@@ -174,7 +174,7 @@ contract Escrow {
     safe_send(fee_w1, w1Val);
     safe_send(fee_w2, w2Val);
     safe_send(fee_w3, w3Val);
- 
+  
     // record deployed/tx in logs if you like
   }
 
