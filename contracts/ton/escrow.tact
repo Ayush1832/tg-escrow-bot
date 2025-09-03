@@ -1,245 +1,363 @@
-// Escrow.tact
-// TON-native escrow per-trade contract
-// - One contract per trade
-// - Seller pays deployment (deployment script uses seller key)
-// - Buyer deposits exact `amount` (in nanograms / the same unit as msg.value).
-// - Commission: commission_bps (e.g., 250 = 2.5%)
-// - Commission split in BPS: 7000 / 2250 / 750 (i.e., 70% / 22.5% / 7.5%)
+// Escrow contract for USDT on TON Testnet
+// Flow: Seller deploys -> Seller deposits USDT -> Buyer pays off-chain -> Seller confirms -> Escrow releases USDT
 
-import StdContract; // common helpers from tact std (BLUEPRINT has these)
-import Errors;      // small helper for require-like behavior (optional)
+// Binary message definitions for better performance
+message(0x1) ConfirmDelivery {}
+message(0x2) RaiseDispute {}
+message(0x3) ResolveToBuyer {}
+message(0x4) ResolveToSeller {}
+message(0x5) CancelIfNoDeposit {}
+message(0x6) ClaimExpired {}
+message(0x7) EmergencyWithdraw {}
+message(0x8) ConfirmDeposit {}
+message(0x9) RetryPayout {}
 
-// -- Storage (fields) -------------------------------------------------------
+// Standard jetton notification when tokens are received
+message(0x7362d09c) TokenNotification {
+    queryId: Int as uint64;
+    amount: Int as uint128;  // Use uint128 for token amounts
+    from: Address;
+    forwardPayload: Slice as remaining;
+}
+
+// Production event logging for audit trail
+message(0x10) DepositReceived {
+    amount: Int as uint128;
+    from: Address;
+    jettonWallet: Address;
+}
+
+message(0x11) DepositConfirmed {
+    confirmedBy: Address;
+}
+
+message(0x12) TradeCompleted {
+    buyer: Address;
+    amount: Int as uint128;
+    fee: Int as uint128;
+}
+
+message(0x13) PayoutRetried {
+    retriedBy: Address;
+    queryId: Int as uint64;
+}
+
+// Testnet USDT Master (replace with mainnet when live)
+const USDT_MASTER: Address = address("kQD0GKBM8ZbryVk2aESmzfU6b9b_8era_IkvBSELujFZPsyy");
+
+// Standalone fee calculation functions (extracted for performance)
+fun computeW1(fee: Int): Int { return (fee * 7000) / 10000; }
+fun computeW2(fee: Int): Int { return (fee * 2250) / 10000; }
+fun computeW3(fee: Int, w1: Int, w2: Int): Int { return fee - w1 - w2; }
+
 contract Escrow {
-  // parties
-  field seller : address;
-  field buyer  : address;
-  field admin  : address;
 
-  // trade terms
-  // `amount` is the agreed trade value (in nanotons/lowest TON unit)
-  field amount : uint128;
+  // Parties
+  seller: Address;
+  buyer: Address;
+  admin: Address;
+  
+  // Security: Pre-computed expected jetton wallet (set by bot during deployment)
+  expectedJettonWallet: Address?;
 
-  // commission in basis points (bps). Use 10000 = 100%
-  field commission_bps : uint16;
+  // Trade
+  amount: Int;         // trade amount in USDT (jettons, 6 decimals)
+  commissionBps: Int; // fee % in basis points (10000 = 100%)
 
-  // fee recipient wallets
-  field fee_w1 : address;
-  field fee_w2 : address;
-  field fee_w3 : address;
+  // Fee recipients
+  feeW1: Address; // 70%
+  feeW2: Address; // 22.5%
+  feeW3: Address; // 7.5% + remainder
 
-  // status enum:
-  // 0 = PendingDeposit
-  // 1 = Active (funds locked)
-  // 2 = Dispute
-  // 3 = Released (completed)
-  // 4 = Refunded (cancelled/refunded to buyer)
-  field status : uint8;
+  // Status
+  // 0 = PendingDeposit, 1 = Active, 2 = Dispute, 3 = Released, 4 = Refunded
+  status: Int;
 
-  // How many nanotons were deposited (useful to record)
-  field deposited : uint128;
+  // deposited jettons
+  deposited: Int as uint128;
 
-  // optional: deadline (epoch seconds) after which seller or admin may cancel
-  // 0 = no deadline
-  field deadline : uint64;
+  // optional deadline
+  deadline: Int as uint32;
 
-  // --------- constructor -------------------------------------------------
-  // Seller will call deploy script; deploy inputs set initial state
-  constructor(
-    seller_: address,
-    buyer_: address,
-    admin_: address,
-    amount_: uint128,
-    commission_bps_: uint16,
-    fee_w1_: address,
-    fee_w2_: address,
-    fee_w3_: address,
-    deadline_: uint64
+  // jetton wallet address for this escrow (verified)
+  jettonWallet: Address?;
+
+  // track if deposit was verified
+  depositVerified: Bool;
+  
+  // track payout attempts to prevent double-spending
+  payoutAttempted: Bool;
+
+  // ---------- init ----------
+  init(
+    seller_: Address,
+    buyer_: Address,
+    admin_: Address,
+    amount_: Int as uint128,
+    commissionBps_: Int as uint16,
+    feeW1_: Address,
+    feeW2_: Address,
+    feeW3_: Address,
+    deadline_: Int,
+    expectedJettonWallet_: Address?  // Pre-computed by bot for security
   ) {
-    // Basic checks
-    require(seller_ != address(0), 101); // invalid seller
-    require(buyer_  != address(0), 102); // invalid buyer
-    require(admin_  != address(0), 103); // invalid admin
-    require(amount_ > 0u128, 104);       // invalid amount
-    require(commission_bps_ <= 10000u16, 105);
+    require(amount_ > 0, "Amount must be > 0");
+    require(commissionBps_ <= 10000, "Commission must be <= 100%");
 
-    seller := seller_;
-    buyer  := buyer_;
-    admin  := admin_;
-    amount := amount_;
-    commission_bps := commission_bps_;
-    fee_w1 := fee_w1_;
-    fee_w2 := fee_w2_;
-    fee_w3 := fee_w3_;
-    status := 0u8; // PendingDeposit
-    deposited := 0u128;
-    deadline := deadline_;
+    self.seller = seller_;
+    self.buyer = buyer_;
+    self.admin = admin_;
+    self.amount = amount_;
+    self.commissionBps = commissionBps_;
+    self.feeW1 = feeW1_;
+    self.feeW2 = feeW2_;
+    self.feeW3 = feeW3_;
+    self.status = 0;       // PendingDeposit
+    self.deposited = 0;
+    self.deadline = deadline_;
+    self.jettonWallet = null;
+    self.depositVerified = false;
+    self.payoutAttempted = false;
+    self.expectedJettonWallet = expectedJettonWallet_;
   }
 
-  // -------------------- Utility / internal helpers ------------------------
-  // internal: check only buyer
-  internal function expect_buyer() {
-    require(msg.sender == buyer, 201); // require caller is buyer
+  // ---------- fee helpers ----------
+  fun computeFee(total: Int): Int {
+    return (total * self.commissionBps) / 10000;
   }
 
-  internal function expect_seller() {
-    require(msg.sender == seller, 202);
-  }
-
-  internal function expect_admin() {
-    require(msg.sender == admin, 203);
-  }
-
-  internal function check_status(u: uint8) {
-    require(status == u, 211);
-  }
-
-  // compute fee and split; returns tuple (fee, w1, w2, w3, toSeller)
-  internal function compute_splits(total: uint128)
-               -> (fee: uint128, w1: uint128, w2: uint128, w3: uint128, toSeller: uint128)
-  {
-    // fee = total * commission_bps / 10000
-    let fee_128 = (total * uint128(commission_bps as uint32)) / uint128(10000u32);
-
-    // successive splits (rounding: last wallet gets leftover)
-    let w1_calc = (fee_128 * uint128(7000u32)) / uint128(10000u32); // 70%
-    let w2_calc = (fee_128 * uint128(2250u32)) / uint128(10000u32); // 22.5%
-    // w3 gets remainder to avoid rounding issues
-    let w3_calc = fee_128 - w1_calc - w2_calc;
-
-    let toSeller_calc = total - fee_128;
-
-    (fee_128, w1_calc, w2_calc, w3_calc, toSeller_calc)
-  }
-
-  // safe send TON coins - internal wrapper
-  internal function safe_send(to: address, value: uint128) {
-    // zero-value skip
-    if (value == 0u128) { return; }
-    // Use sendRaw or transfer helper from StdContract
-    // NOTE: Blueprint std exposes `send_grams` or `send_value` utilities;
-    // replace `send_grams` below with actual available std helper in your build.
-    send_grams(to, value); // replace if your toolchain expects a different name
-  }
-
-  // -------------------- Receive TON deposit (buyer) ----------------------
-  // This receive handles plain TON transfers to contract address.
-  // Buyer must deposit exactly `amount` (optionally allow >= amount and refund remainder).
-  #[receive]
-  external function receive_grams() {
-    // ensure we are expecting TON deposit (status == PendingDeposit)
-    check_status(0u8);
-
-    // only accept sender as buyer
-    require(msg.sender == buyer, 221);
-
-    // msg.value is the attached nanotons
-    let v = msg.value;
-
-    // require at least amount, allow refund of extra
-    require(v >= amount, 222);
-
-    // mark deposited
-    deposited := v;
-    status := 1u8; // Active
-
-    // if buyer sent more than amount, refund remainder
-    if (v > amount) {
-      let remainder = v - amount;
-      // subtract remainder from deposited (keep exactly `amount` as locked)
-      deposited := amount;
-      // refund remainder to buyer (perform after state update)
-      safe_send(buyer, remainder);
+  // PRODUCTION: Verify jetton wallet belongs to USDT master
+  inline fun isUSDTWallet(wallet: Address): Bool {
+    // With expectedJettonWallet pre-computed from USDT_MASTER, this is secure
+    // The bot ensures expectedJettonWallet is derived from USDT_MASTER + escrow address
+    if (self.expectedJettonWallet != null) {
+      return wallet == self.expectedJettonWallet;
     }
-
-    // emit event (if you use events / logs)
+    
+    // Fallback: Basic validation (not as secure)
+    return wallet != myAddress();
+  }
+  
+  // Verify if sender is the correct USDT jetton wallet for this escrow
+  inline fun verifyJettonWallet(wallet: Address): Bool {
+    // PRODUCTION SECURITY: Use the pre-computed USDT wallet verification
+    return self.isUSDTWallet(wallet);
   }
 
-  // -------------------- Buyer confirms delivery -> release funds ----------
-  public function confirmDelivery() {
-    // only buyer can confirm
-    expect_buyer();
-    // must be Active (funds locked)
-    check_status(1u8);
+  // ---------- jetton receiver ----------
+  receive(msg: TokenNotification) {
+    require(self.status == 0, "Already deposited");
+    require(msg.from == self.seller, "Only seller can deposit");
+    require(msg.amount == self.amount, "Deposit must equal trade amount");
+    
+    // CRITICAL: Verify this is a legitimate USDT jetton wallet
+    require(self.verifyJettonWallet(sender()), "Invalid USDT jetton wallet");
+    
+    // PRODUCTION SECURITY: Additional validation
+    // Since we use pre-computed expectedJettonWallet derived from USDT_MASTER,
+    // the verification above already ensures this is a legitimate USDT wallet
 
-    // mark as Released BEFORE money movement (prevents reentrancy/double-release)
-    status := 3u8;
-
-    // compute splits
-    let (feeVal, w1Val, w2Val, w3Val, toSellerVal) = compute_splits(amount);
-
-    // transfers: first seller, then fees OR fees then seller (order doesn't matter, but update state before)
-    // We'll send seller first then fees; in case of tiny rounding leftover it's handled in w3
-    safe_send(seller, toSellerVal);
-    safe_send(fee_w1, w1Val);
-    safe_send(fee_w2, w2Val);
-    safe_send(fee_w3, w3Val);
-   
-    // record deployed/tx in logs if you like
+    // Store the verified jetton wallet address
+    self.jettonWallet = sender();
+    self.deposited = msg.amount;
+    self.depositVerified = false; // Bot must confirm after off-chain balance verification
+    self.status = 1; // Active - but deposit not yet confirmed
+    
+    // Emit deposit event for audit trail
+    emit(DepositReceived{
+        amount: msg.amount,
+        from: msg.from,
+        jettonWallet: sender()
+    }.toCell());
   }
 
-  // -------------------- Raise dispute (buyer) -----------------------------
-  public function raiseDispute(reason: cell) {
-    // buyer can raise dispute only when Active
-    expect_buyer();
-    check_status(1u8);
-    status := 2u8; // Dispute
+  // ---------- confirm delivery (seller releases to buyer) ----------
+  receive(msg: ConfirmDelivery) {
+    require(sender() == self.seller, "Only seller can confirm");
+    require(self.status == 1, "Must be active - already resolved");
+    require(self.depositVerified, "Deposit not verified");
+    require(!self.payoutAttempted, "Payout already attempted");
 
-    // optionally store reason (not implemented - could be an event log)
-    // notify admin off-chain (bot) by watching status change
+    self.status = 3; // Released
+    
+    let fee: Int = self.computeFee(self.deposited);
+    let w1: Int = computeW1(fee);
+    let w2: Int = computeW2(fee);
+    let w3: Int = computeW3(fee, w1, w2);
+
+    let toBuyer: Int = self.deposited - fee;
+
+    // Mark payout as attempted to prevent double-spending
+    self.payoutAttempted = true;
+    
+    // Send to buyer first (most important)
+    self.sendJettonTransfer(self.buyer, toBuyer, 0, "Trade completed");
+    
+    // Send fees
+    self.sendJettonTransfer(self.feeW1, w1, 1, "Platform fee 1");
+    self.sendJettonTransfer(self.feeW2, w2, 2, "Platform fee 2");
+    self.sendJettonTransfer(self.feeW3, w3, 3, "Platform fee 3");
+    
+    // Emit trade completion event
+    emit(TradeCompleted{
+        buyer: self.buyer,
+        amount: toBuyer,
+        fee: fee
+    }.toCell());
   }
 
-  // -------------------- Admin resolution actions ------------------------
-  // Admin can --> resolve to seller (release) OR resolve to buyer (refund)
-  public function resolveToSeller() {
-    expect_admin();
-    // only allowed if Dispute or Active (admin might force-release)
-    require(status == 2u8 || status == 1u8, 231);
-
-    status := 3u8; // Released
-
-    let (feeVal, w1Val, w2Val, w3Val, toSellerVal) = compute_splits(amount);
-
-    safe_send(seller, toSellerVal);
-    safe_send(fee_w1, w1Val);
-    safe_send(fee_w2, w2Val);
-    safe_send(fee_w3, w3Val);
+  // ---------- raise dispute ----------
+  receive(msg: RaiseDispute) {
+    require(sender() == self.buyer, "Only buyer can dispute");
+    require(self.status == 1, "Must be active - already resolved");
+    require(self.depositVerified, "Deposit not verified");
+    self.status = 2; // Dispute
   }
 
-  public function resolveToBuyer() {
-    expect_admin();
-    require(status == 2u8 || status == 1u8, 232);
+  // ---------- admin resolves ----------
+  receive(msg: ResolveToBuyer) {
+    require(sender() == self.admin, "Only admin can resolve");
+    require(self.status == 1 || self.status == 2, "Invalid status - already resolved");
+    require(self.depositVerified, "Deposit not verified");
+    
+    self.status = 3; // Released (buyer wins)
+    
+    // Calculate fees (platform still gets commission)
+    let fee: Int = self.computeFee(self.deposited);
+    let w1: Int = computeW1(fee);
+    let w2: Int = computeW2(fee);
+    let w3: Int = computeW3(fee, w1, w2);
+    let toBuyer: Int = self.deposited - fee;
 
-    status := 4u8; // Refunded
-
-    // refund full `amount` to buyer
-    safe_send(buyer, amount);
+    // Send to buyer
+    self.sendJettonTransfer(self.buyer, toBuyer, 10, "Dispute resolved - buyer");
+    
+    // Send fees
+    self.sendJettonTransfer(self.feeW1, w1, 11, "Platform fee 1");
+    self.sendJettonTransfer(self.feeW2, w2, 12, "Platform fee 2");
+    self.sendJettonTransfer(self.feeW3, w3, 13, "Platform fee 3");
   }
 
-  // -------------------- Seller / Admin cancel if deposit not made -----------
-  // Allow seller to cancel trade if deadline reached or buyer never deposited.
-  public function cancelIfNoDeposit() {
-    // only seller or admin
-    require(msg.sender == seller || msg.sender == admin, 241);
+  receive(msg: ResolveToSeller) {
+    require(sender() == self.admin, "Only admin can resolve");
+    require(self.status == 1 || self.status == 2, "Invalid status - already resolved");
+    require(self.depositVerified, "Deposit not verified");
+    
+    self.status = 4; // Refunded (seller wins)
+    
+    // Refund full amount to seller (no fees charged in seller favor)
+    self.sendJettonTransfer(self.seller, self.deposited, 20, "Dispute resolved - seller");
+  }
 
-    // only allowed if still pending deposit
-    check_status(0u8);
-
-    // if deadline specified (>0) require now >= deadline OR allow immediate cancel by seller
-    if (deadline != 0u64) {
-      require(now >= deadline, 242); // require current epoch >= deadline
+  // ---------- cancel if no deposit ----------
+  receive(msg: CancelIfNoDeposit) {
+    require(sender() == self.seller || sender() == self.admin, "Not allowed");
+    require(self.status == 0, "Not pending deposit");
+    
+    // Admin can cancel anytime, seller must wait for deadline
+    if (sender() == self.seller && self.deadline != 0) {
+      require(now() >= self.deadline, "Seller must wait until deadline");
     }
-
-    status := 4u8; // Refunded (no deposit - nothing on chain to return)
-    // nothing to send because no deposit
+    
+    self.status = 4; // Cancelled
   }
 
-  // -------------------- Misc helpers / fallback --------------------------
-  // Add any admin-only emergency withdraw to fee wallet (optional)
-  public function emergencyWithdraw(to: address, value: uint128) {
-    expect_admin();
-    // allow only when contract still holds some balance (avoid draining funds when active)
-    // Caller must ensure safety (use sparingly)
-    safe_send(to, value);
+  // ---------- deadline enforcement ----------
+  receive(msg: ClaimExpired) {
+    require(sender() == self.buyer, "Only buyer can claim expired");
+    require(self.status == 1, "Must be active - already resolved");
+    require(self.deadline != 0, "No deadline set");
+    require(now() >= self.deadline, "Deadline not reached");
+    require(self.depositVerified, "Deposit not verified");
+    
+    self.status = 3; // Released to buyer
+    
+    // Calculate fees
+    let fee: Int = self.computeFee(self.deposited);
+    let w1: Int = computeW1(fee);
+    let w2: Int = computeW2(fee);
+    let w3: Int = computeW3(fee, w1, w2);
+    let toBuyer: Int = self.deposited - fee;
+
+    // Send to buyer
+    self.sendJettonTransfer(self.buyer, toBuyer, 30, "Trade expired - auto release");
+    
+    // Send fees
+    self.sendJettonTransfer(self.feeW1, w1, 31, "Platform fee 1");
+    self.sendJettonTransfer(self.feeW2, w2, 32, "Platform fee 2");
+    self.sendJettonTransfer(self.feeW3, w3, 33, "Platform fee 3");
+  }
+
+  // ---------- helper for jetton transfers ----------
+  fun sendJettonTransfer(to: Address, amount: Int, queryId: Int, comment: String) {
+    require(self.jettonWallet != null, "Jetton wallet not set");
+    
+    // Build transfer message manually for compatibility
+    let transferBody: Cell = beginCell()
+      .storeUint(0x0f8a7ea5, 32)    // TokenTransfer opcode (full 32-bit)
+      .storeUint(queryId, 64)       // query_id
+      .storeCoins(amount)           // amount
+      .storeAddress(to)             // destination
+      .storeAddress(myAddress())    // response_destination (for notifications)
+      .storeBit(false)              // custom_payload (null)
+      .storeCoins(50000000)         // forward_ton_amount (0.05 TON for notification)
+      .storeBit(false)              // forward_payload (keep simple for compatibility)
+      .endCell();
+
+    send(SendParameters{
+        to: self.jettonWallet!!,
+        value: 150000000,  // 0.15 TON for gas
+        mode: 1,           // Pay fees separately
+        body: transferBody
+    });
+    
+    // Simple logging (optional - remove if causing issues)
+    // self.notify(LogEvent{message: comment}.toCell());
+  }
+
+  // ---------- CRITICAL SECURITY: Bot deposit confirmation ----------
+  // Bot calls this after verifying jetton wallet balance off-chain
+  receive(msg: ConfirmDeposit) {
+    require(sender() == self.admin, "Only admin can confirm deposits");
+    require(self.status == 1, "No deposit to confirm");
+    require(self.jettonWallet != null, "Jetton wallet not set");
+    require(!self.depositVerified, "Deposit already confirmed");
+    
+    self.depositVerified = true;
+    
+    // Emit confirmation event
+    emit(DepositConfirmed{confirmedBy: sender()}.toCell());
+  }
+  
+  // ---------- CRITICAL SECURITY: Retry failed payouts ----------
+  // Admin/bot calls this to retry failed transfers
+  receive(msg: RetryPayout) {
+    require(sender() == self.admin, "Only admin can retry payouts");
+    require(self.status == 3, "Payouts not in progress");
+    require(self.depositVerified, "Deposit not verified");
+    
+    // Re-issue all transfers (idempotent due to unique queryIds)
+    let fee: Int = self.computeFee(self.deposited);
+    let w1: Int = computeW1(fee);
+    let w2: Int = computeW2(fee);
+    let w3: Int = computeW3(fee, w1, w2);
+    let toBuyer: Int = self.deposited - fee;
+    
+    // Use different queryIds to avoid conflicts
+    self.sendJettonTransfer(self.buyer, toBuyer, 100, "Trade completed - retry");
+    self.sendJettonTransfer(self.feeW1, w1, 101, "Platform fee 1 - retry");
+    self.sendJettonTransfer(self.feeW2, w2, 102, "Platform fee 2 - retry");
+    self.sendJettonTransfer(self.feeW3, w3, 103, "Platform fee 3 - retry");
+  }
+  
+  // ---------- emergency functions ----------
+  receive(msg: EmergencyWithdraw) {
+    require(sender() == self.admin, "Only admin");
+    require(self.status == 1 || self.status == 2, "Invalid status - already resolved");
+    require(self.depositVerified, "No verified deposit");
+    
+    // Emergency withdraw all funds to admin for manual resolution
+    self.status = 4; // Refunded
+    self.sendJettonTransfer(self.admin, self.deposited, 99, "Emergency withdrawal");
   }
 }

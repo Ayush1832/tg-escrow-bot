@@ -2,55 +2,547 @@
 #pragma allow-post-modification;
 #pragma compute-asm-ltr;
 
-;; Escrow_Escrow.headers.fc
+;; escrow_Escrow.headers.fc
 ;;
 ;; Header files for Escrow
 ;; NOTE: declarations are sorted for optimal order
 ;;
 
+;; __tact_store_address_opt
+builder __tact_store_address_opt(builder b, slice address) inline;
+
+;; __tact_not_null
+forall X -> X __tact_not_null(X x) impure inline;
+
 ;; __tact_context_get_sender
 slice __tact_context_get_sender() inline;
 
+;; __tact_slice_eq_bits_nullable_right
+int __tact_slice_eq_bits_nullable_right(slice a, slice b) inline;
+
+;; $DepositReceived$_store
+builder $DepositReceived$_store(builder build_0, (int, slice, slice) v) inline;
+
+;; $DepositReceived$_store_cell
+cell $DepositReceived$_store_cell((int, slice, slice) v, builder b) inline;
+
+;; $DepositConfirmed$_store
+builder $DepositConfirmed$_store(builder build_0, (slice) v) inline;
+
+;; $DepositConfirmed$_store_cell
+cell $DepositConfirmed$_store_cell((slice) v, builder b) inline;
+
+;; $TradeCompleted$_store
+builder $TradeCompleted$_store(builder build_0, (slice, int, int) v) inline;
+
+;; $TradeCompleted$_store_cell
+cell $TradeCompleted$_store_cell((slice, int, int) v, builder b) inline;
+
+;; $Escrow$_store
+builder $Escrow$_store(builder build_0, (slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int) v) inline;
+
+;; $Escrow$_load
+(slice, ((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int))) $Escrow$_load(slice sc_0) inline;
+
+;; $Escrow$init$_load
+(slice, ((slice, slice, slice, int, int, slice, slice, slice, int, slice))) $Escrow$init$_load(slice sc_0) inline;
+
+;; $Escrow$_contract_init
+(slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int) $Escrow$_contract_init(slice $seller_, slice $buyer_, slice $admin_, int $amount_, int $commissionBps_, slice $feeW1_, slice $feeW2_, slice $feeW3_, int $deadline_, slice $expectedJettonWallet_) impure inline;
+
 ;; $Escrow$_contract_load
-tuple $Escrow$_contract_load() impure inline;
+(slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int) $Escrow$_contract_load() impure inline;
+
+;; $Escrow$_contract_store
+() $Escrow$_contract_store((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int) v) impure inline;
+
+;; $global_emit
+() $global_emit(cell $body) impure inline;
+
+;; $global_computeW1
+int $global_computeW1(int $fee) impure inline_ref;
+
+;; $global_computeW2
+int $global_computeW2(int $fee) impure inline_ref;
+
+;; $global_computeW3
+int $global_computeW3(int $fee, int $w1, int $w2) impure inline_ref;
+
+;; $Escrow$_fun_computeFee
+((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int), int) $Escrow$_fun_computeFee((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int) $self, int $total) impure inline_ref;
+
+;; $Escrow$_fun_isUSDTWallet
+((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int), int) $Escrow$_fun_isUSDTWallet((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int) $self, slice $wallet) impure inline;
+
+;; $Escrow$_fun_verifyJettonWallet
+((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int), int) $Escrow$_fun_verifyJettonWallet((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int) $self, slice $wallet) impure inline;
+
+;; $SendParameters$_constructor_to_value_mode_body
+((int, cell, cell, cell, int, slice, int)) $SendParameters$_constructor_to_value_mode_body(slice $to, int $value, int $mode, cell $body) inline;
+
+;; $Escrow$_fun_sendJettonTransfer
+((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int), ()) $Escrow$_fun_sendJettonTransfer((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int) $self, slice $to, int $amount, int $queryId, slice $comment) impure inline_ref;
+
+;; $DepositReceived$_constructor_amount_from_jettonWallet
+((int, slice, slice)) $DepositReceived$_constructor_amount_from_jettonWallet(int $amount, slice $from, slice $jettonWallet) inline;
+
+;; $TradeCompleted$_constructor_buyer_amount_fee
+((slice, int, int)) $TradeCompleted$_constructor_buyer_amount_fee(slice $buyer, int $amount, int $fee) inline;
+
+;; $DepositConfirmed$_constructor_confirmedBy
+((slice)) $DepositConfirmed$_constructor_confirmedBy(slice $confirmedBy) inline;
 
 
-;; Escrow_Escrow.stdlib.fc
+;; escrow_Escrow.stdlib.fc
 global (int, slice, int, slice) __tact_context;
 global slice __tact_context_sender;
 global cell __tact_child_contract_codes;
 global int __tact_randomized;
 
+(slice, slice) __tact_load_address_opt(slice cs) asm """
+
+            b{00} SDBEGINSQ
+            IF:<{
+              PUSHNULL
+            }>ELSE<{
+              LDMSGADDR
+              SWAP
+            }>
+
+""";
+
+builder __tact_store_addr_none(builder b) asm "b{00} STSLICECONST";
+
+builder __tact_store_address_opt(builder b, slice address) inline {
+    if (null?(address)) {
+        return __tact_store_addr_none(b);
+    } else {
+        return b.store_slice(address);
+    }
+}
+
+forall X -> X __tact_not_null(X x) impure inline {
+    throw_if(128, null?(x)); return x;
+}
+
 slice __tact_context_get_sender() inline {
     return __tact_context_sender;
 }
 
-() $global_cashback(slice $to) impure asm """
+int __tact_slice_eq_bits_nullable_right(slice a, slice b) inline {
+    return (null?(b)) ? (false) : (equal_slices_bits(a, b));
+}
+
+builder $global_beginCell() impure asm """
     NEWC
-    x{42_} STSLICECONST // .storeUint(0x10, 6)
-    STSLICE          // .storeAddress(to)
-    0 PUSHINT        // 0
-    111 STUR         // .storeUint(0, 111)
-                     // 4 zeros for coins and 107 zeros for lt, fees, etc.
+""";
+
+slice $global_myAddress() impure asm """
+    MYADDR
+""";
+
+() $global_send((int, cell, cell, cell, int, slice, int) $params) impure asm """
+    NEWC
+    b{01} STSLICECONST  // store tag = $0 and ihr_disabled = true
+    1 STI               // store `bounce`
+    b{000} STSLICECONST // store bounced = false and src = addr_none
+    STSLICE             // store `to`
+    SWAP
+    STGRAMS             // store `value`
+    105 PUSHINT         // 1 + 4 + 4 + 64 + 32
+    STZEROES            // store currency_collection, ihr_fee, fwd_fee, created_lt and created_at
+    // → Stack state
+    // s0: Builder
+    // s1: `data`
+    // s2: `code`
+    // s3: `body`
+    // s4: `mode`
+
+    // Group 2: Placing the Builder after code and data, then checking those for nullability
+    s2 XCHG0
+    DUP2
+    ISNULL
+    SWAP
+    ISNULL
+    AND
+    // → Stack state
+    // s0: -1 (true) if `data` and `code` are both null, 0 (false) otherwise
+    // s1: `code`
+    // s2: `data`
+    // s3: Builder
+    // s4: `body`
+    // s5: `mode`
+
+    // Group 3: Left branch of the IFELSE, executed if s0 is -1 (true)
+    <{
+        DROP2 // drop `data` and `code`, since either of those is null
+        b{0} STSLICECONST
+    }> PUSHCONT
+
+    // Group 3: Right branch of the IFELSE, executed if s0 is 0 (false)
+    <{
+        // _ split_depth:(Maybe (## 5))
+        //   special:(Maybe TickTock)
+        //   code:(Maybe ^Cell)
+        //   data:(Maybe ^Cell)
+        //   library:(Maybe ^Cell)
+        // = StateInit;
+        ROT                // place message Builder on top
+        b{10} STSLICECONST // store Maybe = true, Either = false
+        // Start composing inlined StateInit
+        b{00} STSLICECONST // store split_depth and special first
+        STDICT             // store code
+        STDICT             // store data
+        b{0} STSLICECONST  // store library
+    }> PUSHCONT
+
+    // Group 3: IFELSE that does the branching shown above
+    IFELSE
+    // → Stack state
+    // s0: Builder
+    // s1: null or StateInit
+    // s2: `body`
+    // s3: `mode`
+
+    // Group 4: Finalizing the message
+    STDICT // store `body` as ref with an extra Maybe bit, since `body` might be null
     ENDC
-    66 PUSHINT       // SendRemainingValue | SendIgnoreErrors
+    // → Stack state
+    // s0: Cell
+    // s1: `mode`
+
+    // Group 5: Sending the message, with `mode` on top
+    SWAP
+    SENDRAWMSG // https://github.com/tact-lang/tact/issues/1558
+""";
+
+() $global_sendRawMessage(cell $msg, int $mode) impure asm """
     SENDRAWMSG
 """;
 
-;; Escrow_Escrow.storage.fc
+cell $Builder$_fun_endCell(builder $self) impure asm """
+    ENDC
+""";
+
+builder $Builder$_fun_storeRef(cell $cell, builder $self) impure asm """
+    STREF
+""";
+
+() $global_emit(cell $body) impure inline {
+    cell $c = $Builder$_fun_endCell($Builder$_fun_storeRef($body, store_uint($global_beginCell(), 15211807202738752817960438464513, 104)));
+    $global_sendRawMessage($c, 0);
+}
+
+int $global_now() impure asm """
+    NOW
+""";
+
+builder $Builder$_fun_storeBit(int $value, builder $self) impure asm """
+    1 STI
+""";
+
+builder $Builder$_fun_storeCoins(builder $self, int $value) impure asm """
+    STVARUINT16
+""";
+
+builder $Builder$_fun_storeAddress(builder $self, slice $address) impure asm """
+    STSLICER
+""";
+
+;; escrow_Escrow.constants.fc
+;; String "Trade completed"
+slice __gen_slice_string_aa65c1f035e9fd1b66af83687717e72c36083517dc1d147b1560533b86481cf3() asm """
+    B{b5ee9c7241010101001100001e547261646520636f6d706c65746564ad77f5b7} B>boc <s PUSHSLICE
+""";
+
+;; String "Platform fee 1"
+slice __gen_slice_string_a97ae668deec9f769265acc994b0d5a0b264c477328cd31136d9c4ad8544dc38() asm """
+    B{b5ee9c7241010101001000001c506c6174666f726d206665652031b89099ba} B>boc <s PUSHSLICE
+""";
+
+;; String "Platform fee 2"
+slice __gen_slice_string_7bbea8aee7fafe4aae4a6f067567af97a829be696385460d1a775b2fae81bcde() asm """
+    B{b5ee9c7241010101001000001c506c6174666f726d2066656520324c63c9a9} B>boc <s PUSHSLICE
+""";
+
+;; String "Platform fee 3"
+slice __gen_slice_string_020623e78f74d6e67825bdb924e128aef560072a6c662a60a62999a74f7ee3cd() asm """
+    B{b5ee9c7241010101001000001c506c6174666f726d2066656520334fe0a25b} B>boc <s PUSHSLICE
+""";
+
+;; String "Dispute resolved - buyer"
+slice __gen_slice_string_161ea8db3cb9cc304b4cbbaab1a91f93bcb6de16b14b0fe624798488aad4de73() asm """
+    B{b5ee9c7241010101001a00003044697370757465207265736f6c766564202d206275796572f8ecb216} B>boc <s PUSHSLICE
+""";
+
+;; String "Dispute resolved - seller"
+slice __gen_slice_string_b3c19a86b8375884788650008f0a70a91d31ee914c52c6e8ffb9a1bbfb35b33a() asm """
+    B{b5ee9c7241010101001b00003244697370757465207265736f6c766564202d2073656c6c65723bb55c20} B>boc <s PUSHSLICE
+""";
+
+;; String "Trade expired - auto release"
+slice __gen_slice_string_280a74cc0a4a328fafc306d2507bb737797ddb02c5c5b1064787ec6ecde942bb() asm """
+    B{b5ee9c7241010101001e00003854726164652065787069726564202d206175746f2072656c65617365a438bfdc} B>boc <s PUSHSLICE
+""";
+
+;; String "Trade completed - retry"
+slice __gen_slice_string_e63fe14a42d9ceb6f9cef5410d103654cc3f13f90c939f3cbfae7b2dc2b479ad() asm """
+    B{b5ee9c7241010101001900002e547261646520636f6d706c65746564202d207265747279ae732416} B>boc <s PUSHSLICE
+""";
+
+;; String "Platform fee 1 - retry"
+slice __gen_slice_string_2378c220ed003bb301899cde2d1a0aa2bc1943fab23341388d85aae93bde17b4() asm """
+    B{b5ee9c7241010101001800002c506c6174666f726d206665652031202d20726574727987964fc5} B>boc <s PUSHSLICE
+""";
+
+;; String "Platform fee 2 - retry"
+slice __gen_slice_string_fd67ed4e990a791ef4814dd5c9a065b8c3b81e5b9a77346ac1803eff5fa1c61c() asm """
+    B{b5ee9c7241010101001800002c506c6174666f726d206665652032202d207265747279ae9ae0dc} B>boc <s PUSHSLICE
+""";
+
+;; String "Platform fee 3 - retry"
+slice __gen_slice_string_3489c2afb3ceaf9178d70491139d1d3a7e131aab1d1222749471452f63a1c431() asm """
+    B{b5ee9c7241010101001800002c506c6174666f726d206665652033202d207265747279e64cde28} B>boc <s PUSHSLICE
+""";
+
+;; String "Emergency withdrawal"
+slice __gen_slice_string_6892a7d9d114843f80ab37858b014daa71e31c0a73a21cc1f05bcd29ab0dee7b() asm """
+    B{b5ee9c72410101010016000028456d657267656e6379207769746864726177616ce37578ef} B>boc <s PUSHSLICE
+""";
+
+;; escrow_Escrow.storage.fc
 ;;
-;; Type: Escrow
-;; TLB: _  = Escrow
+;; Type: SendParameters
+;; TLB: _ mode:int257 body:Maybe ^cell code:Maybe ^cell data:Maybe ^cell value:int257 to:address bounce:bool = SendParameters
 ;;
 
-tuple $Escrow$_contract_load() impure inline {
+((int, cell, cell, cell, int, slice, int)) $SendParameters$_constructor_to_value_mode_body(slice $to, int $value, int $mode, cell $body) inline {
+    return ($mode, $body, null(), null(), $value, $to, true);
+}
+
+;;
+;; Type: DepositReceived
+;; Header: 0x00000010
+;; TLB: deposit_received#00000010 amount:uint128 from:address jettonWallet:address = DepositReceived
+;;
+
+builder $DepositReceived$_store(builder build_0, (int, slice, slice) v) inline {
+    var (v'amount, v'from, v'jettonWallet) = v;
+    build_0 = store_uint(build_0, 16, 32);
+    build_0 = build_0.store_uint(v'amount, 128);
+    build_0 = build_0.store_slice(v'from);
+    build_0 = build_0.store_slice(v'jettonWallet);
+    return build_0;
+}
+
+cell $DepositReceived$_store_cell((int, slice, slice) v, builder b) inline {
+    return $DepositReceived$_store(b, v).end_cell();
+}
+
+((int, slice, slice)) $DepositReceived$_constructor_amount_from_jettonWallet(int $amount, slice $from, slice $jettonWallet) inline {
+    return ($amount, $from, $jettonWallet);
+}
+
+;;
+;; Type: DepositConfirmed
+;; Header: 0x00000011
+;; TLB: deposit_confirmed#00000011 confirmedBy:address = DepositConfirmed
+;;
+
+builder $DepositConfirmed$_store(builder build_0, (slice) v) inline {
+    var (v'confirmedBy) = v;
+    build_0 = store_uint(build_0, 17, 32);
+    build_0 = build_0.store_slice(v'confirmedBy);
+    return build_0;
+}
+
+cell $DepositConfirmed$_store_cell((slice) v, builder b) inline {
+    return $DepositConfirmed$_store(b, v).end_cell();
+}
+
+((slice)) $DepositConfirmed$_constructor_confirmedBy(slice $confirmedBy) inline {
+    return ($confirmedBy);
+}
+
+;;
+;; Type: TradeCompleted
+;; Header: 0x00000012
+;; TLB: trade_completed#00000012 buyer:address amount:uint128 fee:uint128 = TradeCompleted
+;;
+
+builder $TradeCompleted$_store(builder build_0, (slice, int, int) v) inline {
+    var (v'buyer, v'amount, v'fee) = v;
+    build_0 = store_uint(build_0, 18, 32);
+    build_0 = build_0.store_slice(v'buyer);
+    build_0 = build_0.store_uint(v'amount, 128);
+    build_0 = build_0.store_uint(v'fee, 128);
+    return build_0;
+}
+
+cell $TradeCompleted$_store_cell((slice, int, int) v, builder b) inline {
+    return $TradeCompleted$_store(b, v).end_cell();
+}
+
+((slice, int, int)) $TradeCompleted$_constructor_buyer_amount_fee(slice $buyer, int $amount, int $fee) inline {
+    return ($buyer, $amount, $fee);
+}
+
+;;
+;; Type: Escrow
+;; TLB: _ seller:address buyer:address admin:address expectedJettonWallet:address amount:int257 commissionBps:int257 feeW1:address feeW2:address feeW3:address status:int257 deposited:uint128 deadline:uint32 jettonWallet:address depositVerified:bool payoutAttempted:bool = Escrow
+;;
+
+builder $Escrow$_store(builder build_0, (slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int) v) inline {
+    var (v'seller, v'buyer, v'admin, v'expectedJettonWallet, v'amount, v'commissionBps, v'feeW1, v'feeW2, v'feeW3, v'status, v'deposited, v'deadline, v'jettonWallet, v'depositVerified, v'payoutAttempted) = v;
+    build_0 = build_0.store_slice(v'seller);
+    build_0 = build_0.store_slice(v'buyer);
+    build_0 = build_0.store_slice(v'admin);
+    var build_1 = begin_cell();
+    build_1 = __tact_store_address_opt(build_1, v'expectedJettonWallet);
+    build_1 = build_1.store_int(v'amount, 257);
+    build_1 = build_1.store_int(v'commissionBps, 257);
+    var build_2 = begin_cell();
+    build_2 = build_2.store_slice(v'feeW1);
+    build_2 = build_2.store_slice(v'feeW2);
+    build_2 = build_2.store_slice(v'feeW3);
+    var build_3 = begin_cell();
+    build_3 = build_3.store_int(v'status, 257);
+    build_3 = build_3.store_uint(v'deposited, 128);
+    build_3 = build_3.store_uint(v'deadline, 32);
+    build_3 = __tact_store_address_opt(build_3, v'jettonWallet);
+    build_3 = build_3.store_int(v'depositVerified, 1);
+    build_3 = build_3.store_int(v'payoutAttempted, 1);
+    build_2 = store_builder_ref(build_2, build_3);
+    build_1 = store_builder_ref(build_1, build_2);
+    build_0 = store_builder_ref(build_0, build_1);
+    return build_0;
+}
+
+(slice, ((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int))) $Escrow$_load(slice sc_0) inline {
+    var v'seller = sc_0~load_msg_addr();
+    var v'buyer = sc_0~load_msg_addr();
+    var v'admin = sc_0~load_msg_addr();
+    slice sc_1 = sc_0~load_ref().begin_parse();
+    var v'expectedJettonWallet = sc_1~__tact_load_address_opt();
+    var v'amount = sc_1~load_int(257);
+    var v'commissionBps = sc_1~load_int(257);
+    slice sc_2 = sc_1~load_ref().begin_parse();
+    var v'feeW1 = sc_2~load_msg_addr();
+    var v'feeW2 = sc_2~load_msg_addr();
+    var v'feeW3 = sc_2~load_msg_addr();
+    slice sc_3 = sc_2~load_ref().begin_parse();
+    var v'status = sc_3~load_int(257);
+    var v'deposited = sc_3~load_uint(128);
+    var v'deadline = sc_3~load_uint(32);
+    var v'jettonWallet = sc_3~__tact_load_address_opt();
+    var v'depositVerified = sc_3~load_int(1);
+    var v'payoutAttempted = sc_3~load_int(1);
+    return (sc_0, (v'seller, v'buyer, v'admin, v'expectedJettonWallet, v'amount, v'commissionBps, v'feeW1, v'feeW2, v'feeW3, v'status, v'deposited, v'deadline, v'jettonWallet, v'depositVerified, v'payoutAttempted));
+}
+
+(slice, ((slice, slice, slice, int, int, slice, slice, slice, int, slice))) $Escrow$init$_load(slice sc_0) inline {
+    var v'seller_ = sc_0~load_msg_addr();
+    var v'buyer_ = sc_0~load_msg_addr();
+    var v'admin_ = sc_0~load_msg_addr();
+    var v'amount_ = sc_0~load_uint(128);
+    var v'commissionBps_ = sc_0~load_uint(16);
+    slice sc_1 = sc_0~load_ref().begin_parse();
+    var v'feeW1_ = sc_1~load_msg_addr();
+    var v'feeW2_ = sc_1~load_msg_addr();
+    var v'feeW3_ = sc_1~load_msg_addr();
+    slice sc_2 = sc_1~load_ref().begin_parse();
+    var v'deadline_ = sc_2~load_int(257);
+    var v'expectedJettonWallet_ = sc_2~__tact_load_address_opt();
+    return (sc_0, (v'seller_, v'buyer_, v'admin_, v'amount_, v'commissionBps_, v'feeW1_, v'feeW2_, v'feeW3_, v'deadline_, v'expectedJettonWallet_));
+}
+
+(slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int) $Escrow$_contract_load() impure inline {
     slice $sc = get_data().begin_parse();
-    return null();
+    int $loaded = $sc~load_int(1);
+    if ($loaded) {
+        return $sc~$Escrow$_load();
+    }
+    else {
+        (slice $seller_, slice $buyer_, slice $admin_, int $amount_, int $commissionBps_, slice $feeW1_, slice $feeW2_, slice $feeW3_, int $deadline_, slice $expectedJettonWallet_) = $sc~$Escrow$init$_load();
+        $sc.end_parse();
+        return $Escrow$_contract_init($seller_, $buyer_, $admin_, $amount_, $commissionBps_, $feeW1_, $feeW2_, $feeW3_, $deadline_, $expectedJettonWallet_);
+    }
+}
+
+() $Escrow$_contract_store((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int) v) impure inline {
+    builder b = begin_cell();
+    b = b.store_int(true, 1);
+    b = $Escrow$_store(b, v);
+    set_data(b.end_cell());
 }
 
 ;;
 ;; Contract Escrow functions
 ;;
+
+(slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int) $Escrow$_contract_init(slice $seller_, slice $buyer_, slice $admin_, int $amount_, int $commissionBps_, slice $feeW1_, slice $feeW2_, slice $feeW3_, int $deadline_, slice $expectedJettonWallet_) impure inline {
+    var (($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)) = (null(), null(), null(), null(), null(), null(), null(), null(), null(), null(), null(), null(), null(), null(), null());
+    throw_unless(6243, ($amount_ > 0));
+    throw_unless(1661, ($commissionBps_ <= 10000));
+    $self'seller = $seller_;
+    $self'buyer = $buyer_;
+    $self'admin = $admin_;
+    $self'amount = $amount_;
+    $self'commissionBps = $commissionBps_;
+    $self'feeW1 = $feeW1_;
+    $self'feeW2 = $feeW2_;
+    $self'feeW3 = $feeW3_;
+    $self'status = 0;
+    $self'deposited = 0;
+    $self'deadline = $deadline_;
+    $self'jettonWallet = null();
+    $self'depositVerified = false;
+    $self'payoutAttempted = false;
+    $self'expectedJettonWallet = $expectedJettonWallet_;
+    return ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted);
+}
+
+int $global_computeW1(int $fee) impure inline_ref {
+    return (($fee * 7000) / 10000);
+}
+
+int $global_computeW2(int $fee) impure inline_ref {
+    return (($fee * 2250) / 10000);
+}
+
+int $global_computeW3(int $fee, int $w1, int $w2) impure inline_ref {
+    return (($fee - $w1) - $w2);
+}
+
+((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int), int) $Escrow$_fun_computeFee((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int) $self, int $total) impure inline_ref {
+    var (($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)) = $self;
+    var $fresh$ret_0 = (($total * $self'commissionBps) / 10000);
+    return (($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted), $fresh$ret_0);
+}
+
+((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int), int) $Escrow$_fun_isUSDTWallet((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int) $self, slice $wallet) impure inline {
+    var (($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)) = $self;
+    if ((~ null?($self'expectedJettonWallet))) {
+        var $fresh$ret_1 = ( __tact_slice_eq_bits_nullable_right($wallet, $self'expectedJettonWallet) );
+        return (($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted), $fresh$ret_1);
+    }
+    var $fresh$ret_2 = ( ~ equal_slices_bits($wallet, $global_myAddress()) );
+    return (($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted), $fresh$ret_2);
+}
+
+((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int), int) $Escrow$_fun_verifyJettonWallet((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int) $self, slice $wallet) impure inline {
+    var (($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)) = $self;
+    var $fresh$ret_3 = ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_isUSDTWallet($wallet);
+    return (($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted), $fresh$ret_3);
+}
+
+((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int), ()) $Escrow$_fun_sendJettonTransfer((slice, slice, slice, slice, int, int, slice, slice, slice, int, int, int, slice, int, int) $self, slice $to, int $amount, int $queryId, slice $comment) impure inline_ref {
+    var (($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)) = $self;
+    throw_unless(16651, (~ null?($self'jettonWallet)));
+    cell $transferBody = $Builder$_fun_endCell($Builder$_fun_storeBit(false, $Builder$_fun_storeCoins($Builder$_fun_storeBit(false, $Builder$_fun_storeAddress($Builder$_fun_storeAddress($Builder$_fun_storeCoins(store_uint(store_uint($global_beginCell(), 260734629, 32), $queryId, 64), $amount), $to), $global_myAddress())), 50000000)));
+    $global_send($SendParameters$_constructor_to_value_mode_body(__tact_not_null($self'jettonWallet), 150000000, 1, $transferBody));
+    return (($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted), ());
+}
 
 ;;
 ;; Get methods of a Contract Escrow
@@ -76,21 +568,175 @@ tuple $Escrow$_contract_load() impure inline {
     __tact_context_sender = msg_sender_addr;
     
     ;; Load contract data
-    var $self = $Escrow$_contract_load();
+    var ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted) = $Escrow$_contract_load();
     
     ;; Handle bounced messages
     if (msg_bounced) { return (); }
-    int op = 0;
-    int in_msg_length = slice_bits(in_msg);
-    if (in_msg_length >= 32) {
-        op = in_msg~load_uint(32);
-    }
-    ;; Receive empty message
-    if ((op == 0) & (in_msg_length <= 32)) {
-        $global_cashback(__tact_context_get_sender());
-        
+    var op = in_msg~load_opcode_internal();
+    ;; Receive TokenNotification message
+    if (op == 0x7362d09c) {
+        var $msg'queryId = in_msg~load_uint(64);
+        var $msg'amount = in_msg~load_uint(128);
+        var $msg'from = in_msg~load_msg_addr();
+        var $msg'forwardPayload = in_msg;
+        throw_unless(35739, ($self'status == 0));
+        throw_unless(36840, ( equal_slices_bits($msg'from, $self'seller) ));
+        throw_unless(10550, ($msg'amount == $self'amount));
+        throw_unless(6793, ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_verifyJettonWallet(__tact_context_get_sender()));
+        $self'jettonWallet = __tact_context_get_sender();
+        $self'deposited = $msg'amount;
+        $self'depositVerified = false;
+        $self'status = 1;
+        $global_emit($DepositReceived$_store_cell($DepositReceived$_constructor_amount_from_jettonWallet($msg'amount, $msg'from, __tact_context_get_sender()), begin_cell()));
+        $Escrow$_contract_store(($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted));
         return ();
     }
+    
+    ;; Receive ConfirmDelivery message
+    if (op == 0x1) {
+        var $msg = empty_tuple();
+        throw_unless(55532, ( equal_slices_bits(__tact_context_get_sender(), $self'seller) ));
+        throw_unless(41175, ($self'status == 1));
+        throw_unless(62616, $self'depositVerified);
+        throw_unless(8451, (~ $self'payoutAttempted));
+        $self'status = 3;
+        int $fee = ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_computeFee($self'deposited);
+        int $w1 = $global_computeW1($fee);
+        int $w2 = $global_computeW2($fee);
+        int $w3 = $global_computeW3($fee, $w1, $w2);
+        int $toBuyer = ($self'deposited - $fee);
+        $self'payoutAttempted = true;
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'buyer, $toBuyer, 0, __gen_slice_string_aa65c1f035e9fd1b66af83687717e72c36083517dc1d147b1560533b86481cf3());
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'feeW1, $w1, 1, __gen_slice_string_a97ae668deec9f769265acc994b0d5a0b264c477328cd31136d9c4ad8544dc38());
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'feeW2, $w2, 2, __gen_slice_string_7bbea8aee7fafe4aae4a6f067567af97a829be696385460d1a775b2fae81bcde());
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'feeW3, $w3, 3, __gen_slice_string_020623e78f74d6e67825bdb924e128aef560072a6c662a60a62999a74f7ee3cd());
+        $global_emit($TradeCompleted$_store_cell($TradeCompleted$_constructor_buyer_amount_fee($self'buyer, $toBuyer, $fee), begin_cell()));
+        $Escrow$_contract_store(($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted));
+        return ();
+    }
+    
+    ;; Receive RaiseDispute message
+    if (op == 0x2) {
+        var $msg = empty_tuple();
+        throw_unless(8823, ( equal_slices_bits(__tact_context_get_sender(), $self'buyer) ));
+        throw_unless(41175, ($self'status == 1));
+        throw_unless(62616, $self'depositVerified);
+        $self'status = 2;
+        $Escrow$_contract_store(($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted));
+        return ();
+    }
+    
+    ;; Receive ResolveToBuyer message
+    if (op == 0x3) {
+        var $msg = empty_tuple();
+        throw_unless(57743, ( equal_slices_bits(__tact_context_get_sender(), $self'admin) ));
+        throw_unless(12978, ( (($self'status == 1)) ? (true) : (($self'status == 2)) ));
+        throw_unless(62616, $self'depositVerified);
+        $self'status = 3;
+        int $fee = ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_computeFee($self'deposited);
+        int $w1 = $global_computeW1($fee);
+        int $w2 = $global_computeW2($fee);
+        int $w3 = $global_computeW3($fee, $w1, $w2);
+        int $toBuyer = ($self'deposited - $fee);
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'buyer, $toBuyer, 10, __gen_slice_string_161ea8db3cb9cc304b4cbbaab1a91f93bcb6de16b14b0fe624798488aad4de73());
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'feeW1, $w1, 11, __gen_slice_string_a97ae668deec9f769265acc994b0d5a0b264c477328cd31136d9c4ad8544dc38());
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'feeW2, $w2, 12, __gen_slice_string_7bbea8aee7fafe4aae4a6f067567af97a829be696385460d1a775b2fae81bcde());
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'feeW3, $w3, 13, __gen_slice_string_020623e78f74d6e67825bdb924e128aef560072a6c662a60a62999a74f7ee3cd());
+        $Escrow$_contract_store(($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted));
+        return ();
+    }
+    
+    ;; Receive ResolveToSeller message
+    if (op == 0x4) {
+        var $msg = empty_tuple();
+        throw_unless(57743, ( equal_slices_bits(__tact_context_get_sender(), $self'admin) ));
+        throw_unless(12978, ( (($self'status == 1)) ? (true) : (($self'status == 2)) ));
+        throw_unless(62616, $self'depositVerified);
+        $self'status = 4;
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'seller, $self'deposited, 20, __gen_slice_string_b3c19a86b8375884788650008f0a70a91d31ee914c52c6e8ffb9a1bbfb35b33a());
+        $Escrow$_contract_store(($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted));
+        return ();
+    }
+    
+    ;; Receive CancelIfNoDeposit message
+    if (op == 0x5) {
+        var $msg = empty_tuple();
+        throw_unless(14294, ( (( equal_slices_bits(__tact_context_get_sender(), $self'seller) )) ? (true) : (( equal_slices_bits(__tact_context_get_sender(), $self'admin) )) ));
+        throw_unless(10924, ($self'status == 0));
+        if (( (( equal_slices_bits(__tact_context_get_sender(), $self'seller) )) ? (($self'deadline != 0)) : (false) )) {
+            throw_unless(41485, ($global_now() >= $self'deadline));
+        }
+        $self'status = 4;
+        $Escrow$_contract_store(($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted));
+        return ();
+    }
+    
+    ;; Receive ClaimExpired message
+    if (op == 0x6) {
+        var $msg = empty_tuple();
+        throw_unless(63402, ( equal_slices_bits(__tact_context_get_sender(), $self'buyer) ));
+        throw_unless(41175, ($self'status == 1));
+        throw_unless(50390, ($self'deadline != 0));
+        throw_unless(48201, ($global_now() >= $self'deadline));
+        throw_unless(62616, $self'depositVerified);
+        $self'status = 3;
+        int $fee = ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_computeFee($self'deposited);
+        int $w1 = $global_computeW1($fee);
+        int $w2 = $global_computeW2($fee);
+        int $w3 = $global_computeW3($fee, $w1, $w2);
+        int $toBuyer = ($self'deposited - $fee);
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'buyer, $toBuyer, 30, __gen_slice_string_280a74cc0a4a328fafc306d2507bb737797ddb02c5c5b1064787ec6ecde942bb());
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'feeW1, $w1, 31, __gen_slice_string_a97ae668deec9f769265acc994b0d5a0b264c477328cd31136d9c4ad8544dc38());
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'feeW2, $w2, 32, __gen_slice_string_7bbea8aee7fafe4aae4a6f067567af97a829be696385460d1a775b2fae81bcde());
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'feeW3, $w3, 33, __gen_slice_string_020623e78f74d6e67825bdb924e128aef560072a6c662a60a62999a74f7ee3cd());
+        $Escrow$_contract_store(($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted));
+        return ();
+    }
+    
+    ;; Receive ConfirmDeposit message
+    if (op == 0x8) {
+        var $msg = empty_tuple();
+        throw_unless(63984, ( equal_slices_bits(__tact_context_get_sender(), $self'admin) ));
+        throw_unless(55644, ($self'status == 1));
+        throw_unless(16651, (~ null?($self'jettonWallet)));
+        throw_unless(48396, (~ $self'depositVerified));
+        $self'depositVerified = true;
+        $global_emit($DepositConfirmed$_store_cell($DepositConfirmed$_constructor_confirmedBy(__tact_context_get_sender()), begin_cell()));
+        $Escrow$_contract_store(($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted));
+        return ();
+    }
+    
+    ;; Receive RetryPayout message
+    if (op == 0x9) {
+        var $msg = empty_tuple();
+        throw_unless(15210, ( equal_slices_bits(__tact_context_get_sender(), $self'admin) ));
+        throw_unless(34715, ($self'status == 3));
+        throw_unless(62616, $self'depositVerified);
+        int $fee = ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_computeFee($self'deposited);
+        int $w1 = $global_computeW1($fee);
+        int $w2 = $global_computeW2($fee);
+        int $w3 = $global_computeW3($fee, $w1, $w2);
+        int $toBuyer = ($self'deposited - $fee);
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'buyer, $toBuyer, 100, __gen_slice_string_e63fe14a42d9ceb6f9cef5410d103654cc3f13f90c939f3cbfae7b2dc2b479ad());
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'feeW1, $w1, 101, __gen_slice_string_2378c220ed003bb301899cde2d1a0aa2bc1943fab23341388d85aae93bde17b4());
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'feeW2, $w2, 102, __gen_slice_string_fd67ed4e990a791ef4814dd5c9a065b8c3b81e5b9a77346ac1803eff5fa1c61c());
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'feeW3, $w3, 103, __gen_slice_string_3489c2afb3ceaf9178d70491139d1d3a7e131aab1d1222749471452f63a1c431());
+        $Escrow$_contract_store(($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted));
+        return ();
+    }
+    
+    ;; Receive EmergencyWithdraw message
+    if (op == 0x7) {
+        var $msg = empty_tuple();
+        throw_unless(16461, ( equal_slices_bits(__tact_context_get_sender(), $self'admin) ));
+        throw_unless(12978, ( (($self'status == 1)) ? (true) : (($self'status == 2)) ));
+        throw_unless(60623, $self'depositVerified);
+        $self'status = 4;
+        ($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted)~$Escrow$_fun_sendJettonTransfer($self'admin, $self'deposited, 99, __gen_slice_string_6892a7d9d114843f80ab37858b014daa71e31c0a73a21cc1f05bcd29ab0dee7b());
+        $Escrow$_contract_store(($self'seller, $self'buyer, $self'admin, $self'expectedJettonWallet, $self'amount, $self'commissionBps, $self'feeW1, $self'feeW2, $self'feeW3, $self'status, $self'deposited, $self'deadline, $self'jettonWallet, $self'depositVerified, $self'payoutAttempted));
+        return ();
+    }
+    
     ;; Throw if not handled
     throw(130);
 }

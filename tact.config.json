@@ -2,9 +2,9 @@
   "$schema": "https://raw.githubusercontent.com/tact-lang/tact/main/src/config/configSchema.json",
   "projects": [
     {
-      "name": "Escrow",
-      "path": "contracts/escrow.tact",
-      "output": "build\\Escrow",
+      "name": "escrow",
+      "path": "contracts/ton/escrow.tact",
+      "output": "contracts/ton/build/Escrow",
       "options": {
         "debug": false,
         "external": false

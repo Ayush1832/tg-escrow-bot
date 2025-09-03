@@ -1,9 +1,9 @@
 # Tact compilation report
 Contract: Escrow
-BoC Size: 96 bytes
+BoC Size: 2955 bytes
 
 ## Structures (Structs and Messages)
-Total structures: 11
+Total structures: 25
 
 ### DataSize
 TL-B: `_ cells:int257 bits:int257 refs:int257 = DataSize`
@@ -45,9 +45,65 @@ Signature: `VarAddress{workchain:int32,address:^slice}`
 TL-B: `_ hash:Maybe int257 = BasechainAddress`
 Signature: `BasechainAddress{hash:Maybe int257}`
 
+### ConfirmDelivery
+TL-B: `confirm_delivery#00000001  = ConfirmDelivery`
+Signature: `ConfirmDelivery{}`
+
+### RaiseDispute
+TL-B: `raise_dispute#00000002  = RaiseDispute`
+Signature: `RaiseDispute{}`
+
+### ResolveToBuyer
+TL-B: `resolve_to_buyer#00000003  = ResolveToBuyer`
+Signature: `ResolveToBuyer{}`
+
+### ResolveToSeller
+TL-B: `resolve_to_seller#00000004  = ResolveToSeller`
+Signature: `ResolveToSeller{}`
+
+### CancelIfNoDeposit
+TL-B: `cancel_if_no_deposit#00000005  = CancelIfNoDeposit`
+Signature: `CancelIfNoDeposit{}`
+
+### ClaimExpired
+TL-B: `claim_expired#00000006  = ClaimExpired`
+Signature: `ClaimExpired{}`
+
+### EmergencyWithdraw
+TL-B: `emergency_withdraw#00000007  = EmergencyWithdraw`
+Signature: `EmergencyWithdraw{}`
+
+### ConfirmDeposit
+TL-B: `confirm_deposit#00000008  = ConfirmDeposit`
+Signature: `ConfirmDeposit{}`
+
+### RetryPayout
+TL-B: `retry_payout#00000009  = RetryPayout`
+Signature: `RetryPayout{}`
+
+### TokenNotification
+TL-B: `token_notification#7362d09c queryId:uint64 amount:uint128 from:address forwardPayload:remainder<slice> = TokenNotification`
+Signature: `TokenNotification{queryId:uint64,amount:uint128,from:address,forwardPayload:remainder<slice>}`
+
+### DepositReceived
+TL-B: `deposit_received#00000010 amount:uint128 from:address jettonWallet:address = DepositReceived`
+Signature: `DepositReceived{amount:uint128,from:address,jettonWallet:address}`
+
+### DepositConfirmed
+TL-B: `deposit_confirmed#00000011 confirmedBy:address = DepositConfirmed`
+Signature: `DepositConfirmed{confirmedBy:address}`
+
+### TradeCompleted
+TL-B: `trade_completed#00000012 buyer:address amount:uint128 fee:uint128 = TradeCompleted`
+Signature: `TradeCompleted{buyer:address,amount:uint128,fee:uint128}`
+
+### PayoutRetried
+TL-B: `payout_retried#00000013 retriedBy:address queryId:uint64 = PayoutRetried`
+Signature: `PayoutRetried{retriedBy:address,queryId:uint64}`
+
 ### Escrow$Data
-TL-B: `_  = Escrow`
-Signature: `Escrow{}`
+TL-B: `_ seller:address buyer:address admin:address expectedJettonWallet:address amount:int257 commissionBps:int257 feeW1:address feeW2:address feeW3:address status:int257 deposited:uint128 deadline:uint32 jettonWallet:address depositVerified:bool payoutAttempted:bool = Escrow`
+Signature: `Escrow{seller:address,buyer:address,admin:address,expectedJettonWallet:address,amount:int257,commissionBps:int257,feeW1:address,feeW2:address,feeW3:address,status:int257,deposited:uint128,deadline:uint32,jettonWallet:address,depositVerified:bool,payoutAttempted:bool}`
 
 ## Get methods
 Total get methods: 0
@@ -89,6 +145,33 @@ Total get methods: 0
 * 135: Code of a contract was not found
 * 136: Invalid standard address
 * 138: Not a basechain address
+* 1661: Commission must be <= 100%
+* 6243: Amount must be > 0
+* 6793: Invalid USDT jetton wallet
+* 8451: Payout already attempted
+* 8823: Only buyer can dispute
+* 10550: Deposit must equal trade amount
+* 10924: Not pending deposit
+* 12978: Invalid status - already resolved
+* 14294: Not allowed
+* 15210: Only admin can retry payouts
+* 16461: Only admin
+* 16651: Jetton wallet not set
+* 34715: Payouts not in progress
+* 35739: Already deposited
+* 36840: Only seller can deposit
+* 41175: Must be active - already resolved
+* 41485: Seller must wait until deadline
+* 48201: Deadline not reached
+* 48396: Deposit already confirmed
+* 50390: No deadline set
+* 55532: Only seller can confirm
+* 55644: No deposit to confirm
+* 57743: Only admin can resolve
+* 60623: No verified deposit
+* 62616: Deposit not verified
+* 63402: Only buyer can claim expired
+* 63984: Only admin can confirm deposits
 
 ## Trait inheritance diagram
 

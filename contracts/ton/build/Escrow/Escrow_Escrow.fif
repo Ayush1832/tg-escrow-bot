@@ -1,18 +1,436 @@
-// automatically generated from `@stdlib/std/stdlib.fc` `C:/Users/LENOVO/Desktop/tg-escrow-bot/escrow-bot/build/Escrow/Escrow_Escrow.fc` 
+// automatically generated from `@stdlib/std/stdlib.fc` `C:/Users/LENOVO/Desktop/tg-escrow-bot/contracts/ton/build/Escrow/escrow_Escrow.fc` 
 PROGRAM{
+  DECLPROC __tact_store_address_opt
+  DECLPROC __tact_not_null
   DECLPROC __tact_context_get_sender
+  DECLPROC __tact_slice_eq_bits_nullable_right
+  DECLPROC $DepositReceived$_store
+  DECLPROC $DepositReceived$_store_cell
+  DECLPROC $DepositConfirmed$_store
+  DECLPROC $DepositConfirmed$_store_cell
+  DECLPROC $TradeCompleted$_store
+  DECLPROC $TradeCompleted$_store_cell
+  DECLPROC $Escrow$_store
+  DECLPROC $Escrow$_load
+  DECLPROC $Escrow$init$_load
+  DECLPROC $Escrow$_contract_init
   DECLPROC $Escrow$_contract_load
+  DECLPROC $Escrow$_contract_store
+  DECLPROC $global_emit
+  DECLPROC $global_computeW1
+  DECLPROC $global_computeW2
+  DECLPROC $global_computeW3
+  DECLPROC $Escrow$_fun_computeFee
+  DECLPROC $Escrow$_fun_isUSDTWallet
+  DECLPROC $Escrow$_fun_verifyJettonWallet
+  DECLPROC $SendParameters$_constructor_to_value_mode_body
+  DECLPROC $Escrow$_fun_sendJettonTransfer
+  DECLPROC $DepositReceived$_constructor_amount_from_jettonWallet
+  DECLPROC $TradeCompleted$_constructor_buyer_amount_fee
+  DECLPROC $DepositConfirmed$_constructor_confirmedBy
   DECLPROC recv_internal
   65535 DECLMETHOD __tact_selector_hack
   DECLGLOBVAR __tact_context
   DECLGLOBVAR __tact_context_sender
   DECLGLOBVAR __tact_child_contract_codes
   DECLGLOBVAR __tact_randomized
+  __tact_store_address_opt PROCINLINE:<{
+    DUP
+    ISNULL
+    IF:<{
+      DROP
+      b{00} STSLICECONST
+    }>ELSE<{
+      SWAP
+      STSLICE
+    }>
+  }>
+  __tact_not_null PROCINLINE:<{
+    DUP
+    ISNULL
+    128 THROWIF
+  }>
   __tact_context_get_sender PROCINLINE:<{
     __tact_context_sender GETGLOB
   }>
-  $Escrow$_contract_load PROCINLINE:<{
+  __tact_slice_eq_bits_nullable_right PROCINLINE:<{
+    DUP
+    ISNULL
+    IF:<{
+      2DROP
+      FALSE
+    }>ELSE<{
+      SDEQ
+    }>
+  }>
+  $DepositReceived$_store PROCINLINE:<{
+    16 PUSHINT
+    s0 s4 XCHG2
+    32 STU
+    s1 s2 XCHG
+    128 STU
+    STSLICE
+    STSLICE
+  }>
+  $DepositReceived$_store_cell PROCINLINE:<{
+    3 -ROLL
+    $DepositReceived$_store INLINECALLDICT
+    ENDC
+  }>
+  $DepositConfirmed$_store PROCINLINE:<{
+    17 PUSHINT
+    ROT
+    32 STU
+    STSLICE
+  }>
+  $DepositConfirmed$_store_cell PROCINLINE:<{
+    SWAP
+    $DepositConfirmed$_store INLINECALLDICT
+    ENDC
+  }>
+  $TradeCompleted$_store PROCINLINE:<{
+    18 PUSHINT
+    s0 s4 XCHG2
+    32 STU
+    s1 s2 XCHG
+    STSLICE
+    128 STU
+    128 STU
+  }>
+  $TradeCompleted$_store_cell PROCINLINE:<{
+    3 -ROLL
+    $TradeCompleted$_store INLINECALLDICT
+    ENDC
+  }>
+  $Escrow$_store PROCINLINE:<{
+    s14 s15 XCHG2
+    STSLICE
+    s1 s12 XCHG
+    STSLICE
+    s1 s10 XCHG
+    STSLICE
+    NEWC
+    s0 s9 XCHG2
+    __tact_store_address_opt INLINECALLDICT
+    s1 s7 XCHG
+    257 PUSHINT
+    STIX
+    s1 s5 XCHG
+    257 PUSHINT
+    STIX
+    s0 s3 XCHG
+    NEWC
+    STSLICE
+    s1 s2 XCHG
+    STSLICE
+    STSLICE
+    s0 s2 XCHG
+    NEWC
+    257 PUSHINT
+    STIX
+    s1 s3 XCHG
+    128 STU
+    s1 s4 XCHG
+    32 STU
+    s0 s4 XCHG2
+    __tact_store_address_opt INLINECALLDICT
+    s1 s4 XCHG
+    1 STI
+    s1 s4 XCHG
+    1 STI
+    s1 s3 XCHG
+    STBREFR
+    s1 s2 XCHG
+    STBREFR
+    STBREFR
+  }>
+  $Escrow$_load PROCINLINE:<{
+    LDMSGADDR
+    LDMSGADDR
+    LDMSGADDR
+    LDREF
+    SWAP
+    CTOS
+                b{00} SDBEGINSQ
+                IF:<{
+                  PUSHNULL
+                }>ELSE<{
+                  LDMSGADDR
+                  SWAP
+                }>
+    SWAP
+    257 PUSHINT
+    LDIX
+    257 PUSHINT
+    LDIX
+    LDREF
+    DROP
+    CTOS
+    LDMSGADDR
+    LDMSGADDR
+    LDMSGADDR
+    LDREF
+    DROP
+    CTOS
+    257 PUSHINT
+    LDIX
+    128 LDU
+    32 LDU
+                b{00} SDBEGINSQ
+                IF:<{
+                  PUSHNULL
+                }>ELSE<{
+                  LDMSGADDR
+                  SWAP
+                }>
+    SWAP
+    1 LDI
+    1 LDI
+    DROP
+    s12 s15 XCHG
+    s12 s14 XCHG
+    s12 s13 XCHG
+  }>
+  $Escrow$init$_load PROCINLINE:<{
+    LDMSGADDR
+    LDMSGADDR
+    LDMSGADDR
+    128 LDU
+    16 LDU
+    LDREF
+    SWAP
+    CTOS
+    LDMSGADDR
+    LDMSGADDR
+    LDMSGADDR
+    LDREF
+    DROP
+    CTOS
+    257 PUSHINT
+    LDIX
+                b{00} SDBEGINSQ
+                IF:<{
+                  PUSHNULL
+                }>ELSE<{
+                  LDMSGADDR
+                  SWAP
+                }>
+    NIP
+    s5 s10 XCHG
+    s5 s9 XCHG
+    s5 s8 XCHG
+    s5 s7 XCHG
+    s5 s6 XCHG
+  }>
+  $Escrow$_contract_init PROCINLINE:<{
+    6243 PUSHINT
+    s7 PUSH
+    0 GTINT
+    THROWANYIFNOT
+    s5 PUSH
+    10000 PUSHINT
+    LEQ
+    1661 THROWIFNOT
+    0 PUSHINT
+    s7 s0 s0 XC2PU
+    s2 s7 XCHG
+    s2 s6 XCHG
+    s2 s5 XCHG
+    s2 s4 XCHG
+    3 ROLL
     PUSHNULL
+    FALSE
+    FALSE
+  }>
+  $Escrow$_contract_load PROCINLINE:<{
+    c4 PUSH
+    CTOS
+    1 LDI
+    SWAP
+    IF:<{
+      $Escrow$_load INLINECALLDICT
+      1 15 BLKDROP2
+    }>ELSE<{
+      $Escrow$init$_load INLINECALLDICT
+      s0 s10 XCHG
+      ENDS
+      9 ROLL
+      $Escrow$_contract_init INLINECALLDICT
+    }>
+  }>
+  $Escrow$_contract_store PROCINLINE:<{
+    NEWC
+    TRUE
+    SWAP
+    1 STI
+    15 -ROLL
+    $Escrow$_store INLINECALLDICT
+    ENDC
+    c4 POP
+  }>
+  $global_emit PROCINLINE:<{
+        NEWC
+    15211807202738752817960438464513 PUSHINT
+    SWAP
+    104 STU
+        STREF
+        ENDC
+    0 PUSHINT
+        SENDRAWMSG
+  }>
+  $global_computeW1 PROCREF:<{
+    7000 PUSHINT
+    MUL
+    10000 PUSHINT
+    DIV
+  }>
+  $global_computeW2 PROCREF:<{
+    2250 PUSHINT
+    MUL
+    10000 PUSHINT
+    DIV
+  }>
+  $global_computeW3 PROCREF:<{
+    -ROT
+    SUB
+    SWAP
+    SUB
+  }>
+  $Escrow$_fun_computeFee PROCREF:<{
+    s10 PUSH
+    MUL
+    10000 PUSHINT
+    DIV
+  }>
+  $Escrow$_fun_isUSDTWallet PROCINLINE:<{
+    s12 PUSH
+    ISNULL
+    NOT
+    IF:<{
+      s12 PUSH
+      __tact_slice_eq_bits_nullable_right INLINECALLDICT
+    }>ELSE<{
+          MYADDR
+      SDEQ
+      NOT
+    }>
+  }>
+  $Escrow$_fun_verifyJettonWallet PROCINLINE:<{
+    $Escrow$_fun_isUSDTWallet INLINECALLDICT
+  }>
+  $SendParameters$_constructor_to_value_mode_body PROCINLINE:<{
+    2SWAP
+    PUSHNULL
+    PUSHNULL
+    s0 s0 s3 XCHG3
+    TRUE
+  }>
+  $Escrow$_fun_sendJettonTransfer PROCREF:<{
+    DROP
+    16651 PUSHINT
+    s6 PUSH
+    ISNULL
+    NOT
+    THROWANYIFNOT
+    FALSE
+    FALSE
+        NEWC
+    260734629 PUSHINT
+    SWAP
+    32 STU
+    s1 s3 XCHG
+    64 STU
+    s0 s3 XCHG2
+        STVARUINT16
+    s0 s3 XCHG2
+        STSLICER
+        MYADDR
+        STSLICER
+    s1 s2 XCHG
+        1 STI
+    50000000 PUSHINT
+        STVARUINT16
+        1 STI
+        ENDC
+    s3 PUSH
+    __tact_not_null INLINECALLDICT
+    150000000 PUSHINT
+    ROT
+    1 PUSHINT
+    SWAP
+    $SendParameters$_constructor_to_value_mode_body INLINECALLDICT
+        NEWC
+        b{01} STSLICECONST  // store tag = $0 and ihr_disabled = true
+        1 STI               // store `bounce`
+        b{000} STSLICECONST // store bounced = false and src = addr_none
+        STSLICE             // store `to`
+        SWAP
+        STGRAMS             // store `value`
+        105 PUSHINT         // 1 + 4 + 4 + 64 + 32
+        STZEROES            // store currency_collection, ihr_fee, fwd_fee, created_lt and created_at
+        // → Stack state
+        // s0: Builder
+        // s1: `data`
+        // s2: `code`
+        // s3: `body`
+        // s4: `mode`
+        // Group 2: Placing the Builder after code and data, then checking those for nullability
+        s2 XCHG0
+        DUP2
+        ISNULL
+        SWAP
+        ISNULL
+        AND
+        // → Stack state
+        // s0: -1 (true) if `data` and `code` are both null, 0 (false) otherwise
+        // s1: `code`
+        // s2: `data`
+        // s3: Builder
+        // s4: `body`
+        // s5: `mode`
+        // Group 3: Left branch of the IFELSE, executed if s0 is -1 (true)
+        <{
+            DROP2 // drop `data` and `code`, since either of those is null
+            b{0} STSLICECONST
+        }> PUSHCONT
+        // Group 3: Right branch of the IFELSE, executed if s0 is 0 (false)
+        <{
+            // _ split_depth:(Maybe (## 5))
+            //   special:(Maybe TickTock)
+            //   code:(Maybe ^Cell)
+            //   data:(Maybe ^Cell)
+            //   library:(Maybe ^Cell)
+            // = StateInit;
+            ROT                // place message Builder on top
+            b{10} STSLICECONST // store Maybe = true, Either = false
+            // Start composing inlined StateInit
+            b{00} STSLICECONST // store split_depth and special first
+            STDICT             // store code
+            STDICT             // store data
+            b{0} STSLICECONST  // store library
+        }> PUSHCONT
+        // Group 3: IFELSE that does the branching shown above
+        IFELSE
+        // → Stack state
+        // s0: Builder
+        // s1: null or StateInit
+        // s2: `body`
+        // s3: `mode`
+        // Group 4: Finalizing the message
+        STDICT // store `body` as ref with an extra Maybe bit, since `body` might be null
+        ENDC
+        // → Stack state
+        // s0: Cell
+        // s1: `mode`
+        // Group 5: Sending the message, with `mode` on top
+        SWAP
+        SENDRAWMSG // https://github.com/tact-lang/tact/issues/1558
+  }>
+  $DepositReceived$_constructor_amount_from_jettonWallet PROCINLINE:<{
+  }>
+  $TradeCompleted$_constructor_buyer_amount_fee PROCINLINE:<{
+  }>
+  $DepositConfirmed$_constructor_confirmedBy PROCINLINE:<{
   }>
   recv_internal PROC:<{
     SWAP
@@ -30,40 +448,831 @@ PROGRAM{
     s0 s2 XCHG
     __tact_context_sender SETGLOB
     $Escrow$_contract_load INLINECALLDICT
-    DROP
-    SWAP
+    s0 16 s() XCHG
     IFJMP:<{
+      15 BLKDROP
       DROP
     }>
-    0 PUSHINT
+    s0 s14 XCHG
+    32 LDUQ 130 THROWIFNOT
     OVER
-    SBITS
-    DUP
-    31 GTINT
-    IF:<{
-      NIP
-      SWAP
-      32 LDU
-      DROP
-    }>ELSE<{
-      s2 POP
-    }>
-    0 EQINT
-    SWAP
-    33 LESSINT
-    AND
+    1935855772 PUSHINT
+    EQUAL
     IFJMP:<{
+      NIP
+      64 LDU
+      NIP
+      128 LDU
+      LDMSGADDR
+      DROP
+      35739 PUSHINT
+      s6 PUSH
+      0 EQINT
+      THROWANYIFNOT
+      36840 PUSHINT
+      s1 s15 PUSH2
+      SDEQ
+      THROWANYIFNOT
+      10550 PUSHINT
+      s2 s11 PUSH2
+      EQUAL
+      THROWANYIFNOT
+      6793 PUSHINT
       __tact_context_get_sender INLINECALLDICT
-          NEWC
-          x{42_} STSLICECONST // .storeUint(0x10, 6)
-          STSLICE          // .storeAddress(to)
-          0 PUSHINT        // 0
-          111 STUR         // .storeUint(0, 111)
-                           // 4 zeros for coins and 107 zeros for lt, fees, etc.
-          ENDC
-          66 PUSHINT       // SendRemainingValue | SendIgnoreErrors
-          SENDRAWMSG
+      s15 16 s() XCHG
+      s14 16 s() XCHG
+      s13 16 s() XCHG
+      s12 16 s() XCHG
+      s11 16 s() XCHG
+      s10 16 s() XCHG
+      s9 16 s() XCHG
+      s8 16 s() XCHG
+      s7 16 s() XCHG
+      s6 16 s() XCHG
+      s5 16 s() XCHG
+      s4 16 s() XCHG
+      s3 16 s() XCHG
+      s2 17 s() XCHG
+      s1 18 s() XCHG
+      $Escrow$_fun_verifyJettonWallet INLINECALLDICT
+      s5 POP
+      s5 POP
+      2DROP
+      s14 s14 XCHG2
+      THROWANYIFNOT
+      __tact_context_get_sender INLINECALLDICT
+      s11 PUSH
+      FALSE
+      1 PUSHINT
+      __tact_context_get_sender INLINECALLDICT
+      s2 s15 XCHG
+      s1 16 s() XCHG
+      $DepositReceived$_constructor_amount_from_jettonWallet INLINECALLDICT
+      NEWC
+      $DepositReceived$_store_cell INLINECALLDICT
+      $global_emit INLINECALLDICT
+      s11 s14 XCHG
+      s10 s13 XCHG
+      s9 s12 XCHG
+      s8 s11 XCHG
+      s7 s10 XCHG
+      s6 s9 XCHG
+      s5 s8 XCHG
+      s4 s7 XCHG
+      s3 s6 XCHG
+      s0 s4 XCHG
+      s0 s5 XCHG
+      s1 s3 s3 XCHG3
+      $Escrow$_contract_store INLINECALLDICT
     }>
+    DROP
+    DUP
+    1 EQINT
+    IFJMP:<{
+      DROP
+      55532 PUSHINT
+      __tact_context_get_sender INLINECALLDICT
+      s14 PUSH
+      SDEQ
+      THROWANYIFNOT
+      41175 PUSHINT
+      s0 s4 XCHG
+      1 EQINT
+      s1 s4 XCHG
+      THROWANYIFNOT
+      62616 PUSHINT
+      s13 PUSH
+      THROWANYIFNOT
+      8451 PUSHINT
+      s14 PUSH
+      NOT
+      THROWANYIFNOT
+      s11 s13 XCHG
+      s10 s12 XCHG
+      s9 s11 XCHG
+      s8 s10 XCHG
+      s7 s9 XCHG
+      s6 s8 XCHG
+      s5 s7 XCHG
+      s4 s6 XCHG
+      s3 s5 XCHG
+      3 PUSHINT
+      s5 s2 XCPU
+      s1 s5 s5 XCHG3
+      s0 s4 XCHG
+      s0 s3 XCHG
+      $Escrow$_fun_computeFee INLINECALLDICT
+      NIP
+      DUP
+      $global_computeW1 INLINECALLDICT
+      OVER
+      $global_computeW2 INLINECALLDICT
+      s2 s1 s0 PUSH3
+      $global_computeW3 INLINECALLDICT
+      s7 s3 PUSH2
+      SUB
+      TRUE
+      0 PUSHINT
+          B{b5ee9c7241010101001100001e547261646520636f6d706c65746564ad77f5b7} B>boc <s PUSHSLICE
+      16 s() 21 s() XCHG
+      20 s() PUSH
+      s0 16 s() XCHG
+      s15 20 s() XCHG
+      s14 19 s() XCHG
+      s13 18 s() XCHG
+      s12 22 s() XCHG
+      s0 s11 XCHG
+      s10 20 s() XCHG
+      s9 19 s() XCHG
+      s8 18 s() XCHG
+      s7 22 s() XCHG
+      s0 s6 XCHG
+      s5 20 s() XCHG
+      s4 19 s() XCHG
+      s2 21 s() XCHG
+      19 s() PUSH
+      s0 s2 XCHG
+      s1 22 s() XCHG
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      1 PUSHINT
+          B{b5ee9c7241010101001000001c506c6174666f726d206665652031b89099ba} B>boc <s PUSHSLICE
+      16 s() 17 s() XCHG
+      s15 16 s() XCHG
+      s14 s15 XCHG
+      s10 PUSH
+      s14 s15 XCHG
+      s13 s14 XCHG
+      s0 s12 XCHG
+      s0 s13 XCHG
+      s10 s11 XCHG
+      s9 s10 XCHG
+      s8 s9 XCHG
+      s7 s8 XCHG
+      s6 s7 XCHG
+      s5 s6 XCHG
+      s4 s5 XCHG
+      s3 s4 XCHG
+      s0 22 s() XCHG
+      -ROT
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      2 PUSHINT
+          B{b5ee9c7241010101001000001c506c6174666f726d2066656520324c63c9a9} B>boc <s PUSHSLICE
+      16 s() 17 s() XCHG
+      s15 16 s() XCHG
+      s14 s15 XCHG
+      s9 PUSH
+      s14 s15 XCHG
+      s13 s14 XCHG
+      s12 s13 XCHG
+      s0 s11 XCHG
+      s0 s12 XCHG
+      s9 s10 XCHG
+      s8 s9 XCHG
+      s7 s8 XCHG
+      s6 s7 XCHG
+      s5 s6 XCHG
+      s4 s5 XCHG
+      s3 s4 XCHG
+      s0 20 s() XCHG
+      -ROT
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      3 PUSHINT
+          B{b5ee9c7241010101001000001c506c6174666f726d2066656520334fe0a25b} B>boc <s PUSHSLICE
+      16 s() 17 s() XCHG
+      s15 16 s() XCHG
+      s14 s15 XCHG
+      s13 s14 XCHG
+      s8 PUSH
+      s13 s14 XCHG
+      s12 s13 XCHG
+      s11 s12 XCHG
+      s0 s10 XCHG
+      s0 s11 XCHG
+      s8 s9 XCHG
+      s7 s8 XCHG
+      s6 s7 XCHG
+      s5 s6 XCHG
+      s4 s5 XCHG
+      s3 s4 XCHG
+      -ROT
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      s13 PUSH
+      s0 s2 XCHG
+      s1 16 s() XCHG
+      s0 17 s() XCHG
+      $TradeCompleted$_constructor_buyer_amount_fee INLINECALLDICT
+      NEWC
+      $TradeCompleted$_store_cell INLINECALLDICT
+      $global_emit INLINECALLDICT
+      2 13 BLKSWAP
+      $Escrow$_contract_store INLINECALLDICT
+    }>
+    DUP
+    2 EQINT
+    IFJMP:<{
+      DROP
+      8823 PUSHINT
+      __tact_context_get_sender INLINECALLDICT
+      s13 PUSH
+      SDEQ
+      THROWANYIFNOT
+      41175 PUSHINT
+      s0 s4 XCHG
+      1 EQINT
+      s1 s4 XCHG
+      THROWANYIFNOT
+      62616 PUSHINT
+      s13 PUSH
+      THROWANYIFNOT
+      s11 s13 XCHG
+      s10 s12 XCHG
+      s9 s11 XCHG
+      s8 s10 XCHG
+      s7 s9 XCHG
+      s6 s8 XCHG
+      s5 s7 XCHG
+      s4 s6 XCHG
+      s3 s5 XCHG
+      2 PUSHINT
+      s4 s5 s5 XCHG3
+      s3 s1 s3 XCHG3
+      $Escrow$_contract_store INLINECALLDICT
+    }>
+    DUP
+    3 EQINT
+    IFJMP:<{
+      DROP
+      57743 PUSHINT
+      __tact_context_get_sender INLINECALLDICT
+      s12 PUSH
+      SDEQ
+      THROWANYIFNOT
+      12978 PUSHINT
+      s4 PUSH
+      1 EQINT
+      IF:<{
+        s4 POP
+        TRUE
+      }>ELSE<{
+        s0 s4 XCHG
+        2 EQINT
+      }>
+      s1 s4 XCHG
+      THROWANYIFNOT
+      62616 PUSHINT
+      s13 PUSH
+      THROWANYIFNOT
+      s11 s13 XCHG
+      s10 s12 XCHG
+      s9 s11 XCHG
+      s8 s10 XCHG
+      s7 s9 XCHG
+      s6 s8 XCHG
+      s5 s7 XCHG
+      s4 s6 XCHG
+      s3 s5 XCHG
+      3 PUSHINT
+      s5 s2 XCPU
+      s1 s5 s5 XCHG3
+      s0 s4 XCHG
+      s0 s3 XCHG
+      $Escrow$_fun_computeFee INLINECALLDICT
+      DUP
+      $global_computeW1 INLINECALLDICT
+      OVER
+      $global_computeW2 INLINECALLDICT
+      s2 s1 s0 PUSH3
+      $global_computeW3 INLINECALLDICT
+      s8 s3 PUXC
+      SUB
+      10 PUSHINT
+          B{b5ee9c7241010101001a00003044697370757465207265736f6c766564202d206275796572f8ecb216} B>boc <s PUSHSLICE
+      17 s() 20 s() XCHG
+      19 s() PUSH
+      s0 17 s() XCHG
+      16 s() 19 s() XCHG
+      s15 21 s() XCHG
+      s0 s14 XCHG
+      s13 19 s() XCHG
+      s12 21 s() XCHG
+      s0 s11 XCHG
+      s10 19 s() XCHG
+      s9 21 s() XCHG
+      s0 s8 XCHG
+      s7 19 s() XCHG
+      s6 21 s() XCHG
+      s0 s5 XCHG
+      s4 19 s() XCHG
+      s0 20 s() XCHG
+      3 -ROLL
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      11 PUSHINT
+          B{b5ee9c7241010101001000001c506c6174666f726d206665652031b89099ba} B>boc <s PUSHSLICE
+      16 s() 17 s() XCHG
+      s15 16 s() XCHG
+      s14 s15 XCHG
+      s10 PUSH
+      s14 s15 XCHG
+      s13 s14 XCHG
+      s0 s12 XCHG
+      s0 s13 XCHG
+      s10 s11 XCHG
+      s9 s10 XCHG
+      s8 s9 XCHG
+      s7 s8 XCHG
+      s6 s7 XCHG
+      s5 s6 XCHG
+      s4 s5 XCHG
+      s3 s4 XCHG
+      s0 19 s() XCHG
+      -ROT
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      12 PUSHINT
+          B{b5ee9c7241010101001000001c506c6174666f726d2066656520324c63c9a9} B>boc <s PUSHSLICE
+      16 s() 17 s() XCHG
+      s15 16 s() XCHG
+      s14 s15 XCHG
+      s9 PUSH
+      s14 s15 XCHG
+      s13 s14 XCHG
+      s12 s13 XCHG
+      s0 s11 XCHG
+      s0 s12 XCHG
+      s9 s10 XCHG
+      s8 s9 XCHG
+      s7 s8 XCHG
+      s6 s7 XCHG
+      s5 s6 XCHG
+      s4 s5 XCHG
+      s3 s4 XCHG
+      -ROT
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      13 PUSHINT
+          B{b5ee9c7241010101001000001c506c6174666f726d2066656520334fe0a25b} B>boc <s PUSHSLICE
+      16 s() 17 s() XCHG
+      s15 16 s() XCHG
+      s14 s15 XCHG
+      s13 s14 XCHG
+      s8 PUSH
+      s13 s14 XCHG
+      s12 s13 XCHG
+      s11 s12 XCHG
+      s0 s10 XCHG
+      s0 s11 XCHG
+      s8 s9 XCHG
+      s7 s8 XCHG
+      s6 s7 XCHG
+      s5 s6 XCHG
+      s4 s5 XCHG
+      s3 s4 XCHG
+      -ROT
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      $Escrow$_contract_store INLINECALLDICT
+    }>
+    DUP
+    4 EQINT
+    IFJMP:<{
+      DROP
+      57743 PUSHINT
+      __tact_context_get_sender INLINECALLDICT
+      s12 PUSH
+      SDEQ
+      THROWANYIFNOT
+      12978 PUSHINT
+      s4 PUSH
+      1 EQINT
+      IF:<{
+        s4 POP
+        TRUE
+      }>ELSE<{
+        s0 s4 XCHG
+        2 EQINT
+      }>
+      s1 s4 XCHG
+      THROWANYIFNOT
+      62616 PUSHINT
+      s13 PUSH
+      THROWANYIFNOT
+      4 PUSHINT
+      20 PUSHINT
+          B{b5ee9c7241010101001b00003244697370757465207265736f6c766564202d2073656c6c65723bb55c20} B>boc <s PUSHSLICE
+      s14 PUSH
+      s0 17 s() XCHG
+      s14 16 s() XCHG
+      s13 s15 XCHG
+      s12 s14 XCHG
+      s11 s13 XCHG
+      s10 s12 XCHG
+      s5 PUSH
+      s10 s12 XCHG
+      s9 s11 XCHG
+      s8 s10 XCHG
+      s4 s9 XCHG
+      s0 s8 XCHG
+      s5 s7 XCHG
+      s5 s6 XCHG
+      s3 s3 XCHG2
+      s0 s4 XCHG
+      s5 s1 s5 XCHG3
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      $Escrow$_contract_store INLINECALLDICT
+    }>
+    DUP
+    5 EQINT
+    IFJMP:<{
+      DROP
+      14294 PUSHINT
+      __tact_context_get_sender INLINECALLDICT
+      s14 PUSH
+      SDEQ
+      IF:<{
+        TRUE
+      }>ELSE<{
+        __tact_context_get_sender INLINECALLDICT
+        s12 PUSH
+        SDEQ
+      }>
+      THROWANYIFNOT
+      10924 PUSHINT
+      s0 s4 XCHG
+      0 EQINT
+      s1 s4 XCHG
+      THROWANYIFNOT
+      __tact_context_get_sender INLINECALLDICT
+      s12 PUSH
+      SDEQ
+      IF:<{
+        DUP
+        0 NEQINT
+      }>ELSE<{
+        FALSE
+      }>
+      IF:<{
+        41485 PUSHINT
+            NOW
+        s2 PUSH
+        GEQ
+        THROWANYIFNOT
+      }>
+      s11 s13 XCHG
+      s10 s12 XCHG
+      s9 s11 XCHG
+      s8 s10 XCHG
+      s7 s9 XCHG
+      s6 s8 XCHG
+      s5 s7 XCHG
+      s4 s6 XCHG
+      s3 s5 XCHG
+      4 PUSHINT
+      s4 s5 s5 XCHG3
+      s3 s1 s3 XCHG3
+      $Escrow$_contract_store INLINECALLDICT
+    }>
+    DUP
+    6 EQINT
+    IFJMP:<{
+      DROP
+      63402 PUSHINT
+      __tact_context_get_sender INLINECALLDICT
+      s13 PUSH
+      SDEQ
+      THROWANYIFNOT
+      41175 PUSHINT
+      s0 s4 XCHG
+      1 EQINT
+      s1 s4 XCHG
+      THROWANYIFNOT
+      50390 PUSHINT
+      OVER
+      0 NEQINT
+      THROWANYIFNOT
+      48201 PUSHINT
+          NOW
+      s2 PUSH
+      GEQ
+      THROWANYIFNOT
+      62616 PUSHINT
+      s13 PUSH
+      THROWANYIFNOT
+      s11 s13 XCHG
+      s10 s12 XCHG
+      s9 s11 XCHG
+      s8 s10 XCHG
+      s7 s9 XCHG
+      s6 s8 XCHG
+      s5 s7 XCHG
+      s4 s6 XCHG
+      s3 s5 XCHG
+      3 PUSHINT
+      s5 s2 XCPU
+      s1 s5 s5 XCHG3
+      s0 s4 XCHG
+      s0 s3 XCHG
+      $Escrow$_fun_computeFee INLINECALLDICT
+      DUP
+      $global_computeW1 INLINECALLDICT
+      OVER
+      $global_computeW2 INLINECALLDICT
+      s2 s1 s0 PUSH3
+      $global_computeW3 INLINECALLDICT
+      s8 s3 PUXC
+      SUB
+      30 PUSHINT
+          B{b5ee9c7241010101001e00003854726164652065787069726564202d206175746f2072656c65617365a438bfdc} B>boc <s PUSHSLICE
+      17 s() 20 s() XCHG
+      19 s() PUSH
+      s0 17 s() XCHG
+      16 s() 19 s() XCHG
+      s15 21 s() XCHG
+      s0 s14 XCHG
+      s13 19 s() XCHG
+      s12 21 s() XCHG
+      s0 s11 XCHG
+      s10 19 s() XCHG
+      s9 21 s() XCHG
+      s0 s8 XCHG
+      s7 19 s() XCHG
+      s6 21 s() XCHG
+      s0 s5 XCHG
+      s4 19 s() XCHG
+      s0 20 s() XCHG
+      3 -ROLL
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      31 PUSHINT
+          B{b5ee9c7241010101001000001c506c6174666f726d206665652031b89099ba} B>boc <s PUSHSLICE
+      16 s() 17 s() XCHG
+      s15 16 s() XCHG
+      s14 s15 XCHG
+      s10 PUSH
+      s14 s15 XCHG
+      s13 s14 XCHG
+      s0 s12 XCHG
+      s0 s13 XCHG
+      s10 s11 XCHG
+      s9 s10 XCHG
+      s8 s9 XCHG
+      s7 s8 XCHG
+      s6 s7 XCHG
+      s5 s6 XCHG
+      s4 s5 XCHG
+      s3 s4 XCHG
+      s0 19 s() XCHG
+      -ROT
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      32 PUSHINT
+          B{b5ee9c7241010101001000001c506c6174666f726d2066656520324c63c9a9} B>boc <s PUSHSLICE
+      16 s() 17 s() XCHG
+      s15 16 s() XCHG
+      s14 s15 XCHG
+      s9 PUSH
+      s14 s15 XCHG
+      s13 s14 XCHG
+      s12 s13 XCHG
+      s0 s11 XCHG
+      s0 s12 XCHG
+      s9 s10 XCHG
+      s8 s9 XCHG
+      s7 s8 XCHG
+      s6 s7 XCHG
+      s5 s6 XCHG
+      s4 s5 XCHG
+      s3 s4 XCHG
+      -ROT
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      33 PUSHINT
+          B{b5ee9c7241010101001000001c506c6174666f726d2066656520334fe0a25b} B>boc <s PUSHSLICE
+      16 s() 17 s() XCHG
+      s15 16 s() XCHG
+      s14 s15 XCHG
+      s13 s14 XCHG
+      s8 PUSH
+      s13 s14 XCHG
+      s12 s13 XCHG
+      s11 s12 XCHG
+      s0 s10 XCHG
+      s0 s11 XCHG
+      s8 s9 XCHG
+      s7 s8 XCHG
+      s6 s7 XCHG
+      s5 s6 XCHG
+      s4 s5 XCHG
+      s3 s4 XCHG
+      -ROT
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      $Escrow$_contract_store INLINECALLDICT
+    }>
+    DUP
+    8 EQINT
+    IFJMP:<{
+      DROP
+      63984 PUSHINT
+      __tact_context_get_sender INLINECALLDICT
+      s12 PUSH
+      SDEQ
+      THROWANYIFNOT
+      55644 PUSHINT
+      s4 PUSH
+      1 EQINT
+      THROWANYIFNOT
+      16651 PUSHINT
+      OVER
+      ISNULL
+      NOT
+      THROWANYIFNOT
+      48396 PUSHINT
+      s0 s14 XCHG
+      NOT
+      s1 s14 XCHG
+      THROWANYIFNOT
+      TRUE
+      __tact_context_get_sender INLINECALLDICT
+      $DepositConfirmed$_constructor_confirmedBy INLINECALLDICT
+      NEWC
+      $DepositConfirmed$_store_cell INLINECALLDICT
+      $global_emit INLINECALLDICT
+      s12 s14 XCHG
+      s11 s13 XCHG
+      s10 s12 XCHG
+      s9 s11 XCHG
+      s8 s10 XCHG
+      s7 s9 XCHG
+      s6 s8 XCHG
+      s5 s7 XCHG
+      s4 s6 XCHG
+      s3 s5 XCHG
+      s4 s0 s3 XCHG3
+      s0 s2 XCHG
+      $Escrow$_contract_store INLINECALLDICT
+    }>
+    DUP
+    9 EQINT
+    IFJMP:<{
+      DROP
+      15210 PUSHINT
+      __tact_context_get_sender INLINECALLDICT
+      s12 PUSH
+      SDEQ
+      THROWANYIFNOT
+      34715 PUSHINT
+      s4 PUSH
+      3 EQINT
+      THROWANYIFNOT
+      62616 PUSHINT
+      s14 PUSH
+      THROWANYIFNOT
+      s12 s14 XCHG
+      s11 s13 XCHG
+      s10 s12 XCHG
+      s9 s11 XCHG
+      s8 s10 XCHG
+      s7 s9 XCHG
+      s2 PUSH
+      s7 s9 XCHG
+      s6 s8 XCHG
+      s5 s7 XCHG
+      s4 s6 XCHG
+      s4 s5 s5 XCHG3
+      s0 s3 XCHG
+      $Escrow$_fun_computeFee INLINECALLDICT
+      DUP
+      $global_computeW1 INLINECALLDICT
+      OVER
+      $global_computeW2 INLINECALLDICT
+      s2 s1 s0 PUSH3
+      $global_computeW3 INLINECALLDICT
+      s8 s3 PUXC
+      SUB
+      100 PUSHINT
+          B{b5ee9c7241010101001900002e547261646520636f6d706c65746564202d207265747279ae732416} B>boc <s PUSHSLICE
+      17 s() 20 s() XCHG
+      19 s() PUSH
+      s0 17 s() XCHG
+      16 s() 19 s() XCHG
+      s15 21 s() XCHG
+      s0 s14 XCHG
+      s13 19 s() XCHG
+      s12 21 s() XCHG
+      s0 s11 XCHG
+      s10 19 s() XCHG
+      s9 21 s() XCHG
+      s0 s8 XCHG
+      s7 19 s() XCHG
+      s6 21 s() XCHG
+      s0 s5 XCHG
+      s4 19 s() XCHG
+      s0 20 s() XCHG
+      3 -ROLL
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      101 PUSHINT
+          B{b5ee9c7241010101001800002c506c6174666f726d206665652031202d20726574727987964fc5} B>boc <s PUSHSLICE
+      16 s() 17 s() XCHG
+      s15 16 s() XCHG
+      s14 s15 XCHG
+      s10 PUSH
+      s14 s15 XCHG
+      s13 s14 XCHG
+      s0 s12 XCHG
+      s0 s13 XCHG
+      s10 s11 XCHG
+      s9 s10 XCHG
+      s8 s9 XCHG
+      s7 s8 XCHG
+      s6 s7 XCHG
+      s5 s6 XCHG
+      s4 s5 XCHG
+      s3 s4 XCHG
+      s0 19 s() XCHG
+      -ROT
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      102 PUSHINT
+          B{b5ee9c7241010101001800002c506c6174666f726d206665652032202d207265747279ae9ae0dc} B>boc <s PUSHSLICE
+      16 s() 17 s() XCHG
+      s15 16 s() XCHG
+      s14 s15 XCHG
+      s9 PUSH
+      s14 s15 XCHG
+      s13 s14 XCHG
+      s12 s13 XCHG
+      s0 s11 XCHG
+      s0 s12 XCHG
+      s9 s10 XCHG
+      s8 s9 XCHG
+      s7 s8 XCHG
+      s6 s7 XCHG
+      s5 s6 XCHG
+      s4 s5 XCHG
+      s3 s4 XCHG
+      -ROT
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      103 PUSHINT
+          B{b5ee9c7241010101001800002c506c6174666f726d206665652033202d207265747279e64cde28} B>boc <s PUSHSLICE
+      16 s() 17 s() XCHG
+      s15 16 s() XCHG
+      s14 s15 XCHG
+      s13 s14 XCHG
+      s8 PUSH
+      s13 s14 XCHG
+      s12 s13 XCHG
+      s11 s12 XCHG
+      s0 s10 XCHG
+      s0 s11 XCHG
+      s8 s9 XCHG
+      s7 s8 XCHG
+      s6 s7 XCHG
+      s5 s6 XCHG
+      s4 s5 XCHG
+      s3 s4 XCHG
+      -ROT
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      $Escrow$_contract_store INLINECALLDICT
+    }>
+    7 EQINT
+    IFJMP:<{
+      16461 PUSHINT
+      __tact_context_get_sender INLINECALLDICT
+      s12 PUSH
+      SDEQ
+      THROWANYIFNOT
+      12978 PUSHINT
+      s4 PUSH
+      1 EQINT
+      IF:<{
+        s4 POP
+        TRUE
+      }>ELSE<{
+        s0 s4 XCHG
+        2 EQINT
+      }>
+      s1 s4 XCHG
+      THROWANYIFNOT
+      60623 PUSHINT
+      s13 PUSH
+      THROWANYIFNOT
+      4 PUSHINT
+      99 PUSHINT
+          B{b5ee9c72410101010016000028456d657267656e6379207769746864726177616ce37578ef} B>boc <s PUSHSLICE
+      s14 16 s() XCHG
+      s13 s15 XCHG
+      s12 PUSH
+      s0 s15 XCHG
+      s12 s14 XCHG
+      s11 s13 XCHG
+      s10 s12 XCHG
+      s5 PUSH
+      s10 s12 XCHG
+      s9 s11 XCHG
+      s8 s10 XCHG
+      s4 s9 XCHG
+      s0 s8 XCHG
+      s5 s7 XCHG
+      s5 s6 XCHG
+      s3 s3 XCHG2
+      s0 s4 XCHG
+      s5 s1 s5 XCHG3
+      $Escrow$_fun_sendJettonTransfer INLINECALLDICT
+      $Escrow$_contract_store INLINECALLDICT
+    }>
+    15 BLKDROP
     130 THROW
   }>
   __tact_selector_hack PROC:<{
