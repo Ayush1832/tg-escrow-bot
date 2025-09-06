@@ -896,47 +896,6 @@ export function dictValueParserEmergencyWithdraw(): DictionaryValue<EmergencyWit
     }
 }
 
-export type ConfirmDeposit = {
-    $$type: 'ConfirmDeposit';
-}
-
-export function storeConfirmDeposit(src: ConfirmDeposit) {
-    return (builder: Builder) => {
-        const b_0 = builder;
-        b_0.storeUint(8, 32);
-    };
-}
-
-export function loadConfirmDeposit(slice: Slice) {
-    const sc_0 = slice;
-    if (sc_0.loadUint(32) !== 8) { throw Error('Invalid prefix'); }
-    return { $$type: 'ConfirmDeposit' as const };
-}
-
-export function loadTupleConfirmDeposit(source: TupleReader) {
-    return { $$type: 'ConfirmDeposit' as const };
-}
-
-export function loadGetterTupleConfirmDeposit(source: TupleReader) {
-    return { $$type: 'ConfirmDeposit' as const };
-}
-
-export function storeTupleConfirmDeposit(source: ConfirmDeposit) {
-    const builder = new TupleBuilder();
-    return builder.build();
-}
-
-export function dictValueParserConfirmDeposit(): DictionaryValue<ConfirmDeposit> {
-    return {
-        serialize: (src, builder) => {
-            builder.storeRef(beginCell().store(storeConfirmDeposit(src)).endCell());
-        },
-        parse: (src) => {
-            return loadConfirmDeposit(src.loadRef().beginParse());
-        }
-    }
-}
-
 export type RetryPayout = {
     $$type: 'RetryPayout';
 }
@@ -1102,53 +1061,6 @@ export function dictValueParserDepositReceived(): DictionaryValue<DepositReceive
     }
 }
 
-export type DepositConfirmed = {
-    $$type: 'DepositConfirmed';
-    confirmedBy: Address;
-}
-
-export function storeDepositConfirmed(src: DepositConfirmed) {
-    return (builder: Builder) => {
-        const b_0 = builder;
-        b_0.storeUint(17, 32);
-        b_0.storeAddress(src.confirmedBy);
-    };
-}
-
-export function loadDepositConfirmed(slice: Slice) {
-    const sc_0 = slice;
-    if (sc_0.loadUint(32) !== 17) { throw Error('Invalid prefix'); }
-    const _confirmedBy = sc_0.loadAddress();
-    return { $$type: 'DepositConfirmed' as const, confirmedBy: _confirmedBy };
-}
-
-export function loadTupleDepositConfirmed(source: TupleReader) {
-    const _confirmedBy = source.readAddress();
-    return { $$type: 'DepositConfirmed' as const, confirmedBy: _confirmedBy };
-}
-
-export function loadGetterTupleDepositConfirmed(source: TupleReader) {
-    const _confirmedBy = source.readAddress();
-    return { $$type: 'DepositConfirmed' as const, confirmedBy: _confirmedBy };
-}
-
-export function storeTupleDepositConfirmed(source: DepositConfirmed) {
-    const builder = new TupleBuilder();
-    builder.writeAddress(source.confirmedBy);
-    return builder.build();
-}
-
-export function dictValueParserDepositConfirmed(): DictionaryValue<DepositConfirmed> {
-    return {
-        serialize: (src, builder) => {
-            builder.storeRef(beginCell().store(storeDepositConfirmed(src)).endCell());
-        },
-        parse: (src) => {
-            return loadDepositConfirmed(src.loadRef().beginParse());
-        }
-    }
-}
-
 export type TradeCompleted = {
     $$type: 'TradeCompleted';
     buyer: Address;
@@ -1159,7 +1071,7 @@ export type TradeCompleted = {
 export function storeTradeCompleted(src: TradeCompleted) {
     return (builder: Builder) => {
         const b_0 = builder;
-        b_0.storeUint(18, 32);
+        b_0.storeUint(17, 32);
         b_0.storeAddress(src.buyer);
         b_0.storeUint(src.amount, 128);
         b_0.storeUint(src.fee, 128);
@@ -1168,7 +1080,7 @@ export function storeTradeCompleted(src: TradeCompleted) {
 
 export function loadTradeCompleted(slice: Slice) {
     const sc_0 = slice;
-    if (sc_0.loadUint(32) !== 18) { throw Error('Invalid prefix'); }
+    if (sc_0.loadUint(32) !== 17) { throw Error('Invalid prefix'); }
     const _buyer = sc_0.loadAddress();
     const _amount = sc_0.loadUintBig(128);
     const _fee = sc_0.loadUintBig(128);
@@ -1217,7 +1129,7 @@ export type PayoutRetried = {
 export function storePayoutRetried(src: PayoutRetried) {
     return (builder: Builder) => {
         const b_0 = builder;
-        b_0.storeUint(19, 32);
+        b_0.storeUint(18, 32);
         b_0.storeAddress(src.retriedBy);
         b_0.storeUint(src.queryId, 64);
     };
@@ -1225,7 +1137,7 @@ export function storePayoutRetried(src: PayoutRetried) {
 
 export function loadPayoutRetried(slice: Slice) {
     const sc_0 = slice;
-    if (sc_0.loadUint(32) !== 19) { throw Error('Invalid prefix'); }
+    if (sc_0.loadUint(32) !== 18) { throw Error('Invalid prefix'); }
     const _retriedBy = sc_0.loadAddress();
     const _queryId = sc_0.loadUintBig(64);
     return { $$type: 'PayoutRetried' as const, retriedBy: _retriedBy, queryId: _queryId };
@@ -1266,7 +1178,7 @@ export type Escrow$Data = {
     seller: Address;
     buyer: Address;
     admin: Address;
-    expectedJettonWallet: Address | null;
+    expectedJettonWallet: Address;
     amount: bigint;
     commissionBps: bigint;
     feeW1: Address;
@@ -1288,20 +1200,18 @@ export function storeEscrow$Data(src: Escrow$Data) {
         b_0.storeAddress(src.admin);
         const b_1 = new Builder();
         b_1.storeAddress(src.expectedJettonWallet);
-        b_1.storeInt(src.amount, 257);
-        b_1.storeInt(src.commissionBps, 257);
+        b_1.storeUint(src.amount, 128);
+        b_1.storeUint(src.commissionBps, 16);
+        b_1.storeAddress(src.feeW1);
+        b_1.storeAddress(src.feeW2);
         const b_2 = new Builder();
-        b_2.storeAddress(src.feeW1);
-        b_2.storeAddress(src.feeW2);
         b_2.storeAddress(src.feeW3);
-        const b_3 = new Builder();
-        b_3.storeInt(src.status, 257);
-        b_3.storeUint(src.deposited, 128);
-        b_3.storeUint(src.deadline, 32);
-        b_3.storeAddress(src.jettonWallet);
-        b_3.storeBit(src.depositVerified);
-        b_3.storeBit(src.payoutAttempted);
-        b_2.storeRef(b_3.endCell());
+        b_2.storeUint(src.status, 8);
+        b_2.storeUint(src.deposited, 128);
+        b_2.storeUint(src.deadline, 64);
+        b_2.storeAddress(src.jettonWallet);
+        b_2.storeBit(src.depositVerified);
+        b_2.storeBit(src.payoutAttempted);
         b_1.storeRef(b_2.endCell());
         b_0.storeRef(b_1.endCell());
     };
@@ -1313,20 +1223,19 @@ export function loadEscrow$Data(slice: Slice) {
     const _buyer = sc_0.loadAddress();
     const _admin = sc_0.loadAddress();
     const sc_1 = sc_0.loadRef().beginParse();
-    const _expectedJettonWallet = sc_1.loadMaybeAddress();
-    const _amount = sc_1.loadIntBig(257);
-    const _commissionBps = sc_1.loadIntBig(257);
+    const _expectedJettonWallet = sc_1.loadAddress();
+    const _amount = sc_1.loadUintBig(128);
+    const _commissionBps = sc_1.loadUintBig(16);
+    const _feeW1 = sc_1.loadAddress();
+    const _feeW2 = sc_1.loadAddress();
     const sc_2 = sc_1.loadRef().beginParse();
-    const _feeW1 = sc_2.loadAddress();
-    const _feeW2 = sc_2.loadAddress();
     const _feeW3 = sc_2.loadAddress();
-    const sc_3 = sc_2.loadRef().beginParse();
-    const _status = sc_3.loadIntBig(257);
-    const _deposited = sc_3.loadUintBig(128);
-    const _deadline = sc_3.loadUintBig(32);
-    const _jettonWallet = sc_3.loadMaybeAddress();
-    const _depositVerified = sc_3.loadBit();
-    const _payoutAttempted = sc_3.loadBit();
+    const _status = sc_2.loadUintBig(8);
+    const _deposited = sc_2.loadUintBig(128);
+    const _deadline = sc_2.loadUintBig(64);
+    const _jettonWallet = sc_2.loadMaybeAddress();
+    const _depositVerified = sc_2.loadBit();
+    const _payoutAttempted = sc_2.loadBit();
     return { $$type: 'Escrow$Data' as const, seller: _seller, buyer: _buyer, admin: _admin, expectedJettonWallet: _expectedJettonWallet, amount: _amount, commissionBps: _commissionBps, feeW1: _feeW1, feeW2: _feeW2, feeW3: _feeW3, status: _status, deposited: _deposited, deadline: _deadline, jettonWallet: _jettonWallet, depositVerified: _depositVerified, payoutAttempted: _payoutAttempted };
 }
 
@@ -1334,7 +1243,7 @@ export function loadTupleEscrow$Data(source: TupleReader) {
     const _seller = source.readAddress();
     const _buyer = source.readAddress();
     const _admin = source.readAddress();
-    const _expectedJettonWallet = source.readAddressOpt();
+    const _expectedJettonWallet = source.readAddress();
     const _amount = source.readBigNumber();
     const _commissionBps = source.readBigNumber();
     const _feeW1 = source.readAddress();
@@ -1353,7 +1262,7 @@ export function loadGetterTupleEscrow$Data(source: TupleReader) {
     const _seller = source.readAddress();
     const _buyer = source.readAddress();
     const _admin = source.readAddress();
-    const _expectedJettonWallet = source.readAddressOpt();
+    const _expectedJettonWallet = source.readAddress();
     const _amount = source.readBigNumber();
     const _commissionBps = source.readBigNumber();
     const _feeW1 = source.readAddress();
@@ -1410,7 +1319,7 @@ export function dictValueParserEscrow$Data(): DictionaryValue<Escrow$Data> {
     feeW2_: Address;
     feeW3_: Address;
     deadline_: bigint;
-    expectedJettonWallet_: Address | null;
+    expectedJettonWallet_: Address;
 }
 
 function initEscrow_init_args(src: Escrow_init_args) {
@@ -1425,16 +1334,16 @@ function initEscrow_init_args(src: Escrow_init_args) {
         b_1.storeAddress(src.feeW1_);
         b_1.storeAddress(src.feeW2_);
         b_1.storeAddress(src.feeW3_);
+        b_1.storeUint(src.deadline_, 64);
         const b_2 = new Builder();
-        b_2.storeInt(src.deadline_, 257);
         b_2.storeAddress(src.expectedJettonWallet_);
         b_1.storeRef(b_2.endCell());
         b_0.storeRef(b_1.endCell());
     };
 }
 
-async function Escrow_init(seller_: Address, buyer_: Address, admin_: Address, amount_: bigint, commissionBps_: bigint, feeW1_: Address, feeW2_: Address, feeW3_: Address, deadline_: bigint, expectedJettonWallet_: Address | null) {
-    const __code = Cell.fromHex('b5ee9c7241022101000b7f000110ff0020e303f2c80b0103f83001d072d721d200d200fa4021103450666f04f86102f862ed44d0d200018e55fa40fa40fa40d37fd30fd401d0fa40fa40fa40d430d0810101d700d72c01916d93fa4001e231105a10591058105710560ad1550881186327c200f2f425812710bbf2e67d70541700102710261025102455026d7070e30d1110e3020e0203040096fa40fa40fa40d401d0d72c01916d93fa4001e201810101d700810101d700d430d0fa40fa40fa40d430d0810101d700d37fd31fd72c01916d93fa4001e201d200d2003010cf10ce10cd6c1f00065f0f3004a4d70d1ff2e0822182107362d09cbae3023020c001e30220c0028eb330812277f8422dc705f2f48200a0d704c00114f2f48200f4982df2f410bd10ac109b108a107910681057104610357244554313e020c0030507200b01fe31d33f31d37ffa403082008b9b26c000f2f482008fe8531fc705f2f4812936532bbaf2f4811a89f8420f11100f0e11100e0d11100d0c11100c0b11100b0a11100a0911100908111008071110070611100605111005041110040311100302111102011112012c6eb39a2c206e925b7092c705e295f828c705b3e235355b50ee060198f2f4f8422b7071f842102f01111001c8552080105004cb1f12cb7fcecec9c88258c000000000000000000000000101cb67ccc970fb0010be10ad109c108b107a106910581047103604054133200492308200d8ecf8422ec705f2f48200a0d704c00114f2f48200f4982df2f48121032eb3f2f410bd10ac109b108a1079106810571046103573515241550403db3c3120db3c21db3c54721018191a0803fedb3c5373a17f708bf547261646520636f6d706c657465648111011151110561411100f11140f0e11130e0d11120d0c11160c0b0a11140a0911130908111208071116070605111405041113040211150256130201111601db3c718be506c6174666f726d20666565203181110111111100f11100f10ef2a10ef10de0c0d10ab1c1f0903fc109a108910781067105610451034111659db3c728be506c6174666f726d20666565203281110111111100f11100f10ef2910ef10de10cd0b0c109a108910781067105610451034111459db3c738be506c6174666f726d20666565203381110111111100f11100f10ef10de2810de10cd10bc0a0b108910781067105610451f1f0a026e103459db3c2d02011110011111c8552080125004cb1f12cecb7fcb7fc9c88258c000000000000000000000000101cb67ccc970fb00551c1f2004e4e30220c0048f67308200e18ff8422cc705f2f48132b224c00192347f9304c002e214f2f48200f4982df2f47480148d06511a5cdc1d5d19481c995cdbdb1d9959080b481cd95b1b195ca02e11110e11100e10df10ce10bd10ac2510ac109b108a104908105710565033044515db3ce020c0050c1f20100490308200e18ff8422cc705f2f48132b224c00192347f9304c002e214f2f48200f4982df2f410bd10ac109b108a1079106810571046103573515241550403db3c20db3c21db3c54721018191a0d03fedb3c5284a17a8d06111a5cdc1d5d19481c995cdbdb1d9959080b48189d5e595ca0111111141111561311111110111311100f11150f0e0d11130d0c11150c0b0a11130a09111509080711130706111506050411130411145520db3c800b8be506c6174666f726d20666565203181110111111100f11100f10ef2a10ef10de0c1c1f0e03fe0d10ab109a108910781067105610451034111359db3c800c8be506c6174666f726d20666565203281110111111100f11100f10ef2910ef10de10cd0b0c109a10891078106710561045103459db3c800d8be506c6174666f726d20666565203381110111111100f11100f10ef10de2810de10cd10bc0a0b10891078106710561f1f0f01ba1045103459db3cc87f01ca0055e050efce1cce1acec85009206e9430cf84809201cee217810101cf0015810101cf0003c8ce12cece02c8810101cf0013cb7f14cb1f5004206e9430cf84809201cee214ca0014ca0013cd12cdcdc9ed541f04b88ecc308137d6f8422ec705917f95f8422cc705e2f2f4812aac04c00014f2f4f8422cc7059320c3009170e29a8200a20df82322bef2f4de10bd10ac109b108a107910681057104610357444554313e020c006e30220c008e30220c0092011151604a8308200f7aaf8422dc705f2f48200a0d704c00114f2f48200c4d621c300f2f48200bc49f82322bef2f48200f4982df2f410bd10ac109b108a1079106810571046103573515241550403db3c20db3c21db3c54721018191a1203fedb3c5284a1801e8d07151c98591948195e1c1a5c9959080b48185d5d1bc81c995b19585cd960111111141111561311111110111311100f11150f0e0d11130d0c11150c0b0a11130a09111509080711130706111506050411130411145520db3c801f8be506c6174666f726d20666565203181110111111100f11100f10ef2a1c1f1303fc10ef10de0c0d10ab109a108910781067105610451034111359db3c80208be506c6174666f726d20666565203281110111111100f11100f10ef2910ef10de10cd0b0c109a10891078106710561045103459db3c80218be506c6174666f726d20666565203381110111111100f11100f10ef10de2810de10cd10bc0a0b10891f1f1401c61078106710561045103459db3cc87f01ca0055e050efce1cce1acec85009206e9430cf84809201cee217810101cf0015810101cf0003c8ce12cece02c8810101cf0013cb7f14cb1f5004206e9430cf84809201cee214ca0014ca0013cd12cdcdc9ed541f01c2308200f9f0f8422cc705f2f48200d95c24c001f2f481410b216eb3f2f48200bd0c0eb31ef2f47ff842c801801158cb1fcec9c88258c000000000000000000000000101cb67ccc970fb0010ce10bd10ac109b108a107910681057104610354403022003d6e302c0078f5f81404df8422cc705f2f48132b224c00192347f9304c002e214f2f48200eccf2df2f47480638d05115b595c99d95b98de481dda5d1a191c985dd85b200e11100e10df2c0f10ce10bd10ac2510ac109b108a104908105710565033044515db3ce05f0ff2c082171f20047c30813b6af8422cc705f2f48200879b24c003f2f48200f4982ef2f410ce10bd10ac109b108a1079221079106810571046445503db3c20db3c21db3c54721018191a1b000e2aa8812710a9040012811b58a8812710a90400128108caa8812710a90403f8db3c5284a180648d05d51c9859194818dbdb5c1b195d1959080b481c995d1c9e60111111141111561311111110111311100f11150f0e0d11130d0c11150c0b0a11130a09111509080711130706111506050411130411145520db3c80658d05941b185d199bdc9b48199959480c480b481c995d1c9e601110111111101c1f1d000859a101a103fc0f11100f10ef2a10ef10de0c0d10ab109a108910781067105610451034111359db3c80668d05941b185d199bdc9b48199959480c880b481c995d1c9e601110111111100f11100f10ef2910ef10de10cd0b0c109a10891078106710561045103459db3c80678d05941b185d199bdc9b48199959480cc80b481c995d1c9e601f1f1e01f81110111111100f11100f10ef10de2810de10cd10bc0a0b10891078106710561045103459db3cc87f01ca0055e050efce1cce1acec85009206e9430cf84809201cee217810101cf0015810101cf0003c8ce12cece02c8810101cf0013cb7f14cb1f5004206e9430cf84809201cee214ca0014ca0013cd12cdcdc9ed541f00ec3081410b266eb3f2f47070c882100f8a7ea501cb1f13cb3f5003fa025003cf16f828cf1612ca00820afaf080fa02ca00c923206ef2d080821008f0d1805871015a6d6d40037fc8cf8580ca00cf8440ce01fa028069cf40025c6e016eb0935bcf819d58cf8680cf8480f400f400cf81e2f400c901fb0000acc87f01ca0055e050efce1cce1acec85009206e9430cf84809201cee217810101cf0015810101cf0003c8ce12cece02c8810101cf0013cb7f14cb1f5004206e9430cf84809201cee214ca0014ca0013cd12cdcdc9ed54018732b6');
+async function Escrow_init(seller_: Address, buyer_: Address, admin_: Address, amount_: bigint, commissionBps_: bigint, feeW1_: Address, feeW2_: Address, feeW3_: Address, deadline_: bigint, expectedJettonWallet_: Address) {
+    const __code = Cell.fromHex('b5ee9c7241022001000b64000110ff0020e303f2c80b0102f63001d072d721d200d200fa4021103450666f04f86102f862ed44d0d200018e4afa40fa40fa40d37fd30fd401d0fa40fa40fa40d33fd430d0fa4030105a10591058105710560ad1550881186327c200f2f425812710bbf2e67d70541700102710261025102455026d7070e30d1110935f0f30e00ed70d1ff2e082210203006cfa40fa40fa40d401d0fa40d37fd30ffa40fa40d430d0fa40d307d37fd33fd72c01916d93fa4001e201d200d2003010cf10ce10cd6c1f042e82107362d09cbae3023020c001e30220c002e30220c00304060a0b01fa31d33f31d37ffa403082008b9b26c000f2f482008fe8531fc705f2f4812936532bbaf2f4811a89f8420f11100f0e11100e0d11100d0c11100c0b11100b0a11100a0911100908111008071110070611100605111005041110040311100302111102011112012cc70535355b50eef2f4f8422b7f71f842102f01111001c80500f4552080105004cb1f12cb7fcecec9c88258c000000000000000000000000101cb67ccc970fb0010be10ad109c108b107a106910581047103604054133c87f01ca0055e050efce1cce1ace08c8ce17cb7f15cb0f13cece01c8ce12cb0712cb7f13cb3f5003206e9430cf84809201cee213ca0013ca00cdcdc9ed540492308200d8ecf8422ec705f2f48200a0d704c00114f2f48200f4982df2f48121030eb31ef2f410ac109b108a10791068105710461035102473047f22050403db3c20db3c21db3c5472101617180703fcdb3c5383a1718d0414995b19585cd9481d1bc8189d5e595ca0111011151110561411100f11140f0e11130e0d11120d0c11160c0b0a11140a091113090811120807111607060511140504111304031112030211150256120201111601db3c728be506c6174666f726d20666565203181110111111100f11100f10ef2a10ef1a1e0803fc10de0c0d10ab109a108910781067105610451034111559db3c738be506c6174666f726d20666565203281110111111100f11100f10ef2910ef10de10cd0b0c109a108910781067105610451034111359db3c748be506c6174666f726d20666565203381110111111100f11100f10ef10de2810de10cd10bc0a0b108910781e1e0901f6106710561045103459db3c2d02011110011111c8552080115004cb1f12cecb7fcb7fc9c88258c000000000000000000000000101cb67ccc970fb00551cc87f01ca0055e050efce1cce1ace08c8ce17cb7f15cb0f13cece01c8ce12cb0712cb7f13cb3f5003206e9430cf84809201cee213ca0013ca00cdcdc9ed541e00e230812277f8422dc705f2f48200a0d704c00114f2f48200f4982df2f410bd10ac109b108a107910681057104610357244554313c87f01ca0055e050efce1cce1ace08c8ce17cb7f15cb0f13cece01c8ce12cb0712cb7f13cb3f5003206e9430cf84809201cee213ca0013ca00cdcdc9ed5404e8e30220c0048f69308200e18ff8422cc705f2f48132b224c00192347f9304c002e214f2f48200f4982df2f48121030eb31ef2f4747f80158d0590591b5a5b881c99599d5b99081d1bc81cd95b1b195ca02e11110e11100e10df10ce10bd10ac2510ac109b108a1059085033074616db3ce020c0050c1e1f1004a0308200e18ff8422cc705f2f48132b224c00192347f9304c002e214f2f48200f4982df2f48121030eb31ef2f410ac109b108a10791068105710461035102473047f22050403db3c20db3c21db3c5472101617180d03fadb3c5383a1800b8d0590591b5a5b881c995b19585cd9481d1bc8189d5e595ca0111011151110561411100f11140f0e11130e0d11120d0c11160c0b0a11140a091113090811120807111607060511140504111304031112030211150256120201111601db3c800c8be506c6174666f726d20666565203181110111111101a1e0e03fe0f11100f10ef2a10ef10de0c0d10ab109a108910781067105610451034111559db3c800d8be506c6174666f726d20666565203281110111111100f11100f10ef2910ef10de10cd0b0c109a108910781067105610451034111359db3c800e8be506c6174666f726d20666565203381110111111100f11100f10ef10de2810de1e1e0f028e10cd10bc0a0b10891078106710561045103459db3c2d02011110011111c8552080115004cb1f12cecb7fcb7fc9c88258c000000000000000000000000101cb67ccc970fb00551c1e1f04b68ecc308137d6f8422ec705917f95f8422cc705e2f2f4812aac04c00014f2f4f8422cc7059320c3009170e29a8200a20df82322bef2f4de10bd10ac109b108a107910681057104610357444554313e020c006e30220c009e302c0071f11151d04b8308200f7aaf8422dc705f2f48200a0d704c00114f2f48200c4d621c300f2f48200bc49f82322bef2f48200f4982df2f48121030eb31ef2f410ac109b108a10791068105710461035102473047f22050403db3c20db3c21db3c5472101617181203fedb3c5383a1801f8d05105d5d1bcb5c995b19585cd948195e1c1a5c995920111011151110561411100f11140f0e11130e0d11120d0c11160c0b0a11140a091113090811120807111607060511140504111304031112030211150256120201111601db3c80208be506c6174666f726d20666565203181110111111100f11100f1a1e1303fe10ef2a10ef10de0c0d10ab109a108910781067105610451034111559db3c80218be506c6174666f726d20666565203281110111111100f11100f10ef2910ef10de10cd0b0c109a108910781067105610451034111359db3c80228be506c6174666f726d20666565203381110111111100f11100f10ef10de2810de10cd10bc1e1e1402860a0b10891078106710561045103459db3c2d02011110011111c8552080115004cb1f12cecb7fcb7fc9c88258c000000000000000000000000101cb67ccc970fb00551c1e1f049830813b6af8422cc705f2f48200f4cd24c003917f9324c004e2917f9324c001e2f2f48200f4982ef2f410ce10bd10ac109b108a1079221079106810571046445503db3c20db3c21db3c54721016171819000e2aa8812710a9040012811b58a8812710a90400128108caa8812710a90403fedb3c5284a18103e98d0554995d1c9e481c185e5bdd5d081d1bc8189d5e595ca0111111141111561311111110111311100f11150f0e0d11130d0c11150c0b0a11130a09111509080711130706111506050411130411145520db3c8103ea8bb526574727920666565203181110111111100f11100f10ef2a10ef10de0c0d10ab1a1e1b000859a101a104fe109a108910781067105610451034111359db3c8103eb8bb526574727920666565203281110111111100f11100f10ef2910ef10de10cd0b0c109a10891078106710561045103459db3c8103ec8bb526574727920666565203381110111111100f11100f10ef10de2810de10cd10bc0a0b10891078106710561045103459db3c1e1e1e1c00cef8428103e9c85980125003cb1fcecb3fc9c88258c000000000000000000000000101cb67ccc970fb00c87f01ca0055e050efce1cce1ace08c8ce17cb7f15cb0f13cece01c8ce12cb0712cb7f13cb3f5003206e9430cf84809201cee213ca0013ca00cdcdc9ed5402de8f6781404df8422cc705f2f48200eccf2ef2f481697a24c00192347f9304c002e214f2f47481044c8d06d15b595c99d95b98de481dda5d1a191c985dc81d1bc818591b5a5ba00e11100e10df2c0f10ce10bd10ac2510ac109b108a104908105710565033044515db3ce05f0ff2c0821e1f00e43081410b266eb3f2f47070c882100f8a7ea501cb1f13cb3f5003fa025003cf16f828cf1612ca0070fa02ca00c923206ef2d080821008f0d1805871015a6d6d40037fc8cf8580ca00cf8440ce01fa028069cf40025c6e016eb0935bcf819d58cf8680cf8480f400f400cf81e2f400c901fb00007cc87f01ca0055e050efce1cce1ace08c8ce17cb7f15cb0f13cece01c8ce12cb0712cb7f13cb3f5003206e9430cf84809201cee213ca0013ca00cdcdc9ed5478ef8afa');
     const builder = beginCell();
     builder.storeUint(0, 1);
     initEscrow_init_args({ $$type: 'Escrow_init_args', seller_, buyer_, admin_, amount_, commissionBps_, feeW1_, feeW2_, feeW3_, deadline_, expectedJettonWallet_ })(builder);
@@ -1491,21 +1400,19 @@ export const Escrow_errors = {
     15210: { message: "Only admin can retry payouts" },
     16461: { message: "Only admin" },
     16651: { message: "Jetton wallet not set" },
-    34715: { message: "Payouts not in progress" },
+    27002: { message: "Invalid status" },
     35739: { message: "Already deposited" },
     36840: { message: "Only seller can deposit" },
     41175: { message: "Must be active - already resolved" },
     41485: { message: "Seller must wait until deadline" },
     48201: { message: "Deadline not reached" },
-    48396: { message: "Deposit already confirmed" },
     50390: { message: "No deadline set" },
     55532: { message: "Only seller can confirm" },
-    55644: { message: "No deposit to confirm" },
     57743: { message: "Only admin can resolve" },
     60623: { message: "No verified deposit" },
     62616: { message: "Deposit not verified" },
+    62669: { message: "Invalid status for retry" },
     63402: { message: "Only buyer can claim expired" },
-    63984: { message: "Only admin can confirm deposits" },
 } as const
 
 export const Escrow_errors_backward = {
@@ -1557,21 +1464,19 @@ export const Escrow_errors_backward = {
     "Only admin can retry payouts": 15210,
     "Only admin": 16461,
     "Jetton wallet not set": 16651,
-    "Payouts not in progress": 34715,
+    "Invalid status": 27002,
     "Already deposited": 35739,
     "Only seller can deposit": 36840,
     "Must be active - already resolved": 41175,
     "Seller must wait until deadline": 41485,
     "Deadline not reached": 48201,
-    "Deposit already confirmed": 48396,
     "No deadline set": 50390,
     "Only seller can confirm": 55532,
-    "No deposit to confirm": 55644,
     "Only admin can resolve": 57743,
     "No verified deposit": 60623,
     "Deposit not verified": 62616,
+    "Invalid status for retry": 62669,
     "Only buyer can claim expired": 63402,
-    "Only admin can confirm deposits": 63984,
 } as const
 
 const Escrow_types: ABIType[] = [
@@ -1592,14 +1497,12 @@ const Escrow_types: ABIType[] = [
     {"name":"CancelIfNoDeposit","header":5,"fields":[]},
     {"name":"ClaimExpired","header":6,"fields":[]},
     {"name":"EmergencyWithdraw","header":7,"fields":[]},
-    {"name":"ConfirmDeposit","header":8,"fields":[]},
     {"name":"RetryPayout","header":9,"fields":[]},
     {"name":"TokenNotification","header":1935855772,"fields":[{"name":"queryId","type":{"kind":"simple","type":"uint","optional":false,"format":64}},{"name":"amount","type":{"kind":"simple","type":"uint","optional":false,"format":128}},{"name":"from","type":{"kind":"simple","type":"address","optional":false}},{"name":"forwardPayload","type":{"kind":"simple","type":"slice","optional":false,"format":"remainder"}}]},
     {"name":"DepositReceived","header":16,"fields":[{"name":"amount","type":{"kind":"simple","type":"uint","optional":false,"format":128}},{"name":"from","type":{"kind":"simple","type":"address","optional":false}},{"name":"jettonWallet","type":{"kind":"simple","type":"address","optional":false}}]},
-    {"name":"DepositConfirmed","header":17,"fields":[{"name":"confirmedBy","type":{"kind":"simple","type":"address","optional":false}}]},
-    {"name":"TradeCompleted","header":18,"fields":[{"name":"buyer","type":{"kind":"simple","type":"address","optional":false}},{"name":"amount","type":{"kind":"simple","type":"uint","optional":false,"format":128}},{"name":"fee","type":{"kind":"simple","type":"uint","optional":false,"format":128}}]},
-    {"name":"PayoutRetried","header":19,"fields":[{"name":"retriedBy","type":{"kind":"simple","type":"address","optional":false}},{"name":"queryId","type":{"kind":"simple","type":"uint","optional":false,"format":64}}]},
-    {"name":"Escrow$Data","header":null,"fields":[{"name":"seller","type":{"kind":"simple","type":"address","optional":false}},{"name":"buyer","type":{"kind":"simple","type":"address","optional":false}},{"name":"admin","type":{"kind":"simple","type":"address","optional":false}},{"name":"expectedJettonWallet","type":{"kind":"simple","type":"address","optional":true}},{"name":"amount","type":{"kind":"simple","type":"int","optional":false,"format":257}},{"name":"commissionBps","type":{"kind":"simple","type":"int","optional":false,"format":257}},{"name":"feeW1","type":{"kind":"simple","type":"address","optional":false}},{"name":"feeW2","type":{"kind":"simple","type":"address","optional":false}},{"name":"feeW3","type":{"kind":"simple","type":"address","optional":false}},{"name":"status","type":{"kind":"simple","type":"int","optional":false,"format":257}},{"name":"deposited","type":{"kind":"simple","type":"uint","optional":false,"format":128}},{"name":"deadline","type":{"kind":"simple","type":"uint","optional":false,"format":32}},{"name":"jettonWallet","type":{"kind":"simple","type":"address","optional":true}},{"name":"depositVerified","type":{"kind":"simple","type":"bool","optional":false}},{"name":"payoutAttempted","type":{"kind":"simple","type":"bool","optional":false}}]},
+    {"name":"TradeCompleted","header":17,"fields":[{"name":"buyer","type":{"kind":"simple","type":"address","optional":false}},{"name":"amount","type":{"kind":"simple","type":"uint","optional":false,"format":128}},{"name":"fee","type":{"kind":"simple","type":"uint","optional":false,"format":128}}]},
+    {"name":"PayoutRetried","header":18,"fields":[{"name":"retriedBy","type":{"kind":"simple","type":"address","optional":false}},{"name":"queryId","type":{"kind":"simple","type":"uint","optional":false,"format":64}}]},
+    {"name":"Escrow$Data","header":null,"fields":[{"name":"seller","type":{"kind":"simple","type":"address","optional":false}},{"name":"buyer","type":{"kind":"simple","type":"address","optional":false}},{"name":"admin","type":{"kind":"simple","type":"address","optional":false}},{"name":"expectedJettonWallet","type":{"kind":"simple","type":"address","optional":false}},{"name":"amount","type":{"kind":"simple","type":"uint","optional":false,"format":128}},{"name":"commissionBps","type":{"kind":"simple","type":"uint","optional":false,"format":16}},{"name":"feeW1","type":{"kind":"simple","type":"address","optional":false}},{"name":"feeW2","type":{"kind":"simple","type":"address","optional":false}},{"name":"feeW3","type":{"kind":"simple","type":"address","optional":false}},{"name":"status","type":{"kind":"simple","type":"uint","optional":false,"format":8}},{"name":"deposited","type":{"kind":"simple","type":"uint","optional":false,"format":128}},{"name":"deadline","type":{"kind":"simple","type":"uint","optional":false,"format":64}},{"name":"jettonWallet","type":{"kind":"simple","type":"address","optional":true}},{"name":"depositVerified","type":{"kind":"simple","type":"bool","optional":false}},{"name":"payoutAttempted","type":{"kind":"simple","type":"bool","optional":false}}]},
 ]
 
 const Escrow_opcodes = {
@@ -1610,13 +1513,11 @@ const Escrow_opcodes = {
     "CancelIfNoDeposit": 5,
     "ClaimExpired": 6,
     "EmergencyWithdraw": 7,
-    "ConfirmDeposit": 8,
     "RetryPayout": 9,
     "TokenNotification": 1935855772,
     "DepositReceived": 16,
-    "DepositConfirmed": 17,
-    "TradeCompleted": 18,
-    "PayoutRetried": 19,
+    "TradeCompleted": 17,
+    "PayoutRetried": 18,
 }
 
 const Escrow_getters: ABIGetter[] = [
@@ -1633,7 +1534,6 @@ const Escrow_receivers: ABIReceiver[] = [
     {"receiver":"internal","message":{"kind":"typed","type":"ResolveToSeller"}},
     {"receiver":"internal","message":{"kind":"typed","type":"CancelIfNoDeposit"}},
     {"receiver":"internal","message":{"kind":"typed","type":"ClaimExpired"}},
-    {"receiver":"internal","message":{"kind":"typed","type":"ConfirmDeposit"}},
     {"receiver":"internal","message":{"kind":"typed","type":"RetryPayout"}},
     {"receiver":"internal","message":{"kind":"typed","type":"EmergencyWithdraw"}},
 ]
@@ -1646,11 +1546,11 @@ export class Escrow implements Contract {
     public static readonly errors = Escrow_errors_backward;
     public static readonly opcodes = Escrow_opcodes;
     
-    static async init(seller_: Address, buyer_: Address, admin_: Address, amount_: bigint, commissionBps_: bigint, feeW1_: Address, feeW2_: Address, feeW3_: Address, deadline_: bigint, expectedJettonWallet_: Address | null) {
+    static async init(seller_: Address, buyer_: Address, admin_: Address, amount_: bigint, commissionBps_: bigint, feeW1_: Address, feeW2_: Address, feeW3_: Address, deadline_: bigint, expectedJettonWallet_: Address) {
         return await Escrow_init(seller_, buyer_, admin_, amount_, commissionBps_, feeW1_, feeW2_, feeW3_, deadline_, expectedJettonWallet_);
     }
     
-    static async fromInit(seller_: Address, buyer_: Address, admin_: Address, amount_: bigint, commissionBps_: bigint, feeW1_: Address, feeW2_: Address, feeW3_: Address, deadline_: bigint, expectedJettonWallet_: Address | null) {
+    static async fromInit(seller_: Address, buyer_: Address, admin_: Address, amount_: bigint, commissionBps_: bigint, feeW1_: Address, feeW2_: Address, feeW3_: Address, deadline_: bigint, expectedJettonWallet_: Address) {
         const __gen_init = await Escrow_init(seller_, buyer_, admin_, amount_, commissionBps_, feeW1_, feeW2_, feeW3_, deadline_, expectedJettonWallet_);
         const address = contractAddress(0, __gen_init);
         return new Escrow(address, __gen_init);
@@ -1674,7 +1574,7 @@ export class Escrow implements Contract {
         this.init = init;
     }
     
-    async send(provider: ContractProvider, via: Sender, args: { value: bigint, bounce?: boolean| null | undefined }, message: TokenNotification | ConfirmDelivery | RaiseDispute | ResolveToBuyer | ResolveToSeller | CancelIfNoDeposit | ClaimExpired | ConfirmDeposit | RetryPayout | EmergencyWithdraw) {
+    async send(provider: ContractProvider, via: Sender, args: { value: bigint, bounce?: boolean| null | undefined }, message: TokenNotification | ConfirmDelivery | RaiseDispute | ResolveToBuyer | ResolveToSeller | CancelIfNoDeposit | ClaimExpired | RetryPayout | EmergencyWithdraw) {
         
         let body: Cell | null = null;
         if (message && typeof message === 'object' && !(message instanceof Slice) && message.$$type === 'TokenNotification') {
@@ -1697,9 +1597,6 @@ export class Escrow implements Contract {
         }
         if (message && typeof message === 'object' && !(message instanceof Slice) && message.$$type === 'ClaimExpired') {
             body = beginCell().store(storeClaimExpired(message)).endCell();
-        }
-        if (message && typeof message === 'object' && !(message instanceof Slice) && message.$$type === 'ConfirmDeposit') {
-            body = beginCell().store(storeConfirmDeposit(message)).endCell();
         }
         if (message && typeof message === 'object' && !(message instanceof Slice) && message.$$type === 'RetryPayout') {
             body = beginCell().store(storeRetryPayout(message)).endCell();

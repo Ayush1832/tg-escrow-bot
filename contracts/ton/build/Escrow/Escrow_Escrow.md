@@ -1,9 +1,9 @@
 # Tact compilation report
 Contract: Escrow
-BoC Size: 2955 bytes
+BoC Size: 2928 bytes
 
 ## Structures (Structs and Messages)
-Total structures: 25
+Total structures: 23
 
 ### DataSize
 TL-B: `_ cells:int257 bits:int257 refs:int257 = DataSize`
@@ -73,10 +73,6 @@ Signature: `ClaimExpired{}`
 TL-B: `emergency_withdraw#00000007  = EmergencyWithdraw`
 Signature: `EmergencyWithdraw{}`
 
-### ConfirmDeposit
-TL-B: `confirm_deposit#00000008  = ConfirmDeposit`
-Signature: `ConfirmDeposit{}`
-
 ### RetryPayout
 TL-B: `retry_payout#00000009  = RetryPayout`
 Signature: `RetryPayout{}`
@@ -89,21 +85,17 @@ Signature: `TokenNotification{queryId:uint64,amount:uint128,from:address,forward
 TL-B: `deposit_received#00000010 amount:uint128 from:address jettonWallet:address = DepositReceived`
 Signature: `DepositReceived{amount:uint128,from:address,jettonWallet:address}`
 
-### DepositConfirmed
-TL-B: `deposit_confirmed#00000011 confirmedBy:address = DepositConfirmed`
-Signature: `DepositConfirmed{confirmedBy:address}`
-
 ### TradeCompleted
-TL-B: `trade_completed#00000012 buyer:address amount:uint128 fee:uint128 = TradeCompleted`
+TL-B: `trade_completed#00000011 buyer:address amount:uint128 fee:uint128 = TradeCompleted`
 Signature: `TradeCompleted{buyer:address,amount:uint128,fee:uint128}`
 
 ### PayoutRetried
-TL-B: `payout_retried#00000013 retriedBy:address queryId:uint64 = PayoutRetried`
+TL-B: `payout_retried#00000012 retriedBy:address queryId:uint64 = PayoutRetried`
 Signature: `PayoutRetried{retriedBy:address,queryId:uint64}`
 
 ### Escrow$Data
-TL-B: `_ seller:address buyer:address admin:address expectedJettonWallet:address amount:int257 commissionBps:int257 feeW1:address feeW2:address feeW3:address status:int257 deposited:uint128 deadline:uint32 jettonWallet:address depositVerified:bool payoutAttempted:bool = Escrow`
-Signature: `Escrow{seller:address,buyer:address,admin:address,expectedJettonWallet:address,amount:int257,commissionBps:int257,feeW1:address,feeW2:address,feeW3:address,status:int257,deposited:uint128,deadline:uint32,jettonWallet:address,depositVerified:bool,payoutAttempted:bool}`
+TL-B: `_ seller:address buyer:address admin:address expectedJettonWallet:address amount:uint128 commissionBps:uint16 feeW1:address feeW2:address feeW3:address status:uint8 deposited:uint128 deadline:uint64 jettonWallet:address depositVerified:bool payoutAttempted:bool = Escrow`
+Signature: `Escrow{seller:address,buyer:address,admin:address,expectedJettonWallet:address,amount:uint128,commissionBps:uint16,feeW1:address,feeW2:address,feeW3:address,status:uint8,deposited:uint128,deadline:uint64,jettonWallet:address,depositVerified:bool,payoutAttempted:bool}`
 
 ## Get methods
 Total get methods: 0
@@ -157,21 +149,19 @@ Total get methods: 0
 * 15210: Only admin can retry payouts
 * 16461: Only admin
 * 16651: Jetton wallet not set
-* 34715: Payouts not in progress
+* 27002: Invalid status
 * 35739: Already deposited
 * 36840: Only seller can deposit
 * 41175: Must be active - already resolved
 * 41485: Seller must wait until deadline
 * 48201: Deadline not reached
-* 48396: Deposit already confirmed
 * 50390: No deadline set
 * 55532: Only seller can confirm
-* 55644: No deposit to confirm
 * 57743: Only admin can resolve
 * 60623: No verified deposit
 * 62616: Deposit not verified
+* 62669: Invalid status for retry
 * 63402: Only buyer can claim expired
-* 63984: Only admin can confirm deposits
 
 ## Trait inheritance diagram
 

@@ -1,5 +1,5 @@
 import { TonClient } from "@ton/ton";
-import { Address, beginCell, Cell } from "@ton/core";
+import { Address, beginCell, Cell, toNano } from "@ton/core";
 
 // PRODUCTION SCRIPT: Compute USDT jetton wallet address for escrow contract
 export async function computeUSDTJettonWallet(escrowAddress: Address): Promise<Address> {
@@ -19,12 +19,13 @@ export async function computeUSDTJettonWallet(escrowAddress: Address): Promise<A
       { type: "slice", cell: beginCell().storeAddress(escrowAddress).endCell() }
     ]);
 
-    if (result.stack.length > 0) {
-      const walletAddress = result.stack[0].readAddress();
+    // Access the first item from the result stack
+    const walletAddress = result.stack.readAddress();
+    if (walletAddress) {
       console.log(`✅ USDT Jetton Wallet Address: ${walletAddress.toString()}`);
       return walletAddress;
     } else {
-      throw new Error("Failed to get jetton wallet address from master");
+      throw new Error("Failed to read jetton wallet address from response");
     }
 
   } catch (error) {

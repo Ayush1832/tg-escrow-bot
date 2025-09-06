@@ -10,15 +10,30 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "build:ton": "npx tact -c tact.config.json",
     "deploy:escrow": "npx blueprint run scripts/ton/deploy-escrow.ts -t testnet",
-    "seller:deposit": "npx blueprint run scripts/ton/seller-deposit-jetton.ts -t testnet",
-    "action:confirm": "npx blueprint run scripts/ton/confirm.ts -t testnet",
-    "action:raise": "npx blueprint run scripts/ton/raise-dispute.ts -t testnet",
-    "action:resolve-seller": "npx blueprint run scripts/ton/resolve.ts -t testnet --fn resolveToSeller",
-    "action:resolve-buyer": "npx blueprint run scripts/ton/resolve.ts -t testnet --fn resolveToBuyer"
+    "deposit": "npx blueprint run scripts/ton/deposit.ts -t testnet",
+    "confirm-delivery": "npx blueprint run scripts/ton/confirm-delivery.ts -t testnet",
+    "raise-dispute": "npx blueprint run scripts/ton/raise-dispute.ts -t testnet",
+    "resolve-dispute": "npx blueprint run scripts/ton/resolve-dispute.ts -t testnet",
+    "retry-payout": "npx blueprint run scripts/ton/retry-payout.ts -t testnet",
+    "cancel-no-deposit": "npx blueprint run scripts/ton/cancel-no-deposit.ts -t testnet",
+    "claim-expired": "npx blueprint run scripts/ton/claim-expired.ts -t testnet",
+    "bot:start": "ts-node bot/start.ts",
+    "bot:dev": "ts-node --watch bot/index.ts",
+    "bot:build": "tsc bot/index.ts --outDir dist/bot",
+    "server:start": "node server.js",
+    "dev": "concurrently \"npm run server:start\" \"npm run bot:start\""
   },
   "dependencies": {
     "@ton/core": "^0.61.0",
-    "dotenv": "^17.2.1"
+    "@tonconnect/sdk": "^3.2.0",
+    "@tonconnect/ui": "^2.2.0",
+    "@types/node-fetch": "^2.6.13",
+    "concurrently": "^9.2.1",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "node-fetch": "^3.3.2",
+    "telegraf": "^4.16.3",
+    "ton-crypto": "^3.2.0"
   },
   "devDependencies": {
     "@tact-lang/compiler": "^1.6.13",
