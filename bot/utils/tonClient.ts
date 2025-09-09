@@ -7,7 +7,7 @@ export class TONClient {
   private isTestnet: boolean;
 
   constructor() {
-    this.isTestnet = process.env.NETWORK === 'testnet';
+    this.isTestnet = process.env.TON_NETWORK === 'testnet';
     
     const endpoint = this.isTestnet 
       ? 'https://testnet.toncenter.com/api/v2/jsonRPC'

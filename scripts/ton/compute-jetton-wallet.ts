@@ -4,12 +4,16 @@ import { Address, beginCell, Cell, toNano } from "@ton/core";
 // PRODUCTION SCRIPT: Compute USDT jetton wallet address for escrow contract
 export async function computeUSDTJettonWallet(escrowAddress: Address): Promise<Address> {
   const client = new TonClient({
-    endpoint: "https://testnet.toncenter.com/api/v2/jsonRPC",
+    endpoint: process.env.TON_NETWORK === 'mainnet' 
+      ? "https://toncenter.com/api/v2/jsonRPC"
+      : "https://testnet.toncenter.com/api/v2/jsonRPC",
     apiKey: process.env.TON_API_KEY || undefined
   });
 
-  // USDT Master on testnet
-  const usdtMaster = Address.parse("kQD0GKBM8ZbryVk2aESmzfU6b9b_8era_IkvBSELujFZPsyy");
+  // USDT Master - automatically choose based on network
+  const usdtMaster = process.env.TON_NETWORK === 'mainnet'
+    ? Address.parse("EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs") // Mainnet USDT
+    : Address.parse("kQD0GKBM8ZbryVk2aESmzfU6b9b_8era_IkvBSELujFZPsyy"); // Testnet USDT
 
   try {
     console.log(`Computing USDT jetton wallet for escrow: ${escrowAddress.toString()}`);

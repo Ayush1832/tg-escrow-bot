@@ -393,7 +393,8 @@ bot.action('start_sell_flow', async (ctx) => {
     
     try {
       // Generate connection URL with user and bot info
-      const connectionUrl = `http://localhost:3000/connect?user_id=${userId}&bot_token=${BOT_TOKEN}`;
+      const domain = process.env.DOMAIN || 'http://localhost:3000';
+      const connectionUrl = `${domain}/connect?user_id=${userId}&bot_token=${BOT_TOKEN}`;
       
       await ctx.reply(
         `🔗 **Step 1: Connect Wallet**\n\n` +
@@ -435,7 +436,8 @@ bot.action('check_wallet_connection', async (ctx) => {
   
   try {
     // Check if wallet is connected via the web server
-    const response = await fetch(`http://localhost:3000/api/wallet-status/${userId}`);
+    const domain = process.env.DOMAIN || 'http://localhost:3000';
+    const response = await fetch(`${domain}/api/wallet-status/${userId}`);
     const data = await response.json();
     
     if (data.connected && data.wallet) {
