@@ -438,7 +438,7 @@ bot.action('check_wallet_connection', async (ctx) => {
     // Check if wallet is connected via the web server
     const domain = process.env.DOMAIN || 'http://localhost:3000';
     const response = await fetch(`${domain}/api/wallet-status/${userId}`);
-    const data = await response.json();
+    const data = await response.json() as any;
     
     if (data.connected && data.wallet) {
       // Wallet is connected!
