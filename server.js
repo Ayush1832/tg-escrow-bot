@@ -4,9 +4,24 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(express.json());
+
+// Serve manifest with dynamic origin (define BEFORE static middleware)
+app.get('/tonconnect-manifest.json', (req, res) => {
+    const origin = `${req.protocol}://${req.get('host')}`;
+    const manifest = {
+        url: origin,
+        name: 'TON Escrow Bot',
+        iconUrl: 'https://ton-connect.github.io/demo-dapp-with-react/favicon.ico',
+        termsOfUseUrl: `${origin}/terms`,
+        privacyPolicyUrl: `${origin}/privacy`
+    };
+    res.setHeader('Content-Type', 'application/json');
+    res.status(200).send(JSON.stringify(manifest));
+});
+
 // Serve static files
 app.use(express.static('public'));
-app.use(express.json());
 
 // Store wallet connections temporarily
 const walletConnections = new Map();
@@ -22,15 +37,6 @@ app.get('/connect', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'wallet-connect.html'));
 });
 
-// Serve manifest with dynamic origin replacement
-app.get('/tonconnect-manifest.json', (req, res) => {
-    const origin = `${req.protocol}://${req.get('host')}`;
-    const manifestPath = path.join(__dirname, 'public', 'tonconnect-manifest.json');
-    let manifest = require('fs').readFileSync(manifestPath, 'utf-8');
-    manifest = manifest.replace(/__ORIGIN__/g, origin);
-    res.setHeader('Content-Type', 'application/json');
-    res.send(manifest);
-});
 
 // Handle wallet connection callback
 app.post('/api/wallet-connected', (req, res) => {
