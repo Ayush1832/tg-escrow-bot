@@ -8,14 +8,21 @@ export class TONClient {
 
   constructor() {
     this.isTestnet = process.env.TON_NETWORK === 'testnet';
-    
-    const endpoint = this.isTestnet 
+
+    const defaultEndpoint = this.isTestnet
       ? 'https://testnet.toncenter.com/api/v2/jsonRPC'
       : 'https://toncenter.com/api/v2/jsonRPC';
-    
+
+    const endpoint = process.env.TON_RPC_ENDPOINT || defaultEndpoint;
+    const apiKey = process.env.TON_API_KEY || undefined;
+
+    console.log(
+      `🌐 TON client config → network: ${this.isTestnet ? 'testnet' : 'mainnet'}, endpoint: ${endpoint}, apiKey: ${apiKey ? 'present' : 'missing'}`
+    );
+
     this.client = new TonClient({
       endpoint,
-      apiKey: process.env.TON_API_KEY || undefined
+      apiKey
     });
   }
 

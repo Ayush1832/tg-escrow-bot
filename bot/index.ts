@@ -11,7 +11,7 @@ import fetch from 'node-fetch';
 
 // Bot configuration
 const BOT_TOKEN = process.env.BOT_TOKEN!;
-const ADMIN_USER_ID = parseInt(process.env.ADMIN_USER_ID || '0');
+const ADMIN_USER_ID = Number(process.env.ADMIN_USER_ID || 0);
 
 if (!BOT_TOKEN) {
   console.error('❌ BOT_TOKEN not found in environment variables');
@@ -411,7 +411,7 @@ bot.action('start_sell_flow', async (ctx) => {
         {
           parse_mode: 'Markdown',
           ...Markup.inlineKeyboard([
-            [Markup.button.url('🔗 Connect Wallet', connectionUrl)],
+            [Markup.button.webApp('🔗 Connect Wallet', connectionUrl)],
             [Markup.button.callback('✅ Check Connection', 'check_wallet_connection')],
             [Markup.button.callback('❌ Cancel', 'cancel_sell')]
           ])

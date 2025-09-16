@@ -22,6 +22,16 @@ app.get('/connect', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'wallet-connect.html'));
 });
 
+// Serve manifest with dynamic origin replacement
+app.get('/tonconnect-manifest.json', (req, res) => {
+    const origin = `${req.protocol}://${req.get('host')}`;
+    const manifestPath = path.join(__dirname, 'public', 'tonconnect-manifest.json');
+    let manifest = require('fs').readFileSync(manifestPath, 'utf-8');
+    manifest = manifest.replace(/__ORIGIN__/g, origin);
+    res.setHeader('Content-Type', 'application/json');
+    res.send(manifest);
+});
+
 // Handle wallet connection callback
 app.post('/api/wallet-connected', (req, res) => {
     const { userId, wallet, botToken } = req.body;

@@ -1,7 +1,7 @@
 {
-  "url": "https://your-domain.com/tonconnect-manifest.json",
+  "url": "__ORIGIN__/tonconnect-manifest.json",
   "name": "TON Escrow Bot",
-  "iconUrl": "https://your-domain.com/icon.png",
-  "termsOfUseUrl": "https://your-domain.com/terms",
-  "privacyPolicyUrl": "https://your-domain.com/privacy"
+  "iconUrl": "__ORIGIN__/icon.png",
+  "termsOfUseUrl": "__ORIGIN__/terms",
+  "privacyPolicyUrl": "__ORIGIN__/privacy"
 }
