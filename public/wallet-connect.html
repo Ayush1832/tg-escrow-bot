@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Connect Wallet - TON Escrow Bot</title>
-    <script src="https://unpkg.com/@tonconnect/sdk@latest/dist/tonconnect-sdk.min.js"></script>
+    <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body {
@@ -118,8 +118,9 @@
 
     <script>
         // Initialize TON Connect
-        const tonConnect = new TonConnect({
-            manifestUrl: `${window.location.origin}/tonconnect-manifest.json`
+        const tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
+            manifestUrl: `${window.location.origin}/tonconnect-manifest.json`,
+            buttonRootId: undefined
         });
 
         const connectBtn = document.getElementById('connectBtn');
@@ -138,7 +139,8 @@
                 connectBtn.textContent = 'Connecting...';
                 showStatus('Connecting to wallet...', 'info');
 
-                const universalLink = tonConnect.connect({
+                // Provide tonProof (optional but recommended)
+                tonConnectUI.setConnectRequestParameters({
                     tonProof: {
                         version: 'v2',
                         nonce: generateNonce(),
@@ -146,11 +148,18 @@
                     }
                 });
 
-                if (universalLink) {
-                    window.location.href = universalLink;
-                } else {
-                    throw new Error('Failed to generate connection link');
-                }
+                // Prefer Telegram Wallet inside Telegram WebApp
+                try {
+                    tonConnectUI.uiOptions = {
+                        walletsList: {
+                            includeWallets: [
+                                { appName: 'telegram-wallet' }
+                            ]
+                        }
+                    };
+                } catch (e) { /* ignore */ }
+
+                await tonConnectUI.openModal();
             } catch (error) {
                 console.error('Connection error:', error);
                 showStatus('Connection failed. Please try again.', 'error');
@@ -162,12 +171,10 @@
         connectBtn.addEventListener('click', startConnectFlow);
 
         // Listen for wallet connection
-        tonConnect.onStatusChange((wallet) => {
-            if (wallet) {
+        tonConnectUI.onStatusChange((wallet) => {
+            if (wallet && wallet.account) {
                 showStatus('Wallet connected successfully!', 'success');
                 showWalletInfo(wallet);
-                
-                // Send connection info back to bot
                 sendConnectionToBot(wallet);
             }
         });
@@ -215,11 +222,12 @@
         }
 
         // Check if already connected
-        const currentWallet = tonConnect.getWallet();
-        if (currentWallet) {
-            showStatus('Wallet already connected!', 'success');
-            showWalletInfo(currentWallet);
-        }
+        tonConnectUI.connectionRestored.then((restored) => {
+            if (restored && tonConnectUI.wallet) {
+                showStatus('Wallet already connected!', 'success');
+                showWalletInfo(tonConnectUI.wallet);
+            }
+        });
 
         // Auto-start connect when opened inside Telegram WebApp
         if (window.Telegram && window.Telegram.WebApp) {
@@ -228,6 +236,31 @@
                 startConnectFlow();
             } catch (e) {
                 // ignore
+            }
+        }
+
+        // Close WebApp after successful send
+        async function sendConnectionToBot(wallet) {
+            try {
+                const response = await fetch('/api/wallet-connected', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId: userId, wallet: wallet, botToken: botToken })
+                });
+
+                if (response.ok) {
+                    showStatus('Connection sent to bot successfully!', 'success');
+                    if (window.Telegram && window.Telegram.WebApp) {
+                        setTimeout(() => window.Telegram.WebApp.close(), 800);
+                    }
+                } else {
+                    throw new Error('Failed to send connection to bot');
+                }
+            } catch (error) {
+                console.error('Error sending to bot:', error);
+                showStatus('Connected but failed to notify bot. Please try again.', 'error');
+                connectBtn.disabled = false;
+                connectBtn.textContent = 'Connect Wallet';
             }
         }
     </script>
