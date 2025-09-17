@@ -58,6 +58,13 @@ app.post('/api/wallet-connected', (req, res) => {
     res.json({ success: true, message: 'Wallet connection stored' });
 });
 
+// Disconnect wallet session for a user
+app.post('/api/wallet-disconnect/:userId', (req, res) => {
+    const { userId } = req.params;
+    walletConnections.delete(userId);
+    res.json({ success: true });
+});
+
 // Get wallet connection status
 app.get('/api/wallet-status/:userId', (req, res) => {
     const { userId } = req.params;

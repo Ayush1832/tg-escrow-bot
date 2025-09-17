@@ -382,12 +382,17 @@ bot.action('start_sell_flow', async (ctx) => {
     
     await ctx.reply(
       `✅ **Wallet Connected!**\n\n` +
-      `Connected wallet: \`${Address.parse(wallet!.address).toString()}\`\n\n` +
+      `Connected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n` +
       `**Step 2: Buyer Information**\n\n` +
       `Please enter the buyer's Telegram username (without @):\n\n` +
       `Example: \`john_doe\`\n\n` +
       `Type the username or /cancel to abort:`,
-      { parse_mode: 'Markdown' }
+      { 
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🔌 Disconnect Wallet', 'disconnect_wallet')]
+        ])
+      }
     );
   } else {
     session.step = 'sell_wallet_connect';
@@ -443,7 +448,7 @@ bot.action('check_wallet_connection', async (ctx) => {
     
     if (data.connected && data.wallet) {
       // Wallet is connected!
-      const normalizedAddress = Address.parse(data.wallet.account.address).toString();
+      const normalizedAddress = Address.parse(data.wallet.account.address).toString({ bounceable: false });
       const walletInfo = {
         address: normalizedAddress,
         publicKey: data.wallet.account.publicKey,
@@ -461,7 +466,12 @@ bot.action('check_wallet_connection', async (ctx) => {
         `Please enter the buyer's Telegram username (without @):\n\n` +
         `Example: \`john_doe\`\n\n` +
         `Type the username or /cancel to abort:`,
-        { parse_mode: 'Markdown' }
+        { 
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('🔌 Disconnect Wallet', 'disconnect_wallet')]
+          ])
+        }
       );
     } else {
       await ctx.reply(
@@ -496,6 +506,28 @@ bot.action('cancel_sell', async (ctx) => {
     `You can start a new trade anytime with /sell command.`,
     { parse_mode: 'Markdown' }
   );
+});
+
+// Disconnect wallet
+bot.action('disconnect_wallet', async (ctx) => {
+  await ctx.answerCbQuery();
+  const userId = ctx.from!.id;
+  const domain = process.env.DOMAIN || 'http://localhost:3000';
+  try {
+    // Clear server-side session
+    await fetch(`${domain}/api/wallet-disconnect/${userId}`, { method: 'POST' });
+  } catch (e) {
+    console.warn('Failed to clear server wallet session:', e);
+  }
+  // Clear bot-side session
+  tonConnectService.disconnectWallet(userId);
+  const session = getUserSession(userId);
+  session.walletAddress = undefined;
+  await ctx.reply('🔌 Wallet disconnected. You can connect again anytime.', {
+    ...Markup.inlineKeyboard([
+      [Markup.button.callback('🔗 Connect Again', 'start_sell_flow')]
+    ])
+  });
 });
 
 bot.action('sell_help', async (ctx) => {

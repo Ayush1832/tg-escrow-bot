@@ -185,8 +185,17 @@
             status.style.display = 'block';
         }
 
+        // Normalize to non-bounceable for display (UQ…)
+        function toNonBounceable(address) {
+            try {
+                if (address.includes(':')) return address; // raw form; bot/server will normalize
+                if (address.startsWith('EQ')) return 'U' + address.slice(1);
+                return address;
+            } catch { return address; }
+        }
+
         function showWalletInfo(wallet) {
-            walletAddress.textContent = wallet.account.address;
+            walletAddress.textContent = toNonBounceable(wallet.account.address);
             walletInfo.style.display = 'block';
         }
 
@@ -197,21 +206,22 @@
 
         async function sendConnectionToBot(wallet) {
             try {
-                // Send connection info back to the bot
+                // Send connection info back to the bot (normalized address)
+                const normalizedAddress = toNonBounceable(wallet.account.address);
+                const payload = { userId: userId, wallet: { ...wallet, account: { ...wallet.account, address: normalizedAddress } }, botToken: botToken };
                 const response = await fetch('/api/wallet-connected', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({
-                        userId: userId,
-                        wallet: wallet,
-                        botToken: botToken
-                    })
+                    body: JSON.stringify(payload)
                 });
 
                 if (response.ok) {
                     showStatus('Connection sent to bot successfully!', 'success');
+                    if (window.Telegram && window.Telegram.WebApp) {
+                        setTimeout(() => window.Telegram.WebApp.close(), 800);
+                    }
                 } else {
                     throw new Error('Failed to send connection to bot');
                 }
@@ -239,30 +249,8 @@
             }
         }
 
-        // Close WebApp after successful send
-        async function sendConnectionToBot(wallet) {
-            try {
-                const response = await fetch('/api/wallet-connected', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ userId: userId, wallet: wallet, botToken: botToken })
-                });
-
-                if (response.ok) {
-                    showStatus('Connection sent to bot successfully!', 'success');
-                    if (window.Telegram && window.Telegram.WebApp) {
-                        setTimeout(() => window.Telegram.WebApp.close(), 800);
-                    }
-                } else {
-                    throw new Error('Failed to send connection to bot');
-                }
-            } catch (error) {
-                console.error('Error sending to bot:', error);
-                showStatus('Connected but failed to notify bot. Please try again.', 'error');
-                connectBtn.disabled = false;
-                connectBtn.textContent = 'Connect Wallet';
-            }
-        }
+        // Ensure single definition only; close WebApp after success
+        // (Replaces duplicate below)
     </script>
 </body>
 </html>
