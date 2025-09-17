@@ -1,6 +1,7 @@
 // bot/index.ts
 import 'dotenv/config';
 import { Telegraf, Markup } from 'telegraf';
+import { Address } from '@ton/core';
 import { escrowUtils } from './utils/escrowUtils';
 import { walletUtils } from './utils/walletUtils';
 import { tonClient } from './utils/tonClient';
@@ -381,7 +382,7 @@ bot.action('start_sell_flow', async (ctx) => {
     
     await ctx.reply(
       `✅ **Wallet Connected!**\n\n` +
-      `Connected wallet: \`${tonConnectService.formatAddress(wallet!.address)}\`\n\n` +
+      `Connected wallet: \`${Address.parse(wallet!.address).toString()}\`\n\n` +
       `**Step 2: Buyer Information**\n\n` +
       `Please enter the buyer's Telegram username (without @):\n\n` +
       `Example: \`john_doe\`\n\n` +
@@ -442,19 +443,20 @@ bot.action('check_wallet_connection', async (ctx) => {
     
     if (data.connected && data.wallet) {
       // Wallet is connected!
+      const normalizedAddress = Address.parse(data.wallet.account.address).toString();
       const walletInfo = {
-        address: data.wallet.account.address,
+        address: normalizedAddress,
         publicKey: data.wallet.account.publicKey,
         connected: true
       };
       
       tonConnectService.connectedWallets.set(userId, walletInfo);
-      session.walletAddress = data.wallet.account.address;
+      session.walletAddress = normalizedAddress;
       session.step = 'sell_buyer_username';
       
       await ctx.reply(
         `✅ **Wallet Connected Successfully!**\n\n` +
-        `Connected wallet: \`${tonConnectService.formatAddress(data.wallet.account.address)}\`\n\n` +
+        `Connected wallet: \`${normalizedAddress}\`\n\n` +
         `**Step 2: Buyer Information**\n\n` +
         `Please enter the buyer's Telegram username (without @):\n\n` +
         `Example: \`john_doe\`\n\n` +
