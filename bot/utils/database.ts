@@ -10,6 +10,8 @@ export interface TradeRecord {
   buyerUsername?: string;
   amount: string;
   commissionBps: number;
+  groupId?: number;
+  groupTitle?: string;
   status: 'pending' | 'active' | 'dispute' | 'completed' | 'cancelled';
   createdAt: string;
   updatedAt: string;
@@ -82,6 +84,16 @@ export class Database {
       return trades.find(t => t.escrowAddress === escrowAddress) || null;
     } catch (error) {
       console.error('❌ Error getting trade:', error);
+      return null;
+    }
+  }
+
+  async getTradeByGroupId(groupId: number): Promise<TradeRecord | null> {
+    try {
+      const trades = this.loadTrades();
+      return trades.find(t => t.groupId === groupId) || null;
+    } catch (error) {
+      console.error('❌ Error getting trade by group ID:', error);
       return null;
     }
   }

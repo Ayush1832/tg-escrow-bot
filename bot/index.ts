@@ -1232,6 +1232,121 @@ bot.action('start_trading', async (ctx) => {
 });
 
 // =============================================================================
+// GROUP MESSAGE HANDLERS
+// =============================================================================
+
+// Handle messages in trade groups
+bot.on('message', async (ctx) => {
+  // Skip if not a group or supergroup
+  if (!ctx.chat || (ctx.chat.type !== 'group' && ctx.chat.type !== 'supergroup')) {
+    return;
+  }
+  
+  const groupId = ctx.chat.id;
+  const userId = ctx.from?.id;
+  const msg: any = ctx.message as any;
+  const text: string | undefined = typeof msg?.text === 'string' ? msg.text : undefined;
+  
+  if (!userId || !text) return;
+  
+  // Check if this is a trade group
+  const trade = await database.getTradeByGroupId(groupId);
+  if (!trade) return;
+  
+  // Handle different trade commands in group
+  if (text.startsWith('/status')) {
+    const args = text.split(' ');
+    const escrowAddress = args[1] || trade.escrowAddress;
+    
+    try {
+      const tradeInfo = await escrowUtils.getTradeInfo(escrowAddress);
+      if (!tradeInfo) {
+        await ctx.reply('❌ Trade not found. Please check the address and try again.');
+        return;
+      }
+
+      const statusText = escrowUtils.getStatusText(tradeInfo.status);
+      const timeRemaining = escrowUtils.getTimeRemaining(tradeInfo.deadline);
+      const isExpired = escrowUtils.isExpired(tradeInfo.deadline);
+      const fees = escrowUtils.calculateFees(tradeInfo.amount, tradeInfo.commissionBps);
+
+      await ctx.reply(
+        `📊 **Trade Status**\n\n` +
+        `**Address:** \`${escrowAddress}\`\n` +
+        `**Status:** ${statusText}\n` +
+        `**Amount:** ${escrowUtils.formatAmount(tradeInfo.amount)} USDT\n` +
+        `**Deposited:** ${escrowUtils.formatAmount(tradeInfo.deposited)} USDT\n` +
+        `**Verified:** ${tradeInfo.depositVerified ? '✅' : '❌'}\n` +
+        `**Time Left:** ${isExpired ? 'Expired' : timeRemaining}\n\n` +
+        `**Fee Breakdown:**\n` +
+        `• Platform fee: ${escrowUtils.formatAmount(fees.totalFee)} USDT\n` +
+        `• To buyer: ${escrowUtils.formatAmount(fees.toBuyer)} USDT\n\n` +
+        `**Actions:**`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('🔄 Refresh', `status_${escrowAddress}`)],
+            [Markup.button.callback('💰 Deposit', `deposit_${escrowAddress}`)],
+            [Markup.button.callback('✅ Confirm Payment', `confirm_${escrowAddress}`)],
+            [Markup.button.callback('⚠️ Raise Dispute', `dispute_${escrowAddress}`)]
+          ])
+        }
+      );
+    } catch (error) {
+      console.error('❌ Error checking status:', error);
+      await ctx.reply('❌ Error checking trade status');
+    }
+  }
+  
+  // Handle payment confirmation in group
+  else if (text.toLowerCase().includes('payment received') || text.toLowerCase().includes('paid')) {
+    // Only seller can confirm payment
+    if (userId === trade.sellerUserId) {
+      await ctx.reply(
+        `✅ **Payment Confirmation**\n\n` +
+        `@${ctx.from?.username} has confirmed receiving payment.\n\n` +
+        `**Next:** Bot will release USDT to buyer.\n\n` +
+        `**Are you sure you want to confirm payment?**`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('✅ Yes, Confirm', `confirm_yes_${trade.escrowAddress}`)],
+            [Markup.button.callback('❌ No, Cancel', `confirm_no_${trade.escrowAddress}`)]
+          ])
+        }
+      );
+    } else {
+      await ctx.reply('❌ Only the seller can confirm payment received.');
+    }
+  }
+  
+  // Handle dispute raising
+  else if (text.toLowerCase().includes('dispute') || text.toLowerCase().includes('problem')) {
+    await ctx.reply(
+      `⚠️ **Raise Dispute**\n\n` +
+      `**When to raise a dispute:**\n` +
+      `• Seller not responding\n` +
+      `• Payment made but no confirmation\n` +
+      `• Seller asking for more money\n` +
+      `• Any suspicious behavior\n\n` +
+      `**What happens next:**\n` +
+      `• Admin reviews the case\n` +
+      `• You provide payment proof\n` +
+      `• Admin makes fair decision\n` +
+      `• Funds released accordingly\n\n` +
+      `**Are you sure you want to raise a dispute?**`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('⚠️ Yes, Raise Dispute', `dispute_yes_${trade.escrowAddress}`)],
+          [Markup.button.callback('❌ No, Cancel', `dispute_no_${trade.escrowAddress}`)]
+        ])
+      }
+    );
+  }
+});
+
+// =============================================================================
 // TEXT MESSAGE HANDLERS (CONVERSATION FLOW)
 // =============================================================================
 
@@ -1269,14 +1384,26 @@ bot.on('text', async (ctx) => {
     session.buyerUsername = text;
     session.step = 'sell_amount';
     
+    // Provide deep-link to create a new group where the bot is a member
+    const botUsername = bot.botInfo?.username;
+    const groupTitle = `Escrow Trade: @${ctx.from?.username} ↔ @${text}`;
+    const payload = encodeURIComponent(`create_trade_group|seller=${ctx.from?.id}|buyer=@${text}|title=${groupTitle}`);
+    const startGroupLink = `https://t.me/${botUsername}?startgroup=${payload}`;
+
     await ctx.reply(
+      `👥 **Create Private Group**\n\n` +
+      `Tap the button below to create a private group with the bot. After creating, add the buyer (@${text}) into the group. The bot will initialize the trade there.\n\n` +
+      `Suggested title:\n` +
+      `• ${groupTitle}\n\n` +
+      `After the group is created, send any message and the bot will set it up.\n\n` +
       `💰 **Step 3: Trade Amount**\n\n` +
-      `Enter the amount of USDT to trade:\n\n` +
-      `Example: "100" (for 100 USDT)\n\n` +
-      `Minimum: 10 USDT\n` +
-      `Maximum: 10,000 USDT\n\n` +
-      `Type the amount or /cancel to abort:`,
-      { parse_mode: 'Markdown' }
+      `Enter the amount of USDT to trade (you can also set this in the group):`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.url('➕ Create Trade Group', startGroupLink)]
+        ])
+      }
     );
   } else if (session.step === 'sell_amount') {
     const amount = parseFloat(text);
@@ -1350,13 +1477,32 @@ bot.on('text', async (ctx) => {
       if (escrowAddress) {
         const fees = escrowUtils.calculateFees(amountUnits, commissionBps);
         
+        // Store trade info for group access
+        const tradeInfo = {
+          escrowAddress,
+          sellerUserId: userId!,
+          sellerUsername: ctx.from?.username || 'unknown',
+          buyerUsername: session.buyerUsername,
+          amount: session.amount.toString(),
+          commissionBps,
+          groupId: session.groupId,
+          groupTitle: session.groupTitle,
+          status: 'pending' as const,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        
+        // Store in database
+        await database.saveTrade(tradeInfo);
+        
+        // Send success message to DM
         await ctx.reply(
           `✅ **Escrow Deployed Successfully!**\n\n` +
           `**Contract Address:**\n` +
           `\`${escrowAddress}\`\n\n` +
           `**Trade Summary:**\n` +
           `• Seller: @${ctx.from?.username}\n` +
-          `• Wallet: \`${tonConnectService.formatAddress(wallet.address)}\`\n` +
+          `• Wallet: \`${wallet.address}\`\n` +
           `• Buyer: @${session.buyerUsername}\n` +
           `• Amount: ${session.amount} USDT\n` +
           `• Commission: ${commissionBps / 100}%\n\n` +
@@ -1365,11 +1511,10 @@ bot.on('text', async (ctx) => {
           `• To buyer: ${escrowUtils.formatAmount(fees.toBuyer)} USDT\n\n` +
           `**Next Steps:**\n` +
           `1. Deposit ${session.amount} USDT into the escrow\n` +
-          `2. Share this address with buyer: @${session.buyerUsername}\n` +
+          `2. Continue in the private group\n` +
           `3. Wait for buyer's off-chain payment\n` +
           `4. Confirm payment to release USDT\n\n` +
-          `**Monitor your trade:**\n` +
-          `Use /status ${escrowAddress} to check progress`,
+          `**Go to your private group to continue the transaction!**`,
           {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard([
@@ -1378,6 +1523,34 @@ bot.on('text', async (ctx) => {
             ])
           }
         );
+        
+        // Send detailed info to group if it exists
+        if (session.groupId) {
+          await ctx.telegram.sendMessage(
+            session.groupId,
+            `🚀 **Escrow Contract Deployed!**\n\n` +
+            `**Contract Address:**\n` +
+            `\`${escrowAddress}\`\n\n` +
+            `**Trade Details:**\n` +
+            `• Amount: ${session.amount} USDT\n` +
+            `• Commission: ${commissionBps / 100}%\n` +
+            `• Platform fee: ${escrowUtils.formatAmount(fees.totalFee)} USDT\n` +
+            `• Buyer receives: ${escrowUtils.formatAmount(fees.toBuyer)} USDT\n\n` +
+            `**Next Steps:**\n` +
+            `1. **Seller:** Deposit ${session.amount} USDT to the contract\n` +
+            `2. **Buyer:** Make off-chain payment to seller\n` +
+            `3. **Seller:** Confirm payment received\n` +
+            `4. **Bot:** Release USDT to buyer\n\n` +
+            `**Status:** ⏳ Waiting for USDT deposit`,
+            {
+              parse_mode: 'Markdown',
+              ...Markup.inlineKeyboard([
+                [Markup.button.callback('📊 Check Status', `status_${escrowAddress}`)],
+                [Markup.button.callback('💰 Deposit USDT', `deposit_${escrowAddress}`)]
+              ])
+            }
+          );
+        }
       } else {
         await ctx.reply('❌ Failed to deploy escrow contract. Please try again.');
       }
