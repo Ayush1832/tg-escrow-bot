@@ -49,8 +49,8 @@ bot.start(async (ctx) => {
     `Welcome to the secure USDT escrow service on TON blockchain!\n\n` +
     `**Available Commands:**\n` +
     `🛒 /sell - Start selling (create escrow)\n` +
-    `💰 /buy - Join as buyer\n` +
     `📊 /status - Check trade status\n` +
+    `🆔 /myid - Get your user ID\n` +
     `❓ /help - Get help\n\n` +
     `**For Admins:**\n` +
     `⚙️ /admin - Admin panel\n\n` +
@@ -64,7 +64,6 @@ bot.start(async (ctx) => {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([
         [Markup.button.callback('🛒 Start Selling', 'start_sell')],
-        [Markup.button.callback('💰 Start Buying', 'start_buy')],
         [Markup.button.callback('❓ Help', 'help_main')]
       ])
     }
@@ -81,7 +80,7 @@ bot.help(async (ctx) => {
     `• Confirm when buyer pays off-chain\n` +
     `• Get paid minus platform fees\n\n` +
     `**For Buyers:**\n` +
-    `• Use /buy to join a trade\n` +
+    `• Join private trade groups created by sellers\n` +
     `• Make off-chain payment to seller\n` +
     `• Receive USDT when seller confirms\n` +
     `• Raise dispute if needed\n\n` +
@@ -91,6 +90,28 @@ bot.help(async (ctx) => {
     `• Deadline protection\n` +
     `• Double-payout prevention\n\n` +
     `**Support:** Contact @admin`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
+// My ID command - helps users find their user ID
+bot.command('myid', async (ctx) => {
+  const userId = ctx.from?.id;
+  const username = ctx.from?.username;
+  
+  console.log(`🆔 User ${username} (${userId}) requested their ID`);
+  
+  await ctx.reply(
+    `🆔 **Your Telegram Information**\n\n` +
+    `**User ID:** \`${userId}\`\n` +
+    `**Username:** ${username ? `@${username}` : 'Not set'}\n\n` +
+    `**How to use:**\n` +
+    `• Share your **User ID** with sellers if you don't have a username\n` +
+    `• Sellers can use either your username or User ID to create trades\n\n` +
+    `**For trading:**\n` +
+    `• If you have a username: sellers can use \`@${username || 'your_username'}\`\n` +
+    `• If no username: sellers can use your User ID: \`${userId}\`\n\n` +
+    `**Privacy:** Your User ID is safe to share for trading purposes.`,
     { parse_mode: 'Markdown' }
   );
 });
@@ -132,7 +153,7 @@ bot.command('about', async (ctx) => {
     {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([
-        [Markup.button.callback('🚀 Start Trading', 'start_trading')],
+        [Markup.button.callback('🛒 Start Selling', 'start_sell')],
         [Markup.button.callback('❓ Help', 'help_main')]
       ])
     }
@@ -170,38 +191,8 @@ bot.command('sell', async (ctx) => {
 });
 
 // =============================================================================
-// BUYER COMMANDS
+// BUYER COMMANDS (Group-only)
 // =============================================================================
-
-// Buy command
-bot.command('buy', async (ctx) => {
-  const userId = ctx.from?.id;
-  const username = ctx.from?.username;
-  
-  console.log(`💰 Buyer ${username} (${userId}) started buy flow`);
-  
-  await ctx.reply(
-    `💰 **Join as Buyer**\n\n` +
-    `Ready to buy USDT through our secure escrow?\n\n` +
-    `**What you need:**\n` +
-    `• Escrow contract address\n` +
-    `• Your TON wallet address\n` +
-    `• Off-chain payment method\n\n` +
-    `**How it works:**\n` +
-    `1. Seller creates escrow with USDT\n` +
-    `2. You make off-chain payment\n` +
-    `3. Seller confirms → USDT released to you\n` +
-    `4. Disputes handled by admin\n\n` +
-    `**Ready to start?**`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('🚀 Join Trade', 'start_buy_flow')],
-        [Markup.button.callback('❓ Help', 'buy_help')]
-      ])
-    }
-  );
-});
 
 // =============================================================================
 // STATUS COMMAND
@@ -284,8 +275,7 @@ bot.command('status', async (ctx) => {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
           [Markup.button.callback('❓ Help', 'status_help')],
-          [Markup.button.callback('🛒 Start Selling', 'start_sell')],
-          [Markup.button.callback('💰 Start Buying', 'start_buy')]
+          [Markup.button.callback('🛒 Start Selling', 'start_sell')]
         ])
       }
     );
@@ -339,11 +329,6 @@ bot.action('start_sell', async (ctx) => {
   await ctx.reply('🛒 Use /sell command to start selling USDT');
 });
 
-bot.action('start_buy', async (ctx) => {
-  await ctx.answerCbQuery();
-  await ctx.reply('💰 Use /buy command to start buying USDT');
-});
-
 bot.action('help_main', async (ctx) => {
   await ctx.answerCbQuery();
   await ctx.reply(
@@ -351,14 +336,14 @@ bot.action('help_main', async (ctx) => {
     `**Commands:**\n` +
     `• /start - Start the bot\n` +
     `• /sell - Start selling USDT\n` +
-    `• /buy - Start buying USDT\n` +
     `• /status - Check trade status\n` +
+    `• /myid - Get your user ID\n` +
     `• /help - Show this help\n` +
     `• /admin - Admin panel (admin only)\n\n` +
     `**How to use:**\n` +
-    `1. Choose your role (seller or buyer)\n` +
-    `2. Follow the step-by-step process\n` +
-    `3. Complete your trade securely\n\n` +
+    `1. Use /sell to create an escrow trade\n` +
+    `2. Add buyer to private group\n` +
+    `3. Complete trade in the group\n\n` +
     `**Need more help?** Contact @admin`,
     { parse_mode: 'Markdown' }
   );
@@ -384,9 +369,14 @@ bot.action('start_sell_flow', async (ctx) => {
       `✅ **Wallet Connected!**\n\n` +
       `Connected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n` +
       `**Step 2: Buyer Information**\n\n` +
-      `Please enter the buyer's Telegram username (without @):\n\n` +
-      `Example: \`john_doe\`\n\n` +
-      `Type the username or /cancel to abort:`,
+      `Please enter the buyer's Telegram username or user ID:\n\n` +
+      `**Options:**\n` +
+      `• **Username:** \`john_doe\` (without @)\n` +
+      `• **User ID:** \`123456789\` (numeric ID)\n\n` +
+      `**Examples:**\n` +
+      `• Username: \`john_doe\`\n` +
+      `• User ID: \`123456789\`\n\n` +
+      `Type the username/ID or /cancel to abort:`,
       { 
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
@@ -463,9 +453,14 @@ bot.action('check_wallet_connection', async (ctx) => {
         `✅ **Wallet Connected Successfully!**\n\n` +
         `Connected wallet: \`${normalizedAddress}\`\n\n` +
         `**Step 2: Buyer Information**\n\n` +
-        `Please enter the buyer's Telegram username (without @):\n\n` +
-        `Example: \`john_doe\`\n\n` +
-        `Type the username or /cancel to abort:`,
+        `Please enter the buyer's Telegram username or user ID:\n\n` +
+        `**Options:**\n` +
+        `• **Username:** \`john_doe\` (without @)\n` +
+        `• **User ID:** \`123456789\` (numeric ID)\n\n` +
+        `**Examples:**\n` +
+        `• Username: \`john_doe\`\n` +
+        `• User ID: \`123456789\`\n\n` +
+        `Type the username/ID or /cancel to abort:`,
         { 
           parse_mode: 'Markdown',
           ...Markup.inlineKeyboard([
@@ -559,54 +554,6 @@ bot.action('sell_help', async (ctx) => {
   );
 });
 
-// =============================================================================
-// BUYER FLOW CALLBACKS
-// =============================================================================
-
-bot.action('start_buy_flow', async (ctx) => {
-  await ctx.answerCbQuery();
-  
-  const session = getUserSession(ctx.from!.id);
-  session.step = 'buy_escrow';
-  
-  await ctx.reply(
-    `🔗 **Step 1: Escrow Address**\n\n` +
-    `Please provide the escrow contract address:\n\n` +
-    `**Format:** \`0:contract_address_here\`\n\n` +
-    `**Example:** \`0:1234567890abcdef...\`\n\n` +
-    `Type the address or /cancel to abort:`,
-    { parse_mode: 'Markdown' }
-  );
-});
-
-bot.action('buy_help', async (ctx) => {
-  await ctx.answerCbQuery();
-  
-  await ctx.reply(
-    `📖 **Buyer Guide**\n\n` +
-    `**Step 1: Join Trade**\n` +
-    `• Get escrow address from seller\n` +
-    `• Provide your TON wallet address\n` +
-    `• Review trade details\n\n` +
-    `**Step 2: Make Payment**\n` +
-    `• Pay seller off-chain (bank, PayPal, etc.)\n` +
-    `• Wait for seller confirmation\n` +
-    `• USDT released to your wallet\n\n` +
-    `**Step 3: Receive USDT**\n` +
-    `• Check your TON wallet\n` +
-    `• USDT appears after confirmation\n` +
-    `• Trade completed successfully\n\n` +
-    `**Security:**\n` +
-    `• Smart contract holds USDT\n` +
-    `• Admin handles disputes\n` +
-    `• Deadline protection\n\n` +
-    `**Fees:**\n` +
-    `• Platform fee deducted from amount\n` +
-    `• You receive USDT minus fees\n\n` +
-    `Ready to start? Use /buy again!`,
-    { parse_mode: 'Markdown' }
-  );
-});
 
 // =============================================================================
 // STATUS AND MONITORING CALLBACKS
@@ -1212,24 +1159,6 @@ bot.action('admin_cancel_expired', async (ctx) => {
   );
 });
 
-// Start trading
-bot.action('start_trading', async (ctx) => {
-  await ctx.answerCbQuery();
-  
-  await ctx.reply(
-    `🚀 **Start Trading**\n\n` +
-    `Ready to start trading USDT securely?\n\n` +
-    `**Choose your role:**`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('🛒 I Want to Sell', 'start_sell')],
-        [Markup.button.callback('💰 I Want to Buy', 'start_buy')],
-        [Markup.button.callback('❓ Need Help', 'help_main')]
-      ])
-    }
-  );
-});
 
 // =============================================================================
 // GROUP MESSAGE HANDLERS
@@ -1369,31 +1298,55 @@ bot.on('text', async (ctx) => {
   // =============================================================================
   
   if (session.step === 'sell_buyer_username') {
-    // Validate username format
-    if (!text.match(/^[a-zA-Z0-9_]{5,32}$/)) {
+    // Support both usernames and user IDs
+    let buyerIdentifier = text.trim();
+    let buyerUsername = '';
+    let buyerUserId: number | null = null;
+    
+    // Check if it's a user ID (numeric)
+    if (/^\d+$/.test(buyerIdentifier)) {
+      buyerUserId = parseInt(buyerIdentifier);
+      buyerUsername = `User_${buyerUserId}`;
+      console.log(`📝 Seller ${ctx.from?.username} (${userId}) entered buyer user ID: ${buyerUserId}`);
+    }
+    // Check if it's a valid username
+    else if (buyerIdentifier.match(/^[a-zA-Z0-9_]{5,32}$/)) {
+      buyerUsername = buyerIdentifier;
+      console.log(`📝 Seller ${ctx.from?.username} (${userId}) entered buyer username: @${buyerUsername}`);
+    }
+    // Invalid format
+    else {
       await ctx.reply(
-        `❌ **Invalid username format**\n\n` +
-        `Username must be 5-32 characters long and contain only letters, numbers, and underscores.\n\n` +
-        `Example: "john_doe" or "user123"\n\n` +
+        `❌ **Invalid format**\n\n` +
+        `Please provide either:\n` +
+        `• **Username:** \`john_doe\` (5-32 characters, letters/numbers/underscores)\n` +
+        `• **User ID:** \`123456789\` (numeric ID)\n\n` +
+        `**Examples:**\n` +
+        `• Username: \`john_doe\`\n` +
+        `• User ID: \`123456789\`\n\n` +
         `Try again or /cancel to abort:`,
         { parse_mode: 'Markdown' }
       );
       return;
     }
     
-    session.buyerUsername = text;
+    session.buyerUsername = buyerUsername;
+    session.buyerUserId = buyerUserId;
     session.step = 'sell_amount';
     
     // Provide deep-link to create a new group where the bot is a member
     const botUsername = bot.botInfo?.username;
-    const groupTitle = `Escrow Trade: @${ctx.from?.username} ↔ @${text}`;
-    const payload = encodeURIComponent(`create_trade_group|seller=${ctx.from?.id}|buyer=@${text}|title=${groupTitle}`);
+    const buyerDisplay = buyerUserId ? `User_${buyerUserId}` : `@${buyerUsername}`;
+    const groupTitle = `Escrow Trade: @${ctx.from?.username} ↔ ${buyerDisplay}`;
+    const payload = encodeURIComponent(`create_trade_group|seller=${ctx.from?.id}|buyer=${buyerUserId || buyerUsername}|title=${groupTitle}`);
     const startGroupLink = `https://t.me/${botUsername}?startgroup=${payload}`;
 
     await ctx.reply(
       `👥 **Create Private Group**\n\n` +
-      `Tap the button below to create a private group with the bot. After creating, add the buyer (@${text}) into the group. The bot will initialize the trade there.\n\n` +
-      `Suggested title:\n` +
+      `Tap the button below to create a private group with the bot. After creating, add the buyer (${buyerDisplay}) into the group. The bot will initialize the trade there.\n\n` +
+      `**Buyer Info:**\n` +
+      `• ${buyerUserId ? `User ID: \`${buyerUserId}\`` : `Username: @${buyerUsername}`}\n\n` +
+      `**Suggested group title:**\n` +
       `• ${groupTitle}\n\n` +
       `After the group is created, send any message and the bot will set it up.\n\n` +
       `💰 **Step 3: Trade Amount**\n\n` +
@@ -1560,106 +1513,6 @@ bot.on('text', async (ctx) => {
     }
   }
   
-  // =============================================================================
-  // BUYER FLOW HANDLERS
-  // =============================================================================
-  
-  else if (session.step === 'buy_escrow') {
-    if (!walletUtils.validateAddress(text)) {
-      await ctx.reply(
-        `❌ **Invalid address format**\n\n` +
-        `Please provide a valid TON address.\n\n` +
-        `**Format:** \`0:contract_address_here\`\n\n` +
-        `Try again or /cancel to abort:`,
-        { parse_mode: 'Markdown' }
-      );
-      return;
-    }
-    
-    session.escrowAddress = text;
-    session.step = 'buy_wallet';
-    
-    await ctx.reply('🔍 Checking trade information...');
-    
-    try {
-      const tradeInfo = await escrowUtils.getTradeInfo(text);
-      if (!tradeInfo) {
-        await ctx.reply('❌ Trade not found. Please check the address and try again.');
-        session.step = null;
-        return;
-      }
-
-      await ctx.reply(
-        `📋 **Trade Details**\n\n` +
-        `**Amount:** ${escrowUtils.formatAmount(tradeInfo.amount)} USDT\n` +
-        `**Commission:** ${tradeInfo.commissionBps / 100}%\n` +
-        `**Status:** ${escrowUtils.getStatusText(tradeInfo.status)}\n` +
-        `**Deposited:** ${escrowUtils.formatAmount(tradeInfo.deposited)} USDT\n\n` +
-        `**Step 2: Your Wallet Address**\n\n` +
-        `Please provide your TON wallet address to receive USDT:\n\n` +
-        `**Format:** \`0:your_wallet_address\`\n\n` +
-        `Type your address or /cancel to abort:`,
-        { parse_mode: 'Markdown' }
-      );
-    } catch (error) {
-      console.error('❌ Error getting trade info:', error);
-      await ctx.reply('❌ Error getting trade information. Please try again.');
-      session.step = null;
-    }
-  } else if (session.step === 'buy_wallet') {
-    if (!walletUtils.validateAddress(text)) {
-      await ctx.reply(
-        `❌ **Invalid wallet address**\n\n` +
-        `Please provide a valid TON wallet address.\n\n` +
-        `**Format:** \`0:your_wallet_address\`\n\n` +
-        `Try again or /cancel to abort:`,
-        { parse_mode: 'Markdown' }
-      );
-      return;
-    }
-    
-    session.buyerWallet = text;
-    session.step = null;
-    
-    try {
-      const tradeInfo = await escrowUtils.getTradeInfo(session.escrowAddress);
-      if (!tradeInfo) {
-        await ctx.reply('❌ Trade not found. Please check the address and try again.');
-        return;
-      }
-
-      const fees = escrowUtils.calculateFees(tradeInfo.amount, tradeInfo.commissionBps);
-      const toBuyer = escrowUtils.formatAmount(fees.toBuyer);
-      
-      await ctx.reply(
-        `✅ **Trade Joined Successfully!**\n\n` +
-        `**Escrow:** \`${walletUtils.formatAddress(session.escrowAddress)}\`\n` +
-        `**Your Wallet:** \`${walletUtils.formatAddress(session.buyerWallet)}\`\n` +
-        `**Amount:** ${toBuyer} USDT\n\n` +
-        `**Trade Details:**\n` +
-        `• Amount: ${escrowUtils.formatAmount(tradeInfo.amount)} USDT\n` +
-        `• Platform fee: ${escrowUtils.formatAmount(fees.totalFee)} USDT\n` +
-        `• You'll receive: ${toBuyer} USDT\n\n` +
-        `**Next Steps:**\n` +
-        `1. Make off-chain payment to seller\n` +
-        `2. Wait for seller confirmation\n` +
-        `3. Receive USDT in your wallet\n\n` +
-        `**Monitor your trade:**\n` +
-        `Use /status ${session.escrowAddress} to check progress`,
-        {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback('📊 Check Status', `status_${session.escrowAddress}`)],
-            [Markup.button.callback('⚠️ Raise Dispute', `dispute_${session.escrowAddress}`)],
-            [Markup.button.callback('❓ Help', 'buy_help')]
-          ])
-        }
-      );
-    } catch (error) {
-      console.error('❌ Error joining trade:', error);
-      await ctx.reply('❌ Error joining trade. Please try again or contact admin.');
-    }
-  }
   
   // =============================================================================
   // ADMIN FLOW HANDLERS
