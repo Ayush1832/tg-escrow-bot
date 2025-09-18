@@ -67,38 +67,43 @@ function startWalletPolling(userId: number, ctx: any) {
         const session = getUserSession(userId);
         session.walletAddress = normalizedAddress;
         
-        // Create a unique trade ID and group link immediately
+        // Create a unique trade ID
         const tradeId = `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        const groupTitle = `Escrow Trade: @${ctx.from?.username}`;
+        const groupTitle = `Escrow Trade: ${ctx.from?.first_name || ctx.from?.username}`;
         
         // Store trade info
         session.tradeId = tradeId;
         session.groupTitle = groupTitle;
         session.step = 'sell_amount';
         
-        // Generate group creation link
+        // Generate a working group creation link
+        console.log(`👥 Generating escrow group creation link for trade: ${tradeId}`);
+        
+        // Create a working group creation link
         const botUsername = bot.botInfo?.username;
         const groupCreationLink = `https://t.me/${botUsername}?startgroup=create_trade_${tradeId}`;
+        
+        // Store group info
         session.groupCreationLink = groupCreationLink;
         
         await ctx.reply(
           `✅ **Wallet Connected Successfully!**\n\n` +
           `Connected wallet: \`${normalizedAddress}\`\n\n` +
-          `**Step 2: Create Private Trade Group**\n\n` +
-          `**Trade ID:** \`${tradeId}\`\n` +
-          `**Group Title:** ${groupTitle}\n\n` +
+          `🎉 **Escrow Group Ready to Create**\n\n` +
+          `**Creator:** ${ctx.from?.first_name || ctx.from?.username}\n\n` +
           `**Next Steps:**\n` +
-          `1. **Click the button below to create a private group**\n` +
+          `1. **Click the button below to create your escrow group**\n` +
           `2. **Add your buyer to the group**\n` +
           `3. **Continue the trade in the group**\n\n` +
           `**Group Creation Link:**\n` +
-          `\`${groupCreationLink}\`\n\n` +
+          `${groupCreationLink}\n\n` +
+          `⚠️ **Note:** After creating the group, only you and your buyer should be members.\n\n` +
           `💰 **Step 3: Trade Amount**\n\n` +
           `Enter the amount of USDT to trade:`,
           {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard([
-              [Markup.button.url('➕ Create Private Group', groupCreationLink)],
+              [Markup.button.url('➕ Create Escrow Group', groupCreationLink)],
               [Markup.button.callback('📋 Copy Link', `copy_group_link_${tradeId}`)],
               [Markup.button.callback('🔌 Disconnect Wallet', 'disconnect_wallet')]
             ])
@@ -562,56 +567,46 @@ bot.action('start_sell_flow', async (ctx) => {
     
     // Create a unique trade ID
     const tradeId = `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const groupTitle = `Escrow Trade: @${ctx.from?.username}`;
+    const groupTitle = `Escrow Trade: ${ctx.from?.first_name || ctx.from?.username}`;
     
     // Store trade info
     session.tradeId = tradeId;
     session.groupTitle = groupTitle;
     session.step = 'sell_amount';
     
-    // Generate group creation link (since we can't create groups programmatically)
-    try {
-      console.log(`👥 Generating group creation link for trade: ${tradeId}`);
-      
-      const botUsername = bot.botInfo?.username;
-      const groupCreationLink = `https://t.me/${botUsername}?startgroup=create_trade_${tradeId}`;
-      
-      // Store group info (will be updated when group is actually created)
-      session.groupCreationLink = groupCreationLink;
-      
-      await ctx.reply(
-        `✅ **Wallet Connected Successfully!**\n\n` +
-        `Connected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n` +
-        `**Step 2: Create Private Trade Group**\n\n` +
-        `**Trade ID:** \`${tradeId}\`\n` +
-        `**Group Title:** ${groupTitle}\n\n` +
-        `**Next Steps:**\n` +
-        `1. **Click the button below to create a private group**\n` +
-        `2. **Add your buyer to the group**\n` +
-        `3. **Continue the trade in the group**\n\n` +
-        `**Group Creation Link:**\n` +
-        `\`${groupCreationLink}\`\n\n` +
-        `💰 **Step 3: Trade Amount**\n\n` +
-        `Enter the amount of USDT to trade:`,
-        {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([
-            [Markup.button.url('➕ Create Private Group', groupCreationLink)],
-            [Markup.button.callback('📋 Copy Link', `copy_group_link_${tradeId}`)],
-            [Markup.button.callback('🔌 Disconnect Wallet', 'disconnect_wallet')]
-          ])
-        }
-      );
-      
-    } catch (error) {
-      console.error('Error creating group:', error);
-      await ctx.reply(
-        `❌ **Failed to Create Group**\n\n` +
-        `Error: ${error instanceof Error ? error.message : String(error)}\n\n` +
-        `Please try again or contact admin for assistance.`,
-        { parse_mode: 'Markdown' }
-      );
-    }
+    // Generate a working group creation link
+    console.log(`👥 Generating escrow group creation link for trade: ${tradeId}`);
+    
+    // Create a working group creation link
+    const botUsername = bot.botInfo?.username;
+    const groupCreationLink = `https://t.me/${botUsername}?startgroup=create_trade_${tradeId}`;
+    
+    // Store group info
+    session.groupCreationLink = groupCreationLink;
+    
+    await ctx.reply(
+      `✅ **Wallet Connected Successfully!**\n\n` +
+      `Connected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n` +
+      `🎉 **Escrow Group Ready to Create**\n\n` +
+      `**Creator:** ${ctx.from?.first_name || ctx.from?.username}\n\n` +
+      `**Next Steps:**\n` +
+      `1. **Click the button below to create your escrow group**\n` +
+      `2. **Add your buyer to the group**\n` +
+      `3. **Continue the trade in the group**\n\n` +
+      `**Group Creation Link:**\n` +
+      `${groupCreationLink}\n\n` +
+      `⚠️ **Note:** After creating the group, only you and your buyer should be members.\n\n` +
+      `💰 **Step 3: Trade Amount**\n\n` +
+      `Enter the amount of USDT to trade:`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.url('➕ Create Escrow Group', groupCreationLink)],
+          [Markup.button.callback('📋 Copy Link', `copy_group_link_${tradeId}`)],
+          [Markup.button.callback('🔌 Disconnect Wallet', 'disconnect_wallet')]
+        ])
+      }
+    );
   } else {
     session.step = 'sell_wallet_connect';
     
