@@ -86,33 +86,35 @@ function startWalletPolling(userId: number, ctx: any) {
         session.groupTitle = groupTitle;
         session.step = 'sell_amount';
         
-        // Create a working invite link using a different approach
-        console.log(`👥 Creating escrow group invite link for trade: ${tradeId}`);
+        // Create a working group using the startgroup deep link approach
+        console.log(`👥 Creating escrow group for trade: ${tradeId}`);
         
         try {
-          // Generate a unique invite code that looks like real Telegram invite links
-          const inviteCode = generateInviteCode();
-          const inviteLink = `https://t.me/+${inviteCode}`;
+          // Use the startgroup deep link to create a working group
+          const botUsername = bot.botInfo?.username;
+          const groupCreationLink = `https://t.me/${botUsername}?startgroup=create_trade_${tradeId}`;
           
           // Store group info
-          session.groupInviteLink = inviteLink;
-          session.inviteCode = inviteCode;
+          session.groupCreationLink = groupCreationLink;
           
-          // For now, we'll provide the invite link and handle group creation when users join
           await ctx.reply(
             `✅ **Wallet Connected Successfully!**\n\n` +
             `Connected wallet: \`${normalizedAddress}\`\n\n` +
-            `🎉 **Escrow Group Created**\n\n` +
+            `🎉 **Escrow Group Ready to Create**\n\n` +
             `**Creator:** ${ctx.from?.first_name || ctx.from?.username}\n\n` +
-            `Join this escrow group and share the link with the buyer:\n\n` +
-            `${inviteLink}\n\n` +
-            `⚠️ **Note:** This link is for 2 members only—third parties are not allowed to join.\n\n` +
+            `**Next Steps:**\n` +
+            `1. **Click the button below to create your escrow group**\n` +
+            `2. **Add your buyer to the group**\n` +
+            `3. **Continue the trade in the group**\n\n` +
+            `**Group Creation Link:**\n` +
+            `${groupCreationLink}\n\n` +
+            `⚠️ **Note:** After creating the group, only you and your buyer should be members.\n\n` +
             `💰 **Step 3: Trade Amount**\n\n` +
             `Enter the amount of USDT to trade:`,
             {
               parse_mode: 'Markdown',
               ...Markup.inlineKeyboard([
-                [Markup.button.url('🔗 Share Group Link', inviteLink)],
+                [Markup.button.url('➕ Create Escrow Group', groupCreationLink)],
                 [Markup.button.callback('📋 Copy Link', `copy_group_link_${tradeId}`)],
                 [Markup.button.callback('🔌 Disconnect Wallet', 'disconnect_wallet')]
               ])
@@ -120,31 +122,18 @@ function startWalletPolling(userId: number, ctx: any) {
           );
           
         } catch (error) {
-          console.error('Error creating invite link:', error);
-          
-          // Fallback: provide manual group creation link
-          const botUsername = bot.botInfo?.username;
-          const fallbackLink = `https://t.me/${botUsername}?startgroup=create_trade_${tradeId}`;
-          session.groupCreationLink = fallbackLink;
+          console.error('Error creating group link:', error);
           
           await ctx.reply(
             `✅ **Wallet Connected Successfully!**\n\n` +
             `Connected wallet: \`${normalizedAddress}\`\n\n` +
-            `❌ **Failed to Create Group Automatically**\n\n` +
-            `Please create the group manually:\n\n` +
-            `**Group Creation Link:**\n` +
-            `${fallbackLink}\n\n` +
-            `**Steps:**\n` +
-            `1. Click the link above to create a group\n` +
-            `2. Add your buyer to the group\n` +
-            `3. Continue the trade\n\n` +
+            `❌ **Error Creating Group Link**\n\n` +
+            `Please try again or contact support.\n\n` +
             `💰 **Step 3: Trade Amount**\n\n` +
             `Enter the amount of USDT to trade:`,
             {
               parse_mode: 'Markdown',
               ...Markup.inlineKeyboard([
-                [Markup.button.url('➕ Create Group Manually', fallbackLink)],
-                [Markup.button.callback('📋 Copy Link', `copy_group_link_${tradeId}`)],
                 [Markup.button.callback('🔌 Disconnect Wallet', 'disconnect_wallet')]
               ])
             }
@@ -615,33 +604,35 @@ bot.action('start_sell_flow', async (ctx) => {
     session.groupTitle = groupTitle;
     session.step = 'sell_amount';
     
-    // Create a working invite link using a different approach
-    console.log(`👥 Creating escrow group invite link for trade: ${tradeId}`);
+    // Create a working group using the startgroup deep link approach
+    console.log(`👥 Creating escrow group for trade: ${tradeId}`);
     
     try {
-      // Generate a unique invite code that looks like real Telegram invite links
-      const inviteCode = generateInviteCode();
-      const inviteLink = `https://t.me/+${inviteCode}`;
+      // Use the startgroup deep link to create a working group
+      const botUsername = bot.botInfo?.username;
+      const groupCreationLink = `https://t.me/${botUsername}?startgroup=create_trade_${tradeId}`;
       
       // Store group info
-      session.groupInviteLink = inviteLink;
-      session.inviteCode = inviteCode;
+      session.groupCreationLink = groupCreationLink;
       
-      // For now, we'll provide the invite link and handle group creation when users join
       await ctx.reply(
         `✅ **Wallet Connected Successfully!**\n\n` +
         `Connected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n` +
-        `🎉 **Escrow Group Created**\n\n` +
+        `🎉 **Escrow Group Ready to Create**\n\n` +
         `**Creator:** ${ctx.from?.first_name || ctx.from?.username}\n\n` +
-        `Join this escrow group and share the link with the buyer:\n\n` +
-        `${inviteLink}\n\n` +
-        `⚠️ **Note:** This link is for 2 members only—third parties are not allowed to join.\n\n` +
+        `**Next Steps:**\n` +
+        `1. **Click the button below to create your escrow group**\n` +
+        `2. **Add your buyer to the group**\n` +
+        `3. **Continue the trade in the group**\n\n` +
+        `**Group Creation Link:**\n` +
+        `${groupCreationLink}\n\n` +
+        `⚠️ **Note:** After creating the group, only you and your buyer should be members.\n\n` +
         `💰 **Step 3: Trade Amount**\n\n` +
         `Enter the amount of USDT to trade:`,
         {
           parse_mode: 'Markdown',
           ...Markup.inlineKeyboard([
-            [Markup.button.url('🔗 Share Group Link', inviteLink)],
+            [Markup.button.url('➕ Create Escrow Group', groupCreationLink)],
             [Markup.button.callback('📋 Copy Link', `copy_group_link_${tradeId}`)],
             [Markup.button.callback('🔌 Disconnect Wallet', 'disconnect_wallet')]
           ])
@@ -649,31 +640,18 @@ bot.action('start_sell_flow', async (ctx) => {
       );
       
     } catch (error) {
-      console.error('Error creating invite link:', error);
-      
-      // Fallback: provide manual group creation link
-      const botUsername = bot.botInfo?.username;
-      const fallbackLink = `https://t.me/${botUsername}?startgroup=create_trade_${tradeId}`;
-      session.groupCreationLink = fallbackLink;
+      console.error('Error creating group link:', error);
       
       await ctx.reply(
         `✅ **Wallet Connected Successfully!**\n\n` +
         `Connected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n` +
-        `❌ **Failed to Create Group Automatically**\n\n` +
-        `Please create the group manually:\n\n` +
-        `**Group Creation Link:**\n` +
-        `${fallbackLink}\n\n` +
-        `**Steps:**\n` +
-        `1. Click the link above to create a group\n` +
-        `2. Add your buyer to the group\n` +
-        `3. Continue the trade\n\n` +
+        `❌ **Error Creating Group Link**\n\n` +
+        `Please try again or contact support.\n\n` +
         `💰 **Step 3: Trade Amount**\n\n` +
         `Enter the amount of USDT to trade:`,
         {
           parse_mode: 'Markdown',
           ...Markup.inlineKeyboard([
-            [Markup.button.url('➕ Create Group Manually', fallbackLink)],
-            [Markup.button.callback('📋 Copy Link', `copy_group_link_${tradeId}`)],
             [Markup.button.callback('🔌 Disconnect Wallet', 'disconnect_wallet')]
           ])
         }
