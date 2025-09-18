@@ -86,12 +86,15 @@ function startWalletPolling(userId: number, ctx: any) {
         session.groupTitle = groupTitle;
         session.step = 'create_group';
         
-        // Get bot info
+        // Get bot info with detailed debugging
         let botUsername = bot.botInfo?.username;
+        console.log('Initial bot.botInfo:', bot.botInfo);
+        console.log('Initial botUsername:', botUsername);
         
         if (!botUsername) {
           try {
             const me = await bot.telegram.getMe();
+            console.log('getMe() result:', me);
             botUsername = me.username;
             console.log('Bot username from getMe:', botUsername);
           } catch (error) {
@@ -101,16 +104,10 @@ function startWalletPolling(userId: number, ctx: any) {
         
         console.log('Final bot username:', botUsername);
         
+        // If still no username, provide manual group creation instructions
         if (!botUsername) {
           await ctx.reply(
-            `❌ **Bot Username Not Found**\n\n` +
-            `Please contact admin to fix this issue.\n\n` +
-            `**Temporary Solution:**\n` +
-            `1. Create a group manually\n` +
-            `2. Add your bot to the group\n` +
-            `3. Use the group for trading\n\n` +
-            `💰 **Trade Amount**\n\n` +
-            `Enter the amount of USDT to trade:`,
+            `✅ **Wallet Connected!**\n\nConnected wallet: \`${normalizedAddress}\`\n\n👥 **Create Group Manually**\n\n**Steps:**\n1. **Create a new group** in Telegram\n2. **Add your bot** to the group\n3. **Send this command** in the group: \`/start create_trade_${tradeId}\`\n4. **Add your buyer** to the group\n\n**Trade ID:** \`${tradeId}\`\n\n💰 **Step 3: Trade Amount**\n\nEnter the amount of USDT to trade:`,
             {
               parse_mode: 'Markdown',
               ...Markup.inlineKeyboard([
@@ -281,10 +278,26 @@ bot.command('myid', async (ctx) => {
   
   console.log(`🆔 User ${username} (${userId}) requested their ID`);
   
+  // Get fresh bot info
+  let botInfo = bot.botInfo;
+  try {
+    const me = await bot.telegram.getMe();
+    botInfo = me;
+    console.log('Fresh bot info from /myid:', me);
+  } catch (error) {
+    console.error('Error getting bot info in /myid:', error);
+  }
+  
   await ctx.reply(
     `🆔 **Your Telegram Information**\n\n` +
     `**User ID:** \`${userId}\`\n` +
-    `**Username:** ${username ? `@${username}` : 'Not set'}\n\n` +
+    `**Username:** ${username ? `@${username}` : 'Not set'}\n` +
+    `**First Name:** ${ctx.from?.first_name || 'Not set'}\n` +
+    `**Last Name:** ${ctx.from?.last_name || 'Not set'}\n\n` +
+    `**Bot Information:**\n` +
+    `**Bot ID:** \`${botInfo?.id}\`\n` +
+    `**Bot Username:** ${botInfo?.username ? `@${botInfo.username}` : 'Not set'}\n` +
+    `**Bot Name:** ${botInfo?.first_name || 'Not set'}\n\n` +
     `**How to use:**\n` +
     `• Share your **User ID** with sellers if you don't have a username\n` +
     `• Sellers can use either your username or User ID to create trades\n\n` +
@@ -613,12 +626,15 @@ bot.action('start_sell_flow', async (ctx) => {
     session.groupTitle = groupTitle;
     session.step = 'create_group';
     
-    // Get bot info
+    // Get bot info with detailed debugging
     let botUsername = bot.botInfo?.username;
+    console.log('Initial bot.botInfo:', bot.botInfo);
+    console.log('Initial botUsername:', botUsername);
     
     if (!botUsername) {
       try {
         const me = await bot.telegram.getMe();
+        console.log('getMe() result:', me);
         botUsername = me.username;
         console.log('Bot username from getMe:', botUsername);
       } catch (error) {
@@ -628,16 +644,10 @@ bot.action('start_sell_flow', async (ctx) => {
     
     console.log('Final bot username:', botUsername);
     
+    // If still no username, provide manual group creation instructions
     if (!botUsername) {
       await ctx.reply(
-        `❌ **Bot Username Not Found**\n\n` +
-        `Please contact admin to fix this issue.\n\n` +
-        `**Temporary Solution:**\n` +
-        `1. Create a group manually\n` +
-        `2. Add your bot to the group\n` +
-        `3. Use the group for trading\n\n` +
-        `💰 **Trade Amount**\n\n` +
-        `Enter the amount of USDT to trade:`,
+        `✅ **Wallet Connected!**\n\nConnected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n👥 **Create Group Manually**\n\n**Steps:**\n1. **Create a new group** in Telegram\n2. **Add your bot** to the group\n3. **Send this command** in the group: \`/start create_trade_${tradeId}\`\n4. **Add your buyer** to the group\n\n**Trade ID:** \`${tradeId}\`\n\n💰 **Step 3: Trade Amount**\n\nEnter the amount of USDT to trade:`,
         {
           parse_mode: 'Markdown',
           ...Markup.inlineKeyboard([
