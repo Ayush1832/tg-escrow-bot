@@ -81,64 +81,57 @@ function startWalletPolling(userId: number, ctx: any) {
         const tradeId = `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const groupTitle = `Escrow Trade: ${ctx.from?.first_name || ctx.from?.username}`;
         
-        // Store trade info
+        // Set up group creation step
         session.tradeId = tradeId;
         session.groupTitle = groupTitle;
-        session.step = 'sell_amount';
+        session.step = 'create_group';
         
-        // Create a working group using the startgroup deep link approach
-        console.log(`👥 Creating escrow group for trade: ${tradeId}`);
+        // Get bot info
+        let botUsername = bot.botInfo?.username;
         
-        try {
-          // Use the startgroup deep link to create a working group
-          const botUsername = bot.botInfo?.username;
-          const groupCreationLink = `https://t.me/${botUsername}?startgroup=create_trade_${tradeId}`;
-          
-          // Store group info
-          session.groupCreationLink = groupCreationLink;
-          
-          await ctx.reply(
-            `✅ **Wallet Connected Successfully!**\n\n` +
-            `Connected wallet: \`${normalizedAddress}\`\n\n` +
-            `🎉 **Escrow Group Ready to Create**\n\n` +
-            `**Creator:** ${ctx.from?.first_name || ctx.from?.username}\n\n` +
-            `**Next Steps:**\n` +
-            `1. **Click the button below to create your escrow group**\n` +
-            `2. **Add your buyer to the group**\n` +
-            `3. **Continue the trade in the group**\n\n` +
-            `**Group Creation Link:**\n` +
-            `${groupCreationLink}\n\n` +
-            `⚠️ **Note:** After creating the group, only you and your buyer should be members.\n\n` +
-            `💰 **Step 3: Trade Amount**\n\n` +
-            `Enter the amount of USDT to trade:`,
-            {
-              parse_mode: 'Markdown',
-              ...Markup.inlineKeyboard([
-                [Markup.button.url('➕ Create Escrow Group', groupCreationLink)],
-                [Markup.button.callback('📋 Copy Link', `copy_group_link_${tradeId}`)],
-                [Markup.button.callback('🔌 Disconnect Wallet', 'disconnect_wallet')]
-              ])
-            }
-          );
-          
-        } catch (error) {
-          console.error('Error creating group link:', error);
-          
-          await ctx.reply(
-            `✅ **Wallet Connected Successfully!**\n\n` +
-            `Connected wallet: \`${normalizedAddress}\`\n\n` +
-            `❌ **Error Creating Group Link**\n\n` +
-            `Please try again or contact support.\n\n` +
-            `💰 **Step 3: Trade Amount**\n\n` +
-            `Enter the amount of USDT to trade:`,
-            {
-              parse_mode: 'Markdown',
-              ...Markup.inlineKeyboard([
-                [Markup.button.callback('🔌 Disconnect Wallet', 'disconnect_wallet')]
-              ])
-            }
-          );
+        if (!botUsername) {
+          try {
+            const me = await bot.telegram.getMe();
+            botUsername = me.username;
+            console.log('Bot username from getMe:', botUsername);
+          } catch (error) {
+            console.error('Error getting bot info:', error);
+          }
         }
+        
+        console.log('Final bot username:', botUsername);
+        
+        if (!botUsername) {
+          await ctx.reply(
+            `❌ **Bot Username Not Found**\n\n` +
+            `Please contact admin to fix this issue.\n\n` +
+            `**Temporary Solution:**\n` +
+            `1. Create a group manually\n` +
+            `2. Add your bot to the group\n` +
+            `3. Use the group for trading\n\n` +
+            `💰 **Trade Amount**\n\n` +
+            `Enter the amount of USDT to trade:`,
+            {
+              parse_mode: 'Markdown',
+              ...Markup.inlineKeyboard([
+                [Markup.button.callback('❌ Cancel', 'cancel_sell')]
+              ])
+            }
+          );
+          return;
+        }
+        const createLink = `https://t.me/${botUsername}?startgroup=create_trade_${tradeId}`;
+        
+        await ctx.reply(
+          `✅ **Wallet Connected!**\n\nConnected wallet: \`${normalizedAddress}\`\n\n👥 **Create Private Group**\n\nClick to create (bot joins auto):\n\n${createLink}`,
+          {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+              [Markup.button.url('➕ Create Group', createLink)],
+              [Markup.button.callback('❌ Cancel', 'cancel_sell')]
+            ])
+          }
+        );
       }
     } catch (error) {
       console.error('Error polling wallet connection:', error);
@@ -176,43 +169,59 @@ bot.start(async (ctx) => {
   
   console.log(`👤 User ${username} (${userId}) started the bot with payload: ${startPayload}`);
   
-  // Check if this is a trade group join request
-  if (startPayload && startPayload.startsWith('join_trade_')) {
-    const tradeId = startPayload.replace('join_trade_', '');
-    console.log(`🔗 User ${username} (${userId}) joining trade group: ${tradeId}`);
-    
-    await ctx.reply(
-      `🔗 **Joining Trade Group**\n\n` +
-      `**Trade ID:** \`${tradeId}\`\n\n` +
-      `You're about to join a private trade group. The seller will create the group and add you.\n\n` +
-      `**What happens next:**\n` +
-      `1. Seller creates the private group\n` +
-      `2. You'll be added to the group\n` +
-      `3. Trade details will be shared there\n` +
-      `4. Complete the transaction securely\n\n` +
-      `**Please wait for the seller to create the group...**`,
-      { parse_mode: 'Markdown' }
-    );
-    return;
-  }
   
   // Check if this is a group creation request
   if (startPayload && startPayload.startsWith('create_trade_')) {
     const tradeId = startPayload.replace('create_trade_', '');
-    console.log(`👥 User ${username} (${userId}) creating trade group: ${tradeId}`);
     
-    await ctx.reply(
-      `👥 **Creating Trade Group**\n\n` +
-      `**Trade ID:** \`${tradeId}\`\n\n` +
-      `You're creating a private group for this trade. After creating the group:\n\n` +
-      `**Next Steps:**\n` +
-      `1. Add the buyer to this group\n` +
-      `2. The bot will initialize the trade\n` +
-      `3. Complete the transaction securely\n\n` +
-      `**Group is ready for trading!** 🎉`,
-      { parse_mode: 'Markdown' }
-    );
-    return;
+    if (ctx.chat?.type === 'group' || ctx.chat?.type === 'supergroup') {
+      const sellerId = ctx.from?.id!;
+      const session = getUserSession(sellerId);
+      
+      if (session.tradeId !== tradeId) {
+        await ctx.reply('❌ Trade mismatch. Restart /sell.');
+        return;
+      }
+      
+      session.groupId = ctx.chat.id;
+      session.step = 'sell_amount';
+      
+      try {
+        const inviteRes = await ctx.telegram.createChatInviteLink(ctx.chat.id, {
+          member_limit: 2,
+          name: session.groupTitle
+        });
+        const inviteLink = inviteRes.invite_link;
+        session.groupInviteLink = inviteLink;
+        
+        // PM seller
+        await bot.telegram.sendMessage(sellerId,
+          `🎉 **Escrow Group Created**\n\nCreator: ${ctx.from?.first_name || ctx.from?.username}\n\nShare with buyer:\n\n${inviteLink}\n\n⚠️ 2 members only.\n\n💰 **Trade Amount**\n\nEnter USDT:`,
+          {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+              [Markup.button.url('🔗 Share', inviteLink)],
+              [Markup.button.callback('📋 Copy', `copy_group_link_${tradeId}`)],
+              [Markup.button.callback('🔌 Disconnect', 'disconnect_wallet')]
+            ])
+          }
+        );
+        
+        // To group
+        await ctx.reply(
+          `👥 **Group Ready!**\n\nTrade ID: \`${tradeId}\`\nSeller: ${ctx.from?.first_name || `@${ctx.from?.username}`}\n\nWait for buyer. Seller: set amount in PM.\n\n/status | 'payment received' | 'dispute'`,
+          { parse_mode: 'Markdown' }
+        );
+      } catch (e) {
+        console.error(e);
+        await ctx.reply('❌ Invite failed. Create manual (limit 1).');
+        await bot.telegram.sendMessage(sellerId, 'Manual invite in group settings.');
+      }
+      return;
+    } else {
+      await ctx.reply('Use create link from PM.');
+      return;
+    }
   }
   
   await ctx.reply(
@@ -599,64 +608,57 @@ bot.action('start_sell_flow', async (ctx) => {
     const tradeId = `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const groupTitle = `Escrow Trade: ${ctx.from?.first_name || ctx.from?.username}`;
     
-    // Store trade info
+    // Set up group creation step
     session.tradeId = tradeId;
     session.groupTitle = groupTitle;
-    session.step = 'sell_amount';
+    session.step = 'create_group';
     
-    // Create a working group using the startgroup deep link approach
-    console.log(`👥 Creating escrow group for trade: ${tradeId}`);
+    // Get bot info
+    let botUsername = bot.botInfo?.username;
     
-    try {
-      // Use the startgroup deep link to create a working group
-      const botUsername = bot.botInfo?.username;
-      const groupCreationLink = `https://t.me/${botUsername}?startgroup=create_trade_${tradeId}`;
-      
-      // Store group info
-      session.groupCreationLink = groupCreationLink;
-      
-      await ctx.reply(
-        `✅ **Wallet Connected Successfully!**\n\n` +
-        `Connected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n` +
-        `🎉 **Escrow Group Ready to Create**\n\n` +
-        `**Creator:** ${ctx.from?.first_name || ctx.from?.username}\n\n` +
-        `**Next Steps:**\n` +
-        `1. **Click the button below to create your escrow group**\n` +
-        `2. **Add your buyer to the group**\n` +
-        `3. **Continue the trade in the group**\n\n` +
-        `**Group Creation Link:**\n` +
-        `${groupCreationLink}\n\n` +
-        `⚠️ **Note:** After creating the group, only you and your buyer should be members.\n\n` +
-        `💰 **Step 3: Trade Amount**\n\n` +
-        `Enter the amount of USDT to trade:`,
-        {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([
-            [Markup.button.url('➕ Create Escrow Group', groupCreationLink)],
-            [Markup.button.callback('📋 Copy Link', `copy_group_link_${tradeId}`)],
-            [Markup.button.callback('🔌 Disconnect Wallet', 'disconnect_wallet')]
-          ])
-        }
-      );
-      
-    } catch (error) {
-      console.error('Error creating group link:', error);
-      
-      await ctx.reply(
-        `✅ **Wallet Connected Successfully!**\n\n` +
-        `Connected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n` +
-        `❌ **Error Creating Group Link**\n\n` +
-        `Please try again or contact support.\n\n` +
-        `💰 **Step 3: Trade Amount**\n\n` +
-        `Enter the amount of USDT to trade:`,
-        {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback('🔌 Disconnect Wallet', 'disconnect_wallet')]
-          ])
-        }
-      );
+    if (!botUsername) {
+      try {
+        const me = await bot.telegram.getMe();
+        botUsername = me.username;
+        console.log('Bot username from getMe:', botUsername);
+      } catch (error) {
+        console.error('Error getting bot info:', error);
+      }
     }
+    
+    console.log('Final bot username:', botUsername);
+    
+    if (!botUsername) {
+      await ctx.reply(
+        `❌ **Bot Username Not Found**\n\n` +
+        `Please contact admin to fix this issue.\n\n` +
+        `**Temporary Solution:**\n` +
+        `1. Create a group manually\n` +
+        `2. Add your bot to the group\n` +
+        `3. Use the group for trading\n\n` +
+        `💰 **Trade Amount**\n\n` +
+        `Enter the amount of USDT to trade:`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('❌ Cancel', 'cancel_sell')]
+          ])
+        }
+      );
+      return;
+    }
+    const createLink = `https://t.me/${botUsername}?startgroup=create_trade_${tradeId}`;
+    
+    await ctx.reply(
+      `✅ **Wallet Connected!**\n\nConnected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n👥 **Create Private Group**\n\nClick to create (bot joins auto):\n\n${createLink}`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.url('➕ Create Group', createLink)],
+          [Markup.button.callback('❌ Cancel', 'cancel_sell')]
+        ])
+      }
+    );
   } else {
     session.step = 'sell_wallet_connect';
     
@@ -1634,6 +1636,9 @@ bot.on('text', async (ctx) => {
     return;
   }
   
+  // Skip text processing if in create_group step
+  if (session.step === 'create_group') return;
+  
   // =============================================================================
   // SELLER FLOW HANDLERS
   // =============================================================================
@@ -1876,29 +1881,39 @@ bot.on('new_chat_members', async (ctx) => {
   const groupId = ctx.chat.id;
   const newMembers = ctx.message?.new_chat_members || [];
   
-  // Check if this is a recognized trade group
-  const trade = await database.getTradeByGroupId(groupId);
-  if (!trade) {
-    return;
-  }
-  
-  console.log(`👥 New members joined trade group ${groupId}: ${newMembers.map(m => `${m.username || m.first_name} (${m.id})`).join(', ')}`);
+  console.log(`👥 New members joined group ${groupId}: ${newMembers.map(m => `${m.username || m.first_name} (${m.id})`).join(', ')}`);
   
   // Welcome new members
   for (const member of newMembers) {
     if (member.id !== ctx.botInfo.id) { // Don't welcome the bot itself
-      await ctx.reply(
-        `👋 **Welcome to the Trade Group!**\n\n` +
-        `**Trade ID:** \`${trade.escrowAddress}\`\n` +
-        `**Amount:** ${trade.amount} USDT\n` +
-        `**Status:** ${trade.status}\n\n` +
-        `**Available Commands:**\n` +
-        `• \`/status\` - Check trade status\n` +
-        `• \`payment received\` - Confirm payment (seller only)\n` +
-        `• \`dispute\` - Raise dispute\n\n` +
-        `**Let's complete this trade securely!** 🔒`,
-        { parse_mode: 'Markdown' }
-      );
+      // Check if this is a recognized trade group
+      const trade = await database.getTradeByGroupId(groupId);
+      
+      if (trade) {
+        await ctx.reply(
+          `👋 **Welcome to the Trade Group!**\n\n` +
+          `**Trade ID:** \`${trade.escrowAddress}\`\n` +
+          `**Amount:** ${trade.amount} USDT\n` +
+          `**Status:** ${trade.status}\n\n` +
+          `**Available Commands:**\n` +
+          `• \`/status\` - Check trade status\n` +
+          `• \`payment received\` - Confirm payment (seller only)\n` +
+          `• \`dispute\` - Raise dispute\n\n` +
+          `**Let's complete this trade securely!** 🔒`,
+          { parse_mode: 'Markdown' }
+        );
+      } else {
+        await ctx.reply(
+          `👋 **Welcome to the escrow group!**\n\n` +
+          `This is a secure trading group. The seller will set up trade details soon.\n\n` +
+          `**Available Commands:**\n` +
+          `• \`/status\` - Check trade status\n` +
+          `• \`payment received\` - Confirm payment (seller only)\n` +
+          `• \`dispute\` - Raise dispute\n\n` +
+          `**Please wait for trade setup...** ⏳`,
+          { parse_mode: 'Markdown' }
+        );
+      }
       break; // Only send one welcome message per batch
     }
   }
