@@ -77,6 +77,25 @@ app.get('/api/wallet-status/:userId', (req, res) => {
     }
 });
 
+// Notify bot about wallet connection (for automatic flow)
+app.post('/api/notify-bot/:userId', (req, res) => {
+    const { userId } = req.params;
+    const { connected, wallet } = req.body;
+    
+    // Store the connection
+    if (connected && wallet) {
+        walletConnections.set(parseInt(userId), {
+            wallet: wallet,
+            timestamp: Date.now(),
+            botToken: process.env.BOT_TOKEN
+        });
+        
+        console.log(`🤖 Bot notified: Wallet connected for user ${userId}:`, wallet.account.address);
+    }
+    
+    res.json({ success: true });
+});
+
 // Clean up old connections (older than 1 hour)
 setInterval(() => {
     const now = Date.now();

@@ -25,12 +25,108 @@ const bot = new Telegraf(BOT_TOKEN);
 // User sessions storage (in production, use Redis or database)
 const userSessions: Map<number, any> = new Map();
 
+// Polling for wallet connections
+const walletPollingInterval = 2000; // Check every 2 seconds
+const walletPolling = new Map<number, NodeJS.Timeout>();
+
 // Helper function to get user session
 function getUserSession(userId: number) {
   if (!userSessions.has(userId)) {
     userSessions.set(userId, {});
   }
   return userSessions.get(userId);
+}
+
+// Start wallet connection polling for a user
+function startWalletPolling(userId: number, ctx: any) {
+  // Clear existing polling for this user
+  if (walletPolling.has(userId)) {
+    clearInterval(walletPolling.get(userId));
+  }
+  
+  const interval = setInterval(async () => {
+    try {
+      const domain = process.env.DOMAIN || 'http://localhost:3000';
+      const response = await fetch(`${domain}/api/wallet-status/${userId}`);
+      const data = await response.json() as any;
+      
+      if (data.connected && data.wallet) {
+        // Wallet connected! Stop polling and proceed
+        clearInterval(interval);
+        walletPolling.delete(userId);
+        
+        // Process the wallet connection
+        const normalizedAddress = Address.parse(data.wallet.account.address).toString({ bounceable: false });
+        const walletInfo = {
+          address: normalizedAddress,
+          publicKey: data.wallet.account.publicKey,
+          connected: true
+        };
+        
+        tonConnectService.connectedWallets.set(userId, walletInfo);
+        const session = getUserSession(userId);
+        session.walletAddress = normalizedAddress;
+        
+        // Create a unique trade ID and group link immediately
+        const tradeId = `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const groupTitle = `Escrow Trade: @${ctx.from?.username}`;
+        
+        // Store trade info
+        session.tradeId = tradeId;
+        session.groupTitle = groupTitle;
+        session.step = 'sell_amount';
+        
+        // Generate group creation link
+        const botUsername = bot.botInfo?.username;
+        const groupCreationLink = `https://t.me/${botUsername}?startgroup=create_trade_${tradeId}`;
+        session.groupCreationLink = groupCreationLink;
+        
+        await ctx.reply(
+          `✅ **Wallet Connected Successfully!**\n\n` +
+          `Connected wallet: \`${normalizedAddress}\`\n\n` +
+          `**Step 2: Create Private Trade Group**\n\n` +
+          `**Trade ID:** \`${tradeId}\`\n` +
+          `**Group Title:** ${groupTitle}\n\n` +
+          `**Next Steps:**\n` +
+          `1. **Click the button below to create a private group**\n` +
+          `2. **Add your buyer to the group**\n` +
+          `3. **Continue the trade in the group**\n\n` +
+          `**Group Creation Link:**\n` +
+          `\`${groupCreationLink}\`\n\n` +
+          `💰 **Step 3: Trade Amount**\n\n` +
+          `Enter the amount of USDT to trade:`,
+          {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+              [Markup.button.url('➕ Create Private Group', groupCreationLink)],
+              [Markup.button.callback('📋 Copy Link', `copy_group_link_${tradeId}`)],
+              [Markup.button.callback('🔌 Disconnect Wallet', 'disconnect_wallet')]
+            ])
+          }
+        );
+      }
+    } catch (error) {
+      console.error('Error polling wallet connection:', error);
+    }
+  }, walletPollingInterval);
+  
+  walletPolling.set(userId, interval);
+  
+  // Stop polling after 5 minutes
+  setTimeout(() => {
+    if (walletPolling.has(userId)) {
+      clearInterval(walletPolling.get(userId));
+      walletPolling.delete(userId);
+    }
+  }, 5 * 60 * 1000);
+}
+
+// Stop wallet connection polling for a user
+function stopWalletPolling(userId: number) {
+  if (walletPolling.has(userId)) {
+    clearInterval(walletPolling.get(userId));
+    walletPolling.delete(userId);
+  }
 }
 
 // =============================================================================
@@ -544,6 +640,9 @@ bot.action('start_sell_flow', async (ctx) => {
           ])
         }
       );
+      
+      // Start polling for wallet connection
+      startWalletPolling(userId, ctx);
     } catch (error) {
       console.error('Error generating connection link:', error);
       await ctx.reply(
@@ -642,6 +741,9 @@ bot.action('cancel_sell', async (ctx) => {
   const userId = ctx.from!.id;
   const session = getUserSession(userId);
   session.step = null;
+  
+  // Stop wallet polling
+  stopWalletPolling(userId);
   
   await ctx.reply(
     `❌ **Trade Creation Cancelled**\n\n` +

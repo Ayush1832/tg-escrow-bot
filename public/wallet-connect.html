@@ -219,8 +219,21 @@
 
                 if (response.ok) {
                     showStatus('Connection sent to bot successfully!', 'success');
+                    
+                    // Notify the bot that wallet is connected
+                    const botResponse = await fetch(`/api/notify-bot/${userId}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ 
+                            connected: true, 
+                            wallet: { ...wallet, account: { ...wallet.account, address: normalizedAddress } }
+                        })
+                    });
+                    
                     if (window.Telegram && window.Telegram.WebApp) {
-                        setTimeout(() => window.Telegram.WebApp.close(), 800);
+                        setTimeout(() => window.Telegram.WebApp.close(), 1000);
                     }
                 } else {
                     throw new Error('Failed to send connection to bot');
