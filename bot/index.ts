@@ -511,7 +511,7 @@ bot.action('start_sell_flow', async (ctx) => {
       console.error('Error creating group:', error);
       await ctx.reply(
         `❌ **Failed to Create Group**\n\n` +
-        `Error: ${error.message}\n\n` +
+        `Error: ${error instanceof Error ? error.message : String(error)}\n\n` +
         `Please try again or contact admin for assistance.`,
         { parse_mode: 'Markdown' }
       );
