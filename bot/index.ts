@@ -117,7 +117,7 @@ function startWalletPolling(userId: number, ctx: any) {
           );
           return;
         }
-        const createLink = `https://t.me/${botUsername}?startgroup=create_trade_${tradeId}`;
+        const createLink = `https://t.me/@ayush_escrow_bot?startgroup=create_trade_${tradeId}`;
         
         await ctx.reply(
           `✅ **Wallet Connected!**\n\nConnected wallet: \`${normalizedAddress}\`\n\n👥 **Create Private Group**\n\nClick to create (bot joins auto):\n\n${createLink}`,
