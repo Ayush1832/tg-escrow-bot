@@ -531,7 +531,7 @@ bot.action('start_sell_flow', async (ctx) => {
         `1. Click "Connect Wallet" below\n` +
         `2. Your wallet will open automatically\n` +
         `3. Confirm the connection\n` +
-        `4. Come back and click "Check Connection"\n\n` +
+        `4. The bot will automatically proceed\n\n` +
         `**Supported Wallets:**\n` +
         `• Telegram Wallet (built-in)\n` +
         `• Tonkeeper\n` +
@@ -540,7 +540,6 @@ bot.action('start_sell_flow', async (ctx) => {
           parse_mode: 'Markdown',
           ...Markup.inlineKeyboard([
             [Markup.button.webApp('🔗 Connect Wallet', connectionUrl)],
-            [Markup.button.callback('✅ Check Connection', 'check_wallet_connection')],
             [Markup.button.callback('❌ Cancel', 'cancel_sell')]
           ])
         }
@@ -579,23 +578,39 @@ bot.action('check_wallet_connection', async (ctx) => {
       
       tonConnectService.connectedWallets.set(userId, walletInfo);
       session.walletAddress = normalizedAddress;
-      session.step = 'sell_buyer_username';
+      // Create a unique trade ID and group link immediately
+      const tradeId = `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const groupTitle = `Escrow Trade: @${ctx.from?.username}`;
+      
+      // Store trade info
+      session.tradeId = tradeId;
+      session.groupTitle = groupTitle;
+      session.step = 'sell_amount';
+      
+      // Generate group creation link
+      const botUsername = bot.botInfo?.username;
+      const groupCreationLink = `https://t.me/${botUsername}?startgroup=create_trade_${tradeId}`;
+      session.groupCreationLink = groupCreationLink;
       
       await ctx.reply(
         `✅ **Wallet Connected Successfully!**\n\n` +
         `Connected wallet: \`${normalizedAddress}\`\n\n` +
-        `**Step 2: Buyer Information**\n\n` +
-        `Please enter the buyer's Telegram username or user ID:\n\n` +
-        `**Options:**\n` +
-        `• **Username:** \`john_doe\` (without @)\n` +
-        `• **User ID:** \`123456789\` (numeric ID)\n\n` +
-        `**Examples:**\n` +
-        `• Username: \`john_doe\`\n` +
-        `• User ID: \`123456789\`\n\n` +
-        `Type the username/ID or /cancel to abort:`,
-        { 
+        `**Step 2: Create Private Trade Group**\n\n` +
+        `**Trade ID:** \`${tradeId}\`\n` +
+        `**Group Title:** ${groupTitle}\n\n` +
+        `**Next Steps:**\n` +
+        `1. **Click the button below to create a private group**\n` +
+        `2. **Add your buyer to the group**\n` +
+        `3. **Continue the trade in the group**\n\n` +
+        `**Group Creation Link:**\n` +
+        `\`${groupCreationLink}\`\n\n` +
+        `💰 **Step 3: Trade Amount**\n\n` +
+        `Enter the amount of USDT to trade:`,
+        {
           parse_mode: 'Markdown',
           ...Markup.inlineKeyboard([
+            [Markup.button.url('➕ Create Private Group', groupCreationLink)],
+            [Markup.button.callback('📋 Copy Link', `copy_group_link_${tradeId}`)],
             [Markup.button.callback('🔌 Disconnect Wallet', 'disconnect_wallet')]
           ])
         }
@@ -607,7 +622,7 @@ bot.action('check_wallet_connection', async (ctx) => {
         `**Steps:**\n` +
         `1. Click "Connect Wallet" button\n` +
         `2. Connect your wallet in the opened page\n` +
-        `3. Come back and click "Check Connection"`,
+        `3. The bot will automatically proceed`,
         { parse_mode: 'Markdown' }
       );
     }
