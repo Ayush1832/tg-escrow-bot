@@ -41,8 +41,48 @@ function getUserSession(userId: number) {
 bot.start(async (ctx) => {
   const userId = ctx.from?.id;
   const username = ctx.from?.username;
+  const startPayload = ctx.startPayload;
   
-  console.log(`👤 User ${username} (${userId}) started the bot`);
+  console.log(`👤 User ${username} (${userId}) started the bot with payload: ${startPayload}`);
+  
+  // Check if this is a trade group join request
+  if (startPayload && startPayload.startsWith('join_trade_')) {
+    const tradeId = startPayload.replace('join_trade_', '');
+    console.log(`🔗 User ${username} (${userId}) joining trade group: ${tradeId}`);
+    
+    await ctx.reply(
+      `🔗 **Joining Trade Group**\n\n` +
+      `**Trade ID:** \`${tradeId}\`\n\n` +
+      `You're about to join a private trade group. The seller will create the group and add you.\n\n` +
+      `**What happens next:**\n` +
+      `1. Seller creates the private group\n` +
+      `2. You'll be added to the group\n` +
+      `3. Trade details will be shared there\n` +
+      `4. Complete the transaction securely\n\n` +
+      `**Please wait for the seller to create the group...**`,
+      { parse_mode: 'Markdown' }
+    );
+    return;
+  }
+  
+  // Check if this is a group creation request
+  if (startPayload && startPayload.startsWith('create_trade_')) {
+    const tradeId = startPayload.replace('create_trade_', '');
+    console.log(`👥 User ${username} (${userId}) creating trade group: ${tradeId}`);
+    
+    await ctx.reply(
+      `👥 **Creating Trade Group**\n\n` +
+      `**Trade ID:** \`${tradeId}\`\n\n` +
+      `You're creating a private group for this trade. After creating the group:\n\n` +
+      `**Next Steps:**\n` +
+      `1. Add the buyer to this group\n` +
+      `2. The bot will initialize the trade\n` +
+      `3. Complete the transaction securely\n\n` +
+      `**Group is ready for trading!** 🎉`,
+      { parse_mode: 'Markdown' }
+    );
+    return;
+  }
   
   await ctx.reply(
     `🤖 **TON Escrow Bot**\n\n` +
@@ -55,9 +95,9 @@ bot.start(async (ctx) => {
     `**For Admins:**\n` +
     `⚙️ /admin - Admin panel\n\n` +
     `**How it works:**\n` +
-    `1. Seller creates escrow with USDT\n` +
-    `2. Buyer makes off-chain payment\n` +
-    `3. Seller confirms → USDT released to buyer\n` +
+    `1. Seller creates escrow and private group\n` +
+    `2. Buyer joins the group\n` +
+    `3. Trade happens in the private group\n` +
     `4. Disputes handled by admin\n\n` +
     `🔒 **100% Secure** - Smart contract holds funds until completion`,
     { 
@@ -114,6 +154,66 @@ bot.command('myid', async (ctx) => {
     `**Privacy:** Your User ID is safe to share for trading purposes.`,
     { parse_mode: 'Markdown' }
   );
+});
+
+// Create group command - for sellers to create the actual group
+bot.command('creategroup', async (ctx) => {
+  const userId = ctx.from?.id;
+  const session = getUserSession(userId);
+  
+  if (!session.tradeId) {
+    await ctx.reply(
+      `❌ **No Active Trade**\n\n` +
+      `You need to start a trade first using /sell command.`,
+      { parse_mode: 'Markdown' }
+    );
+    return;
+  }
+  
+  console.log(`👥 Seller ${ctx.from?.username} (${userId}) creating group for trade: ${session.tradeId}`);
+  
+  try {
+    // Create a new group with the bot
+    const botUsername = bot.botInfo?.username;
+    const groupTitle = session.groupTitle || `Escrow Trade: @${ctx.from?.username} ↔ ${session.buyerDisplay}`;
+    
+    // Generate a unique group invite link
+    const groupInviteLink = `https://t.me/${botUsername}?startgroup=create_trade_${session.tradeId}`;
+    
+    // Store group info
+    session.groupInviteLink = groupInviteLink;
+    
+    await ctx.reply(
+      `✅ **Group Invite Link Generated!**\n\n` +
+      `**Trade ID:** \`${session.tradeId}\`\n` +
+      `**Group Title:** ${groupTitle}\n\n` +
+      `**Group Invite Link:**\n` +
+      `\`${groupInviteLink}\`\n\n` +
+      `**Next Steps:**\n` +
+      `1. **Click the link below to create the group**\n` +
+      `2. **Add the buyer:** ${session.buyerDisplay}\n` +
+      `3. **Continue trade in the group**\n\n` +
+      `**Instructions:**\n` +
+      `• Click the link to create a new group\n` +
+      `• Add the buyer to the group\n` +
+      `• The bot will automatically join and initialize the trade`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.url('➕ Create Group', groupInviteLink)],
+          [Markup.button.callback('📋 Copy Link Text', `copy_group_link_${session.tradeId}`)]
+        ])
+      }
+    );
+    
+  } catch (error) {
+    console.error('Error creating group link:', error);
+    await ctx.reply(
+      `❌ **Failed to Create Group Link**\n\n` +
+      `Please try again or contact admin for assistance.`,
+      { parse_mode: 'Markdown' }
+    );
+  }
 });
 
 // About command
@@ -523,6 +623,52 @@ bot.action('disconnect_wallet', async (ctx) => {
       [Markup.button.callback('🔗 Connect Again', 'start_sell_flow')]
     ])
   });
+});
+
+// Copy link text
+bot.action(/^copy_link_(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const tradeId = ctx.match[1];
+  const botUsername = bot.botInfo?.username;
+  const groupInviteLink = `https://t.me/${botUsername}?start=join_trade_${tradeId}`;
+  
+  await ctx.reply(
+    `📋 **Group Invite Link**\n\n` +
+    `**Trade ID:** \`${tradeId}\`\n\n` +
+    `**Copy this link and send to buyer:**\n` +
+    `\`${groupInviteLink}\`\n\n` +
+    `**Instructions for buyer:**\n` +
+    `1. Click the link above\n` +
+    `2. Start the bot if not already done\n` +
+    `3. Join the private group\n` +
+    `4. Wait for trade initialization`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
+// Copy group link text
+bot.action(/^copy_group_link_(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const tradeId = ctx.match[1];
+  const userId = ctx.from!.id;
+  const session = getUserSession(userId);
+  
+  if (!session.groupInviteLink) {
+    await ctx.reply('❌ No group link available. Please use /creategroup first.');
+    return;
+  }
+  
+  await ctx.reply(
+    `📋 **Group Invite Link**\n\n` +
+    `**Trade ID:** \`${tradeId}\`\n\n` +
+    `**Copy this link and send to buyer:**\n` +
+    `\`${session.groupInviteLink}\`\n\n` +
+    `**Instructions for buyer:**\n` +
+    `1. Click the link above\n` +
+    `2. Create/join the group\n` +
+    `3. Wait for trade initialization`,
+    { parse_mode: 'Markdown' }
+  );
 });
 
 bot.action('sell_help', async (ctx) => {
@@ -1334,27 +1480,39 @@ bot.on('text', async (ctx) => {
     session.buyerUserId = buyerUserId;
     session.step = 'sell_amount';
     
-    // Provide deep-link to create a new group where the bot is a member
-    const botUsername = bot.botInfo?.username;
+    // Create a unique group for this trade
+    const tradeId = `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const buyerDisplay = buyerUserId ? `User_${buyerUserId}` : `@${buyerUsername}`;
     const groupTitle = `Escrow Trade: @${ctx.from?.username} ↔ ${buyerDisplay}`;
-    const payload = encodeURIComponent(`create_trade_group|seller=${ctx.from?.id}|buyer=${buyerUserId || buyerUsername}|title=${groupTitle}`);
-    const startGroupLink = `https://t.me/${botUsername}?startgroup=${payload}`;
-
+    
+    // Store trade info for group creation
+    session.tradeId = tradeId;
+    session.buyerDisplay = buyerDisplay;
+    session.groupTitle = groupTitle;
+    
+    // Generate a unique group invite link
+    const botUsername = bot.botInfo?.username;
+    const groupInviteLink = `https://t.me/${botUsername}?start=join_trade_${tradeId}`;
+    
     await ctx.reply(
-      `👥 **Create Private Group**\n\n` +
-      `Tap the button below to create a private group with the bot. After creating, add the buyer (${buyerDisplay}) into the group. The bot will initialize the trade there.\n\n` +
+      `👥 **Create Private Trade Group**\n\n` +
+      `**Trade ID:** \`${tradeId}\`\n` +
+      `**Group Title:** ${groupTitle}\n\n` +
       `**Buyer Info:**\n` +
       `• ${buyerUserId ? `User ID: \`${buyerUserId}\`` : `Username: @${buyerUsername}`}\n\n` +
-      `**Suggested group title:**\n` +
-      `• ${groupTitle}\n\n` +
-      `After the group is created, send any message and the bot will set it up.\n\n` +
+      `**Next Steps:**\n` +
+      `1. **Click the button below to create a group**\n` +
+      `2. **Add the buyer to the group**\n` +
+      `3. **Continue trade in the group**\n\n` +
+      `**Group Creation Link:**\n` +
+      `\`${groupInviteLink}\`\n\n` +
       `💰 **Step 3: Trade Amount**\n\n` +
-      `Enter the amount of USDT to trade (you can also set this in the group):`,
+      `Enter the amount of USDT to trade:`,
       {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-          [Markup.button.url('➕ Create Trade Group', startGroupLink)]
+          [Markup.button.url('➕ Create Group', groupInviteLink)],
+          [Markup.button.callback('📋 Copy Link Text', `copy_link_${tradeId}`)]
         ])
       }
     );
