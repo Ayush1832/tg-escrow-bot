@@ -81,10 +81,10 @@ function startWalletPolling(userId: number, ctx: any) {
         const tradeId = `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const groupTitle = `Escrow Trade: ${ctx.from?.first_name || ctx.from?.username}`;
         
-        // Set up group creation step
+        // Set up trade amount step
         session.tradeId = tradeId;
         session.groupTitle = groupTitle;
-        session.step = 'create_group';
+        session.step = 'sell_amount';
         
         // Get bot info with detailed debugging
         let botUsername = bot.botInfo?.username;
@@ -117,14 +117,11 @@ function startWalletPolling(userId: number, ctx: any) {
           );
           return;
         }
-        const createLink = `https://t.me/@ayush_escrow_bot?startgroup=create_trade_${tradeId}`;
-        
         await ctx.reply(
-          `✅ **Wallet Connected!**\n\nConnected wallet: \`${normalizedAddress}\`\n\n👥 **Create Private Group**\n\nClick to create (bot joins auto):\n\n${createLink}`,
+          `✅ **Wallet Connected!**\n\nConnected wallet: \`${normalizedAddress}\`\n\n👥 **Create Private Group**\n\n**Steps:**\n1. **Create a new group** in Telegram\n2. **Add @ayush_escrow_bot** to the group\n3. **Add your buyer** to the group\n4. **Send this command** in the group: \`/start create_trade_${tradeId}\`\n\n**Trade ID:** \`${tradeId}\`\n\n💰 **Step 3: Trade Amount**\n\nEnter the amount of USDT to trade:`,
           {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard([
-              [Markup.button.url('➕ Create Group', createLink)],
               [Markup.button.callback('❌ Cancel', 'cancel_sell')]
             ])
           }
@@ -193,12 +190,10 @@ bot.start(async (ctx) => {
         
         // PM seller
         await bot.telegram.sendMessage(sellerId,
-          `🎉 **Escrow Group Created**\n\nCreator: ${ctx.from?.first_name || ctx.from?.username}\n\nShare with buyer:\n\n${inviteLink}\n\n⚠️ 2 members only.\n\n💰 **Trade Amount**\n\nEnter USDT:`,
+          `🎉 **Escrow Group Ready!**\n\nGroup: ${ctx.chat?.title || 'Private Group'}\nTrade ID: \`${tradeId}\`\n\n✅ **Group Setup Complete**\n\nNow you can:\n• Set trade amount in this PM\n• Continue trade in the group\n• Use /status to check trade\n\n💰 **Trade Amount**\n\nEnter the amount of USDT to trade:`,
           {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard([
-              [Markup.button.url('🔗 Share', inviteLink)],
-              [Markup.button.callback('📋 Copy', `copy_group_link_${tradeId}`)],
               [Markup.button.callback('🔌 Disconnect', 'disconnect_wallet')]
             ])
           }
@@ -206,7 +201,7 @@ bot.start(async (ctx) => {
         
         // To group
         await ctx.reply(
-          `👥 **Group Ready!**\n\nTrade ID: \`${tradeId}\`\nSeller: ${ctx.from?.first_name || `@${ctx.from?.username}`}\n\nWait for buyer. Seller: set amount in PM.\n\n/status | 'payment received' | 'dispute'`,
+          `🎉 **Escrow Group Ready!**\n\nTrade ID: \`${tradeId}\`\nSeller: ${ctx.from?.first_name || `@${ctx.from?.username}`}\n\n✅ **Group setup complete!**\n\n**Next steps:**\n• Seller will set trade amount in PM\n• Trade details will be shared here\n• Use /status to check progress\n\n**Commands:**\n/status | 'payment received' | 'dispute'`,
           { parse_mode: 'Markdown' }
         );
       } catch (e) {
@@ -621,10 +616,10 @@ bot.action('start_sell_flow', async (ctx) => {
     const tradeId = `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const groupTitle = `Escrow Trade: ${ctx.from?.first_name || ctx.from?.username}`;
     
-    // Set up group creation step
+    // Set up trade amount step
     session.tradeId = tradeId;
     session.groupTitle = groupTitle;
-    session.step = 'create_group';
+    session.step = 'sell_amount';
     
     // Get bot info with detailed debugging
     let botUsername = bot.botInfo?.username;
@@ -657,14 +652,11 @@ bot.action('start_sell_flow', async (ctx) => {
       );
       return;
     }
-    const createLink = `https://t.me/${botUsername}?startgroup=create_trade_${tradeId}`;
-    
     await ctx.reply(
-      `✅ **Wallet Connected!**\n\nConnected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n👥 **Create Private Group**\n\nClick to create (bot joins auto):\n\n${createLink}`,
+      `✅ **Wallet Connected!**\n\nConnected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n👥 **Create Private Group**\n\n**Steps:**\n1. **Create a new group** in Telegram\n2. **Add @ayush_escrow_bot** to the group\n3. **Add your buyer** to the group\n4. **Send this command** in the group: \`/start create_trade_${tradeId}\`\n\n**Trade ID:** \`${tradeId}\`\n\n💰 **Step 3: Trade Amount**\n\nEnter the amount of USDT to trade:`,
       {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-          [Markup.button.url('➕ Create Group', createLink)],
           [Markup.button.callback('❌ Cancel', 'cancel_sell')]
         ])
       }
