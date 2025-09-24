@@ -407,7 +407,8 @@ function startWalletPolling(userId: number, ctx: any) {
   const interval = setInterval(async () => {
     try {
       const domain = process.env.DOMAIN || 'http://localhost:3000';
-      const response = await fetch(`${domain}/api/wallet-status/${userId}`);
+      const cleanDomain = domain.replace(/^https?:\/\//, '');
+      const response = await fetch(`https://${cleanDomain}/api/wallet-status/${userId}`);
       const data = await response.json() as any;
       
       if (data.connected && data.wallet) {
@@ -755,7 +756,7 @@ bot.command('setup', async (ctx) => {
     {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([
-        [Markup.button.webApp('🔗 Connect Wallet', `https://${process.env.DOMAIN}/connect?userId=${userId}`)],
+        [Markup.button.webApp('🔗 Connect Wallet', `https://${(process.env.DOMAIN || 'localhost:3000').replace(/^https?:\/\//, '')}/connect?userId=${userId}`)],
         [Markup.button.callback('❌ Cancel', 'cancel_setup')]
       ])
     }
@@ -1147,7 +1148,7 @@ bot.action('start_setup', async (ctx) => {
     {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([
-        [Markup.button.webApp('🔗 Connect Wallet', `https://${process.env.DOMAIN}/connect?userId=${userId}`)],
+        [Markup.button.webApp('🔗 Connect Wallet', `https://${(process.env.DOMAIN || 'localhost:3000').replace(/^https?:\/\//, '')}/connect?userId=${userId}`)],
         [Markup.button.callback('❌ Cancel', 'cancel_setup')]
       ])
     }
@@ -1514,7 +1515,7 @@ bot.action(/^deposit_usdt_(.+)$/, async (ctx) => {
       {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-          [Markup.button.webApp('🔗 Connect Wallet', `https://${process.env.DOMAIN}/connect?userId=${userId}`)],
+          [Markup.button.webApp('🔗 Connect Wallet', `https://${(process.env.DOMAIN || 'localhost:3000').replace(/^https?:\/\//, '')}/connect?userId=${userId}`)],
           [Markup.button.callback('❌ Cancel', `cancel_trade_${tradeId}`)]
         ])
       }
@@ -1718,7 +1719,9 @@ bot.action('start_sell_flow', async (ctx) => {
     try {
       // Generate connection URL with user and bot info
       const domain = process.env.DOMAIN || 'http://localhost:3000';
-      const connectionUrl = `${domain}/connect?user_id=${userId}&bot_token=${BOT_TOKEN}`;
+      // Ensure domain doesn't have double protocol
+      const cleanDomain = domain.replace(/^https?:\/\//, '');
+      const connectionUrl = `https://${cleanDomain}/connect?user_id=${userId}&bot_token=${BOT_TOKEN}`;
       
       await ctx.reply(
         `🔗 **Step 1: Connect Wallet**\n\n` +
@@ -1763,7 +1766,8 @@ bot.action('check_wallet_connection', async (ctx) => {
   try {
     // Check if wallet is connected via the web server
     const domain = process.env.DOMAIN || 'http://localhost:3000';
-    const response = await fetch(`${domain}/api/wallet-status/${userId}`);
+    const cleanDomain = domain.replace(/^https?:\/\//, '');
+    const response = await fetch(`https://${cleanDomain}/api/wallet-status/${userId}`);
     const data = await response.json() as any;
     
     if (data.connected && data.wallet) {
@@ -1857,9 +1861,10 @@ bot.action('disconnect_wallet', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from!.id;
   const domain = process.env.DOMAIN || 'http://localhost:3000';
+  const cleanDomain = domain.replace(/^https?:\/\//, '');
   try {
     // Clear server-side session
-    await fetch(`${domain}/api/wallet-disconnect/${userId}`, { method: 'POST' });
+    await fetch(`https://${cleanDomain}/api/wallet-disconnect/${userId}`, { method: 'POST' });
   } catch (e) {
     console.warn('Failed to clear server wallet session:', e);
   }
