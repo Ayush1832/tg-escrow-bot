@@ -2,23 +2,43 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+export interface SellerProfile {
+  userId: number;
+  username: string;
+  walletAddress: string;
+  bankDetails: {
+    accountHolderName: string;
+    accountNumber: string;
+    ifscCode: string;
+    bankName: string;
+  };
+  upiId: string;
+  phoneNumber?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface TradeRecord {
-  escrowAddress: string;
+  tradeId: string;
+  escrowAddress?: string;
   sellerUserId: number;
   buyerUserId?: number;
   sellerUsername: string;
   buyerUsername?: string;
+  buyerWalletAddress?: string;
   amount: string;
   commissionBps: number;
   groupId?: number;
   groupTitle?: string;
-  status: 'pending' | 'active' | 'dispute' | 'completed' | 'cancelled';
+  status: 'pending' | 'active' | 'deposited' | 'payment_pending' | 'payment_confirmed' | 'completed' | 'dispute' | 'cancelled';
   createdAt: string;
   updatedAt: string;
   depositTxHash?: string;
   confirmTxHash?: string;
+  releaseTxHash?: string;
   disputeReason?: string;
   resolutionTxHash?: string;
+  bankTransferConfirmed?: boolean;
 }
 
 export interface DisputeRecord {
@@ -37,12 +57,14 @@ export interface DisputeRecord {
 export class Database {
   private tradesFile: string;
   private disputesFile: string;
+  private sellersFile: string;
   private dataDir: string;
 
   constructor() {
     this.dataDir = path.join(__dirname, '../../data');
     this.tradesFile = path.join(this.dataDir, 'trades.json');
     this.disputesFile = path.join(this.dataDir, 'disputes.json');
+    this.sellersFile = path.join(this.dataDir, 'sellers.json');
     this.ensureDataDir();
   }
 
@@ -57,6 +79,10 @@ export class Database {
     
     if (!fs.existsSync(this.disputesFile)) {
       fs.writeFileSync(this.disputesFile, JSON.stringify([], null, 2));
+    }
+    
+    if (!fs.existsSync(this.sellersFile)) {
+      fs.writeFileSync(this.sellersFile, JSON.stringify([], null, 2));
     }
   }
 
@@ -94,6 +120,16 @@ export class Database {
       return trades.find(t => t.groupId === groupId) || null;
     } catch (error) {
       console.error('❌ Error getting trade by group ID:', error);
+      return null;
+    }
+  }
+
+  async getTradeByTradeId(tradeId: string): Promise<TradeRecord | null> {
+    try {
+      const trades = this.loadTrades();
+      return trades.find(t => t.tradeId === tradeId) || null;
+    } catch (error) {
+      console.error('❌ Error getting trade by trade ID:', error);
       return null;
     }
   }
@@ -184,6 +220,53 @@ export class Database {
       return JSON.parse(data);
     } catch (error) {
       console.error('❌ Error loading disputes:', error);
+      return [];
+    }
+  }
+
+  // Seller Profile operations
+  async saveSellerProfile(profile: SellerProfile): Promise<void> {
+    try {
+      const profiles = this.loadSellerProfiles();
+      const existingIndex = profiles.findIndex(p => p.userId === profile.userId);
+      
+      if (existingIndex >= 0) {
+        profiles[existingIndex] = profile;
+      } else {
+        profiles.push(profile);
+      }
+      
+      fs.writeFileSync(this.sellersFile, JSON.stringify(profiles, null, 2));
+    } catch (error) {
+      console.error('❌ Error saving seller profile:', error);
+    }
+  }
+
+  async getSellerProfile(userId: number): Promise<SellerProfile | null> {
+    try {
+      const profiles = this.loadSellerProfiles();
+      return profiles.find(p => p.userId === userId) || null;
+    } catch (error) {
+      console.error('❌ Error getting seller profile:', error);
+      return null;
+    }
+  }
+
+  async getAllSellerProfiles(): Promise<SellerProfile[]> {
+    try {
+      return this.loadSellerProfiles();
+    } catch (error) {
+      console.error('❌ Error getting all seller profiles:', error);
+      return [];
+    }
+  }
+
+  private loadSellerProfiles(): SellerProfile[] {
+    try {
+      const data = fs.readFileSync(this.sellersFile, 'utf8');
+      return JSON.parse(data);
+    } catch (error) {
+      console.error('❌ Error loading seller profiles:', error);
       return [];
     }
   }
