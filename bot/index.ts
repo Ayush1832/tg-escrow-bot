@@ -12,7 +12,11 @@ import fetch from 'node-fetch';
 
 // Bot configuration
 const BOT_TOKEN = process.env.BOT_TOKEN!;
-const ADMIN_USER_ID = Number(process.env.ADMIN_USER_ID || 0);
+const ADMIN_USER_ID = process.env.ADMIN_USER_ID ? Number(process.env.ADMIN_USER_ID) : 0;
+
+if (ADMIN_USER_ID === 0 || isNaN(ADMIN_USER_ID)) {
+  console.warn('⚠️ ADMIN_USER_ID not set or invalid - admin features will be disabled');
+}
 
 // Group creation configuration (using spare Telegram account)
 const GROUP_CREATOR_TOKEN = process.env.GROUP_CREATOR_TOKEN || BOT_TOKEN; // Use same token if no spare account
@@ -407,8 +411,7 @@ function startWalletPolling(userId: number, ctx: any) {
   const interval = setInterval(async () => {
     try {
       const domain = process.env.DOMAIN || 'http://localhost:3000';
-      const cleanDomain = domain.replace(/^https?:\/\//, '');
-      const response = await fetch(`https://${cleanDomain}/api/wallet-status/${userId}`);
+      const response = await fetch(`${domain}/api/wallet-status/${userId}`);
       const data = await response.json() as any;
       
       if (data.connected && data.wallet) {
@@ -576,12 +579,9 @@ bot.start(async (ctx) => {
         const inviteLink = inviteRes.invite_link;
         session.groupInviteLink = inviteLink;
         
-        // Get seller profile for display
-        const sellerProfile = await database.getSellerProfile(sellerId);
-        
-        // PM seller
+        // PM seller with simple instructions
         await bot.telegram.sendMessage(sellerId,
-          `🎉 **Escrow Group Ready!**\n\nGroup: ${ctx.chat?.title || 'Private Group'}\nTrade ID: \`${tradeId}\`\n\n✅ **Group Setup Complete**\n\n**Your Profile:**\n• **Account:** ${sellerProfile?.bankDetails.accountHolderName || 'Not set'}\n• **Bank:** ${sellerProfile?.bankDetails.bankName || 'Not set'}\n• **UPI:** ${sellerProfile?.upiId || 'Not set'}\n\n**Next Steps:**\n• Set trade amount in this PM\n• Wait for buyer to join\n• Continue trade in the group\n\n💰 **Trade Amount**\n\nEnter the amount of USDT to trade:`,
+          `🎉 **Escrow Group Ready!**\n\nGroup: ${ctx.chat?.title || 'Private Group'}\nTrade ID: \`${tradeId}\`\n\n✅ **Group Setup Complete**\n\n**Next Steps:**\n• Set trade amount in this PM\n• Add buyer to the group\n• Continue trade in the group\n\n💰 **Trade Amount**\n\nEnter the amount of USDT to trade:`,
           {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard([
@@ -756,7 +756,7 @@ bot.command('setup', async (ctx) => {
     {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([
-        [Markup.button.webApp('🔗 Connect Wallet', `https://${(process.env.DOMAIN || 'localhost:3000').replace(/^https?:\/\//, '')}/connect?userId=${userId}`)],
+        [Markup.button.webApp('🔗 Connect Wallet', `${process.env.DOMAIN || 'https://localhost:3000'}/connect?userId=${userId}`)],
         [Markup.button.callback('❌ Cancel', 'cancel_setup')]
       ])
     }
@@ -1148,7 +1148,7 @@ bot.action('start_setup', async (ctx) => {
     {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([
-        [Markup.button.webApp('🔗 Connect Wallet', `https://${(process.env.DOMAIN || 'localhost:3000').replace(/^https?:\/\//, '')}/connect?userId=${userId}`)],
+        [Markup.button.webApp('🔗 Connect Wallet', `${process.env.DOMAIN || 'https://localhost:3000'}/connect?userId=${userId}`)],
         [Markup.button.callback('❌ Cancel', 'cancel_setup')]
       ])
     }
@@ -1328,12 +1328,8 @@ bot.action(/^deploy_escrow_(.+)$/, async (ctx) => {
       trade.updatedAt = new Date().toISOString();
       await database.saveTrade(trade);
       
-      // Send automated notifications
-      await notificationManager.notifyTradeUpdate(tradeId, 'escrow_deployed', {
-        tradeId: tradeId,
-        escrowAddress: escrowAddress,
-        amount: trade.amount
-      });
+      // Simple notification
+      console.log(`📢 Escrow deployed for trade ${tradeId}: ${escrowAddress}`);
       
       await ctx.editMessageText(
         `✅ **Escrow Contract Deployed!**\n\n` +
@@ -1515,7 +1511,7 @@ bot.action(/^deposit_usdt_(.+)$/, async (ctx) => {
       {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-          [Markup.button.webApp('🔗 Connect Wallet', `https://${(process.env.DOMAIN || 'localhost:3000').replace(/^https?:\/\//, '')}/connect?userId=${userId}`)],
+          [Markup.button.webApp('🔗 Connect Wallet', `${process.env.DOMAIN || 'https://localhost:3000'}/connect?userId=${userId}`)],
           [Markup.button.callback('❌ Cancel', `cancel_trade_${tradeId}`)]
         ])
       }
@@ -1556,12 +1552,8 @@ bot.action(/^deposit_usdt_(.+)$/, async (ctx) => {
     trade.updatedAt = new Date().toISOString();
     await database.saveTrade(trade);
     
-    // Send automated notifications
-    await notificationManager.notifyTradeUpdate(tradeId, 'usdt_deposited', {
-      tradeId: tradeId,
-      amount: trade.amount,
-      txHash: depositTxHash
-    });
+    // Simple notification
+    console.log(`📢 USDT deposited for trade ${tradeId}: ${depositTxHash}`);
     
     await ctx.editMessageText(
       `✅ **USDT Deposit Successful!**\n\n` +
@@ -1674,54 +1666,26 @@ bot.action('start_sell_flow', async (ctx) => {
     session.groupTitle = groupTitle;
     session.step = 'sell_amount';
     
-        // Try automated group creation first
-        console.log(`🚀 Attempting automated group creation for trade: ${tradeId}`);
-        
-        const groupResult = await errorRecovery.recoverGroupCreation(
-          tradeId,
-          userId,
-          ctx.from?.username || 'unknown',
-          groupTitle
+        // Simple manual group creation flow
+        await ctx.reply(
+          `✅ **Wallet Connected!**\n\nConnected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n👥 **Create Group Manually**\n\n**Steps:**\n1. **Create a new group** in Telegram\n2. **Add @ayush_escrow_bot** to the group\n3. **Make bot admin** (for invite links)\n4. **Add your buyer** to the group\n5. **Send this command** in the group: \`/start create_trade_${tradeId}\`\n\n**Trade ID:** \`${tradeId}\`\n\n💰 **Step 1: Trade Amount**\n\nEnter the amount of USDT to trade:`,
+          {
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([
+              [Markup.button.callback('❌ Cancel', 'cancel_sell')]
+            ])
+          }
         );
-        
-        if (groupResult.success) {
-          // Automated group creation successful
-          session.groupId = groupResult.groupId;
-          session.groupInviteLink = groupResult.inviteLink;
-          
-          await ctx.reply(
-            `✅ **Wallet Connected & Group Created!**\n\nConnected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n🎉 **Automated Group Created**\n\n**Group:** ${groupResult.groupTitle}\n**Trade ID:** \`${tradeId}\`\n**Invite Link:** \`${groupResult.inviteLink}\`\n\n**Next Steps:**\n1. **Share the invite link** with your buyer\n2. **Set trade amount** below\n3. **Continue in the group**\n\n💰 **Step 1: Trade Amount**\n\nEnter the amount of USDT to trade:`,
-            {
-              parse_mode: 'Markdown',
-              ...Markup.inlineKeyboard([
-                [Markup.button.url('🔗 Share Group Link', groupResult.inviteLink!)],
-                [Markup.button.callback('❌ Cancel', 'cancel_sell')]
-              ])
-            }
-          );
-        } else {
-          // Fallback to manual group creation
-          console.log(`⚠️ Automated group creation failed: ${groupResult.error}`);
-          
-          await ctx.reply(
-            `✅ **Wallet Connected!**\n\nConnected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n👥 **Manual Group Creation Required**\n\n**Steps:**\n1. **Create a new group** in Telegram\n2. **Add @ayush_escrow_bot** to the group\n3. **Make bot admin** (for invite links)\n4. **Add your buyer** to the group\n5. **Send this command** in the group: \`/start create_trade_${tradeId}\`\n\n**Trade ID:** \`${tradeId}\`\n\n💰 **Step 1: Trade Amount**\n\nEnter the amount of USDT to trade:`,
-            {
-              parse_mode: 'Markdown',
-              ...Markup.inlineKeyboard([
-                [Markup.button.callback('❌ Cancel', 'cancel_sell')]
-              ])
-            }
-          );
-        }
   } else {
     session.step = 'sell_wallet_connect';
     
     try {
       // Generate connection URL with user and bot info
       const domain = process.env.DOMAIN || 'http://localhost:3000';
-      // Ensure domain doesn't have double protocol
-      const cleanDomain = domain.replace(/^https?:\/\//, '');
-      const connectionUrl = `https://${cleanDomain}/connect?user_id=${userId}&bot_token=${BOT_TOKEN}`;
+      // Use domain as-is if it already has protocol, otherwise add https://
+      const connectionUrl = domain.startsWith('http') 
+        ? `${domain}/connect?user_id=${userId}&bot_token=${BOT_TOKEN}`
+        : `https://${domain}/connect?user_id=${userId}&bot_token=${BOT_TOKEN}`;
       
       await ctx.reply(
         `🔗 **Step 1: Connect Wallet**\n\n` +
@@ -1766,8 +1730,7 @@ bot.action('check_wallet_connection', async (ctx) => {
   try {
     // Check if wallet is connected via the web server
     const domain = process.env.DOMAIN || 'http://localhost:3000';
-    const cleanDomain = domain.replace(/^https?:\/\//, '');
-    const response = await fetch(`https://${cleanDomain}/api/wallet-status/${userId}`);
+    const response = await fetch(`${domain}/api/wallet-status/${userId}`);
     const data = await response.json() as any;
     
     if (data.connected && data.wallet) {
@@ -1861,10 +1824,9 @@ bot.action('disconnect_wallet', async (ctx) => {
   await ctx.answerCbQuery();
   const userId = ctx.from!.id;
   const domain = process.env.DOMAIN || 'http://localhost:3000';
-  const cleanDomain = domain.replace(/^https?:\/\//, '');
   try {
     // Clear server-side session
-    await fetch(`https://${cleanDomain}/api/wallet-disconnect/${userId}`, { method: 'POST' });
+    await fetch(`${domain}/api/wallet-disconnect/${userId}`, { method: 'POST' });
   } catch (e) {
     console.warn('Failed to clear server wallet session:', e);
   }
@@ -2850,12 +2812,8 @@ bot.on('text', async (ctx) => {
       
       await database.saveTrade(activeBuyerTrade);
       
-      // Send automated notifications
-      await notificationManager.notifyTradeUpdate(activeBuyerTrade.tradeId, 'wallet_provided', {
-        tradeId: activeBuyerTrade.tradeId,
-        walletAddress: normalizedAddress,
-        buyerName: activeBuyerTrade.buyerUsername
-      });
+      // Simple notification
+      console.log(`📢 Wallet provided for trade ${activeBuyerTrade.tradeId}: ${normalizedAddress}`);
       
       // Get seller profile for bank details
       const sellerProfile = await database.getSellerProfile(activeBuyerTrade.sellerUserId);
@@ -3002,12 +2960,8 @@ bot.on('text', async (ctx) => {
         }
       );
       
-      // Send automated notifications
-      await notificationManager.notifyTradeUpdate(pendingTrade.tradeId, 'payment_sent', {
-        tradeId: pendingTrade.tradeId,
-        buyerName: pendingTrade.buyerUsername,
-        amount: pendingTrade.amount
-      });
+      // Simple notification
+      console.log(`📢 Payment notification for trade ${pendingTrade.tradeId}`);
       
       return; // Exit early, don't process as seller flow
     }
@@ -3042,11 +2996,8 @@ bot.on('text', async (ctx) => {
       pendingTrade.updatedAt = new Date().toISOString();
       await database.saveTrade(pendingTrade);
       
-      // Send automated notifications
-      await notificationManager.notifyTradeUpdate(pendingTrade.tradeId, 'payment_confirmed', {
-        tradeId: pendingTrade.tradeId,
-        amount: pendingTrade.amount
-      });
+      // Simple notification
+      console.log(`📢 Payment confirmed for trade ${pendingTrade.tradeId}`);
       
       // Trigger USDT release to buyer
       await releaseUSDTToBuyer(pendingTrade);
@@ -3355,12 +3306,8 @@ async function handleNewBuyer(ctx: any, buyer: any, trade: any) {
   
   await database.saveTrade(trade);
   
-  // Send automated notifications
-  await notificationManager.notifyTradeUpdate(trade.tradeId, 'buyer_joined', {
-    tradeId: trade.tradeId,
-    buyerName: buyer.first_name || `@${buyer.username}`,
-    amount: trade.amount
-  });
+  // Simple notification (removed complex notification system for now)
+  console.log(`📢 Buyer joined trade ${trade.tradeId}: ${buyer.first_name || buyer.username}`);
   
   // Get seller profile for bank details
   const sellerProfile = await database.getSellerProfile(trade.sellerUserId);
@@ -3447,12 +3394,8 @@ async function releaseUSDTToBuyer(trade: any) {
     trade.updatedAt = new Date().toISOString();
     await database.saveTrade(trade);
     
-    // Send automated notifications
-    await notificationManager.notifyTradeUpdate(trade.tradeId, 'trade_completed', {
-      tradeId: trade.tradeId,
-      amount: trade.amount,
-      txHash: releaseTxHash
-    });
+    // Simple notification
+    console.log(`📢 Trade completed: ${trade.tradeId} - ${releaseTxHash}`);
     
     // Notify buyer about USDT release
     await bot.telegram.sendMessage(
@@ -3563,9 +3506,14 @@ async function startBot() {
   console.log('👑 Admin user ID:', ADMIN_USER_ID);
   
   try {
-    // Test TON connection
-    await tonClient.testConnection();
-    console.log('✅ TON client connected');
+    // Test TON connection (optional - don't fail if it doesn't work)
+    try {
+      await tonClient.testConnection();
+      console.log('✅ TON client connected');
+    } catch (tonError) {
+      console.error('⚠️ TON connection failed (continuing anyway):', (tonError as Error).message || tonError);
+      console.log('💡 Bot will work but TON features may be limited');
+    }
     
     // Start bot
     await bot.launch();

@@ -4,9 +4,19 @@ import 'dotenv/config';
 // Check environment variables
 const requiredEnvVars = [
   'BOT_TOKEN',
-  'ADMIN_USER_ID',
-  'NETWORK'
+  'ADMIN_USER_ID'
 ];
+
+// Set default values for optional variables
+if (!process.env.NETWORK) {
+  process.env.NETWORK = 'testnet';
+  console.log('🔧 NETWORK not set, defaulting to testnet');
+}
+
+if (!process.env.DOMAIN) {
+  process.env.DOMAIN = 'http://localhost:3000';
+  console.log('🔧 DOMAIN not set, defaulting to localhost:3000');
+}
 
 const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
 
