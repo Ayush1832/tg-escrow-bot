@@ -1311,9 +1311,15 @@ bot.action(/^buyer_connect_(.+)$/, async (ctx) => {
     `Buyer: ${ctx.from?.first_name || ctx.from?.username}\n` +
     `Trade ID: \`${tradeId}\`\n` +
     `Amount: **${session.amount} USDT**\n\n` +
-    `🔗 **Connecting Wallet...**\n\n` +
-    `Please complete the wallet connection process.`,
-    { parse_mode: 'Markdown' }
+    `🔗 **Connect Your Wallet**\n\n` +
+    `Please click the button below to connect your TON wallet:`,
+    {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.webApp('🔗 Connect Wallet', `${process.env.DOMAIN}/connect?user=${buyerId}&trade=${session.tradeId}`)],
+        [Markup.button.callback('❌ Cancel Trade', 'cancel_trade')]
+      ])
+    }
   );
 
   // Notify seller
