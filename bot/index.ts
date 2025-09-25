@@ -320,17 +320,16 @@ async function checkForExistingBuyer(ctx: any, session: any, tradeId: string) {
     
     // Post a message asking the buyer to identify themselves
     await ctx.reply(
-      `🔍 **Buyer Detection**\n\n` +
-      `**If you are the buyer for this trade, please connect your wallet:**\n\n` +
-      `**Trade Details:**\n` +
-      `• Amount: **${session.amount} USDT**\n` +
-      `• Trade ID: \`${tradeId}\`\n` +
+      `🔍 Buyer Detection\n\n` +
+      `If you are the buyer for this trade, please connect your wallet:\n\n` +
+      `Trade Details:\n` +
+      `• Amount: ${session.amount} USDT\n` +
+      `• Trade ID: ${tradeId}\n` +
       `• Seller: ${ctx.from?.first_name || ctx.from?.username}\n\n` +
-      `**Click the button below to start the trade:**`,
+      `Click the button below to start the trade:`,
       {
-        parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-          [Markup.button.webApp('🔗 I am the Buyer - Connect Wallet', `${process.env.DOMAIN}/connect?trade=${session.tradeId}`)],
+          [Markup.button.callback('🔗 I am the Buyer - Connect Wallet', `buyer_connect_${session.tradeId}`)],
           [Markup.button.callback('❌ Cancel Trade', 'cancel_trade')]
         ])
       }
@@ -338,12 +337,11 @@ async function checkForExistingBuyer(ctx: any, session: any, tradeId: string) {
     
     // Notify seller
     await bot.telegram.sendMessage(session.sellerId!,
-      `🔍 **Buyer Detection**\n\n` +
-      `Trade ID: \`${tradeId}\`\n` +
-      `Amount: **${session.amount} USDT**\n\n` +
+      `🔍 Buyer Detection\n\n` +
+      `Trade ID: ${tradeId}\n` +
+      `Amount: ${session.amount} USDT\n\n` +
       `I've posted a message in the group asking the buyer to connect their wallet.\n\n` +
-      `**Next:** The buyer should click the "Connect Wallet" button to start the trade.`,
-      { parse_mode: 'Markdown' }
+      `Next: The buyer should click the "Connect Wallet" button to start the trade.`
     );
     
   } catch (error) {
@@ -428,9 +426,8 @@ bot.start(async (ctx) => {
         
         // PM seller
         await bot.telegram.sendMessage(sellerId,
-          `🎉 **Escrow Group Ready!**\n\nGroup: ${ctx.chat?.title || 'Private Group'}\nTrade ID: \`${tradeId}\`\nAmount: **${session.amount} USDT**\n\n✅ **Group Setup Complete**\n\n**Next:**\n• Add your buyer to the group\n• Bot will detect buyer and start trade\n• Trade will begin automatically\n\n**Invite Link:** ${inviteLink}`,
+          `🎉 Escrow Group Ready!\n\nGroup: ${ctx.chat?.title || 'Private Group'}\nTrade ID: ${tradeId}\nAmount: ${session.amount} USDT\n\n✅ Group Setup Complete\n\nNext:\n• Add your buyer to the group\n• Bot will detect buyer and start trade\n• Trade will begin automatically\n\nInvite Link: ${inviteLink}`,
           {
-            parse_mode: 'Markdown',
             ...Markup.inlineKeyboard([
               [Markup.button.url('🔗 Share Invite', inviteLink)],
               [Markup.button.callback('🔌 Disconnect', 'disconnect_wallet')]
@@ -1283,26 +1280,72 @@ bot.action(/^deposit_trade_(.+)$/, async (ctx) => {
 });
 
 // Handle cancel trade
+bot.action(/^buyer_connect_(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const tradeId = ctx.match[1];
+
+  // Find the session for this trade
+  const sessions = Array.from(userSessions.values());
+  const session = sessions.find(s => s.tradeId === tradeId);
+
+  if (!session) {
+    await ctx.reply('❌ Trade session not found. Please restart the trade.');
+    return;
+  }
+
+  // Set this user as the buyer
+  const buyerId = ctx.from?.id;
+  if (!buyerId) return;
+
+  session.buyerId = buyerId;
+  session.step = 'buyer_wallet_request';
+
+  // Start buyer wallet polling
+  startBuyerWalletPolling(buyerId, ctx, session);
+
+  // Update the group message
+  await ctx.reply(
+    `✅ **Buyer Identified!**\n\n` +
+    `Buyer: ${ctx.from?.first_name || ctx.from?.username}\n` +
+    `Trade ID: \`${tradeId}\`\n` +
+    `Amount: **${session.amount} USDT**\n\n` +
+    `🔗 **Connecting Wallet...**\n\n` +
+    `Please complete the wallet connection process.`,
+    { parse_mode: 'Markdown' }
+  );
+
+  // Notify seller
+  await bot.telegram.sendMessage(session.sellerId!,
+    `🎉 **Buyer Identified!**\n\n` +
+    `Buyer: ${ctx.from?.first_name || ctx.from?.username}\n` +
+    `Trade ID: \`${tradeId}\`\n` +
+    `Amount: **${session.amount} USDT**\n\n` +
+    `✅ **Trade Started!**\n\n` +
+    `The buyer is connecting their wallet. Once connected, the escrow contract will be deployed automatically.`,
+    { parse_mode: 'Markdown' }
+  );
+});
+
 bot.action('cancel_trade', async (ctx) => {
   await ctx.answerCbQuery();
-  
+
   // Find session by user ID
   const userId = ctx.from?.id;
   if (!userId) return;
-  
+
   const session = getUserSession(userId);
-  
+
   if (session.tradeId) {
     // Clear the session
     userSessions.delete(userId);
-    
+
     await ctx.reply(
       `❌ **Trade Cancelled**\n\n` +
       `Trade ID: \`${session.tradeId}\`\n\n` +
       `You can start a new trade anytime with /sell`,
       { parse_mode: 'Markdown' }
     );
-    
+
     // Notify in group if it exists
     if (session.groupId) {
       try {
