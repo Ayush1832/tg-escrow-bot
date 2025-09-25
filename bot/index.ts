@@ -412,6 +412,8 @@ bot.start(async (ctx) => {
         return;
       }
       
+      // Ensure sellerId is stored in the session
+      session.sellerId = sellerId;
       session.groupId = ctx.chat.id;
       session.step = 'waiting_for_buyer';
       
@@ -1315,15 +1317,23 @@ bot.action(/^buyer_connect_(.+)$/, async (ctx) => {
   );
 
   // Notify seller
-  await bot.telegram.sendMessage(session.sellerId!,
-    `🎉 **Buyer Identified!**\n\n` +
-    `Buyer: ${ctx.from?.first_name || ctx.from?.username}\n` +
-    `Trade ID: \`${tradeId}\`\n` +
-    `Amount: **${session.amount} USDT**\n\n` +
-    `✅ **Trade Started!**\n\n` +
-    `The buyer is connecting their wallet. Once connected, the escrow contract will be deployed automatically.`,
-    { parse_mode: 'Markdown' }
-  );
+  if (session.sellerId) {
+    try {
+      await bot.telegram.sendMessage(session.sellerId,
+        `🎉 **Buyer Identified!**\n\n` +
+        `Buyer: ${ctx.from?.first_name || ctx.from?.username}\n` +
+        `Trade ID: \`${tradeId}\`\n` +
+        `Amount: **${session.amount} USDT**\n\n` +
+        `✅ **Trade Started!**\n\n` +
+        `The buyer is connecting their wallet. Once connected, the escrow contract will be deployed automatically.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (error) {
+      console.error('Error notifying seller:', error);
+    }
+  } else {
+    console.error('Seller ID not found in session:', session);
+  }
 });
 
 bot.action('cancel_trade', async (ctx) => {
