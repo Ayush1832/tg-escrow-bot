@@ -1316,7 +1316,7 @@ bot.action(/^buyer_connect_(.+)$/, async (ctx) => {
     {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([
-        [Markup.button.webApp('🔗 Connect Wallet', `${process.env.DOMAIN}/connect?user=${buyerId}&trade=${session.tradeId}`)],
+        [Markup.button.callback('🔗 Connect Wallet', `connect_wallet_${buyerId}_${session.tradeId}`)],
         [Markup.button.callback('❌ Cancel Trade', 'cancel_trade')]
       ])
     }
@@ -1339,6 +1339,61 @@ bot.action(/^buyer_connect_(.+)$/, async (ctx) => {
     }
   } else {
     console.error('Seller ID not found in session:', session);
+  }
+});
+
+// Handle wallet connection request from group
+bot.action(/^connect_wallet_(.+)_(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const buyerId = ctx.match[1];
+  const tradeId = ctx.match[2];
+
+  // Find the session for this trade
+  const sessions = Array.from(userSessions.values());
+  const session = sessions.find(s => s.tradeId === tradeId);
+
+  if (!session) {
+    await ctx.reply('❌ Trade session not found. Please restart the trade.');
+    return;
+  }
+
+  // Send PM to buyer with wallet connection link
+  try {
+    await bot.telegram.sendMessage(buyerId,
+      `🔗 **Connect Your TON Wallet**\n\n` +
+      `**Trade Details:**\n` +
+      `• Amount: **${session.amount} USDT**\n` +
+      `• Trade ID: \`${tradeId}\`\n` +
+      `• Seller: ${session.sellerUsername || 'Unknown'}\n\n` +
+      `**Click the button below to connect your wallet:**`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.webApp('🔗 Connect Wallet', `${process.env.DOMAIN}/connect?user=${buyerId}&trade=${session.tradeId}`)],
+          [Markup.button.callback('❌ Cancel Trade', 'cancel_trade')]
+        ])
+      }
+    );
+
+    // Update group message
+    await ctx.reply(
+      `📨 **Wallet Connection Link Sent**\n\n` +
+      `I've sent a private message to ${ctx.from?.first_name || ctx.from?.username} with the wallet connection link.\n\n` +
+      `**Please check your private messages to connect your wallet.**`,
+      { parse_mode: 'Markdown' }
+    );
+
+  } catch (error) {
+    console.error('Error sending PM to buyer:', error);
+    await ctx.reply(
+      `❌ **Could not send private message**\n\n` +
+      `Please make sure you have started a conversation with the bot in private messages.\n\n` +
+      `**Steps:**\n` +
+      `1. Go to @ayush_escrow_bot\n` +
+      `2. Send /start\n` +
+      `3. Come back and click the button again`,
+      { parse_mode: 'Markdown' }
+    );
   }
 });
 
