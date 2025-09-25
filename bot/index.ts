@@ -1964,6 +1964,9 @@ bot.on('text', async (ctx) => {
   
   const session = getUserSession(userId);
   
+  // Debug logging
+  console.log(`📝 Text received from user ${userId}: "${text}", session step: ${session.step}`);
+  
   if (text === '/cancel') {
     session.step = null;
     await ctx.reply('❌ Operation cancelled');
@@ -1978,9 +1981,11 @@ bot.on('text', async (ctx) => {
   // =============================================================================
   
   if (session.step === 'sell_amount') {
+    console.log(`💰 Processing sell_amount step for user ${userId}, text: "${text}"`);
     const amount = parseFloat(text);
     
     if (isNaN(amount) || amount < 10 || amount > 10000) {
+      console.log(`❌ Invalid amount: ${amount} for user ${userId}`);
       await ctx.reply(
         `❌ **Invalid amount**\n\n` +
         `Amount must be a number between 10 and 10,000 USDT.\n\n` +
@@ -1997,6 +2002,8 @@ bot.on('text', async (ctx) => {
     const tradeId = `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     session.tradeId = tradeId;
     session.step = 'sell_group_creation';
+    
+    console.log(`✅ Amount processed successfully: ${amount} USDT, Trade ID: ${tradeId} for user ${userId}`);
     
     await ctx.reply(
       `✅ **Trade Amount Set!**\n\n` +
