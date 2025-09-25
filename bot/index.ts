@@ -215,10 +215,32 @@ async function deployEscrowContract(session: any, ctx: any) {
       return;
     }
     
-    // Deploy escrow contract using seller's wallet
-    // For now, use a placeholder mnemonic - in production, this should be handled securely
+    // For automatic deployment, we need the seller's mnemonic
+    // Since we can't get it from the connected wallet (for security), we'll use a different approach
+    // We'll ask the seller to provide their mnemonic for deployment, or use a pre-configured one
+    
+    // Option 1: Use mnemonic from session (if provided by seller)
+    // Option 2: Use environment variable for seller mnemonic (for demo/testing)
+    const sellerMnemonic = session.sellerMnemonic || process.env.SELLER_MNEMONIC;
+    
+    if (!sellerMnemonic) {
+      // If no mnemonic is configured, ask the seller to provide it
+      await ctx.reply(
+        `🔐 **Mnemonic Required for Deployment**\n\n` +
+        `To deploy the escrow contract automatically, please provide your wallet mnemonic.\n\n` +
+        `**Security Note:** This is for demo purposes. In production, use a secure key management system.\n\n` +
+        `**Send your mnemonic as a private message to the bot.**`,
+        { parse_mode: 'Markdown' }
+      );
+      
+      // Set session to wait for mnemonic
+      session.step = 'waiting_for_mnemonic';
+      return;
+    }
+    
+    // Deploy escrow contract using the mnemonic
     const escrowAddress = await tonScripts.deployEscrow(
-      'placeholder mnemonic for demo', // TODO: Implement secure mnemonic handling
+      sellerMnemonic,
       session.sellerId,
       session.sellerUsername || 'Unknown',
       session.buyerUsername || 'Unknown', 
@@ -258,8 +280,51 @@ async function deployEscrowContract(session: any, ctx: any) {
         { parse_mode: 'Markdown' }
       );
       
-      // Start seller deposit process
-      await initiateSellerDeposit(session, ctx);
+      // Automatically transfer USDT to escrow contract
+      console.log(`💰 Starting automatic USDT transfer to escrow...`);
+      
+      const transferSuccess = await tonScripts.transferUSDTToEscrow(
+        sellerMnemonic,
+        escrowAddress,
+        session.amount.toString()
+      );
+      
+      if (transferSuccess) {
+        // Update trade status to active
+        await database.updateTradeStatus(escrowAddress, 'active');
+        
+        // Notify in group
+        await ctx.reply(
+          `🎉 **USDT Deposited Successfully!**\n\n` +
+          `**Contract:** \`${escrowAddress}\`\n` +
+          `**Amount:** ${session.amount} USDT\n` +
+          `**Trade ID:** \`${session.tradeId}\`\n\n` +
+          `✅ **Escrow is now funded and ready!**\n\n` +
+          `**Next Steps:**\n` +
+          `• Seller shares bank details with buyer\n` +
+          `• Buyer makes bank transfer\n` +
+          `• Seller confirms payment\n` +
+          `• USDT is automatically released to buyer`,
+          { parse_mode: 'Markdown' }
+        );
+        
+        // Notify seller
+        await bot.telegram.sendMessage(session.sellerId,
+          `🎉 **USDT Deposited Successfully!**\n\n` +
+          `**Trade ID:** \`${session.tradeId}\`\n` +
+          `**Amount:** ${session.amount} USDT\n` +
+          `**Contract:** \`${escrowAddress}\`\n\n` +
+          `✅ **Escrow is now funded and ready!**\n\n` +
+          `**Next:** Share your bank details with the buyer in the group.`,
+          { parse_mode: 'Markdown' }
+        );
+        
+        session.step = 'trade_active';
+        
+      } else {
+        // Transfer failed, ask seller to deposit manually
+        await initiateSellerDeposit(session, ctx);
+      }
       
     } else {
       await ctx.reply('❌ Failed to deploy escrow contract. Please try again.');
@@ -2175,6 +2240,29 @@ bot.on('text', async (ctx) => {
         ])
       }
     );
+  } else if (session.step === 'waiting_for_mnemonic') {
+    console.log(`🔐 Processing mnemonic for user ${userId}, text: "${text}"`);
+    
+    // Store the mnemonic temporarily (in production, this should be handled securely)
+    session.sellerMnemonic = text.trim();
+    
+    // Validate mnemonic format (basic check)
+    const mnemonicWords = text.trim().split(' ');
+    if (mnemonicWords.length !== 24) {
+      await ctx.reply(
+        `❌ **Invalid Mnemonic Format**\n\n` +
+        `A TON wallet mnemonic should have exactly 24 words.\n\n` +
+        `Please provide your 24-word mnemonic phrase:`,
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+    
+    console.log(`✅ Mnemonic received, proceeding with deployment for user ${userId}`);
+    
+    // Proceed with deployment using the provided mnemonic
+    await deployEscrowContract(session, ctx);
+    
   } else if (session.step === 'sell_commission') {
     let commissionBps = 250; // Default 2.5%
     if (text !== 'default') {

@@ -37,18 +37,105 @@ export class TONScriptsIntegration {
         updatedAt: database.getCurrentTimestamp()
       };
 
-      // For now, create a mock escrow address
-      // In production, this would call your deploy-escrow.ts script
-      const escrowAddress = `0:escrow_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      // Deploy real escrow contract using the deployment script
+      const deployScriptPath = path.join(this.projectRoot, 'scripts', 'ton', 'deploy-escrow.ts');
       
-      tradeRecord.escrowAddress = escrowAddress;
-      await database.saveTrade(tradeRecord);
+      if (!fs.existsSync(deployScriptPath)) {
+        throw new Error(`Deploy script not found at ${deployScriptPath}`);
+      }
+
+      console.log('📝 Calling deploy-escrow.ts script...');
       
-      console.log('✅ Escrow deployed and recorded:', escrowAddress);
-      return escrowAddress;
+      // Call the deployment script with the seller's mnemonic
+      const deploymentCommand = `cd "${this.projectRoot}" && npx ts-node "${deployScriptPath}" "${sellerMnemonic}" "${amount}" "${commissionBps}"`;
+      
+      try {
+        const output = execSync(deploymentCommand, { 
+          encoding: 'utf8',
+          timeout: 60000, // 60 seconds timeout
+          stdio: 'pipe'
+        });
+        
+        console.log('📋 Deployment script output:', output);
+        
+        // Parse the output to extract the escrow address
+        // The script should return the deployed contract address
+        const lines = output.trim().split('\n');
+        const escrowAddress = lines[lines.length - 1].trim();
+        
+        if (!escrowAddress || !escrowAddress.startsWith('0:')) {
+          throw new Error('Invalid escrow address returned from deployment script');
+        }
+        
+        tradeRecord.escrowAddress = escrowAddress;
+        await database.saveTrade(tradeRecord);
+        
+        console.log('✅ Real escrow deployed and recorded:', escrowAddress);
+        return escrowAddress;
+        
+      } catch (execError: any) {
+        console.error('❌ Deployment script error:', execError.message);
+        if (execError.stdout) console.log('STDOUT:', execError.stdout);
+        if (execError.stderr) console.log('STDERR:', execError.stderr);
+        throw execError;
+      }
     } catch (error) {
       console.error('❌ Error deploying escrow:', error);
       return null;
+    }
+  }
+
+  async transferUSDTToEscrow(
+    sellerMnemonic: string,
+    escrowAddress: string,
+    amount: string
+  ): Promise<boolean> {
+    try {
+      console.log(`💰 Transferring ${amount} USDT to escrow ${escrowAddress}...`);
+      
+      // Call the seller deposit script
+      const depositScriptPath = path.join(this.projectRoot, 'scripts', 'ton', 'seller-deposit-jetton.ts');
+      
+      if (!fs.existsSync(depositScriptPath)) {
+        throw new Error(`Deposit script not found at ${depositScriptPath}`);
+      }
+
+      console.log('📝 Calling seller-deposit-jetton.ts script...');
+      
+      // Call the deposit script with seller's mnemonic, escrow address, and amount
+      const depositCommand = `cd "${this.projectRoot}" && npx ts-node "${depositScriptPath}" "${sellerMnemonic}" "${escrowAddress}" "${amount}"`;
+      
+      try {
+        const output = execSync(depositCommand, { 
+          encoding: 'utf8',
+          timeout: 60000, // 60 seconds timeout
+          stdio: 'pipe'
+        });
+        
+        console.log('📋 Deposit script output:', output);
+        
+        // Check if the output indicates success
+        const lines = output.trim().split('\n');
+        const lastLine = lines[lines.length - 1].trim().toLowerCase();
+        
+        if (lastLine.includes('success') || lastLine.includes('completed') || lastLine.includes('sent')) {
+          console.log('✅ USDT transfer completed successfully');
+          return true;
+        } else {
+          console.error('❌ Deposit script did not indicate success');
+          return false;
+        }
+        
+      } catch (execError: any) {
+        console.error('❌ Deposit script error:', execError.message);
+        if (execError.stdout) console.log('STDOUT:', execError.stdout);
+        if (execError.stderr) console.log('STDERR:', execError.stderr);
+        return false;
+      }
+      
+    } catch (error) {
+      console.error('❌ Error transferring USDT to escrow:', error);
+      return false;
     }
   }
 
