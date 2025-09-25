@@ -25,9 +25,7 @@ export class TONScriptsIntegration {
       console.log('🚀 Deploying escrow contract...');
       
       // Create trade record
-      const tradeId = `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const tradeRecord = {
-        tradeId,
         escrowAddress: '', // Will be filled after deployment
         sellerUserId,
         sellerUsername,

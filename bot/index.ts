@@ -12,15 +12,7 @@ import fetch from 'node-fetch';
 
 // Bot configuration
 const BOT_TOKEN = process.env.BOT_TOKEN!;
-const ADMIN_USER_ID = process.env.ADMIN_USER_ID ? Number(process.env.ADMIN_USER_ID) : 0;
-
-if (ADMIN_USER_ID === 0 || isNaN(ADMIN_USER_ID)) {
-  console.warn('⚠️ ADMIN_USER_ID not set or invalid - admin features will be disabled');
-}
-
-// Group creation configuration (using spare Telegram account)
-const GROUP_CREATOR_TOKEN = process.env.GROUP_CREATOR_TOKEN || BOT_TOKEN; // Use same token if no spare account
-const GROUP_CREATOR_USER_ID = Number(process.env.GROUP_CREATOR_USER_ID || ADMIN_USER_ID);
+const ADMIN_USER_ID = Number(process.env.ADMIN_USER_ID || 0);
 
 if (!BOT_TOKEN) {
   console.error('❌ BOT_TOKEN not found in environment variables');
@@ -30,366 +22,21 @@ if (!BOT_TOKEN) {
 // Create bot instance
 const bot = new Telegraf(BOT_TOKEN);
 
-// Wallet session interface for persistent connections
-interface WalletSession {
-  userId: number;
-  walletAddress: string;
-  connectedAt: string;
-  expiresAt: string;
-  autoReconnect: boolean;
-  lastUsed: string;
-}
-
-// User session interface
-interface UserSession {
-  step?: string;
-  tradeId?: string;
-  groupTitle?: string;
-  groupId?: number;
-  groupInviteLink?: string;
-  groupCreationLink?: string;
-  amount?: string;
-  commissionBps?: number;
-  escrowAddress?: string;
-  buyerWalletAddress?: string;
-  buyerUsername?: string;
-  buyerDisplay?: string;
-  bankDetails?: {
-    accountHolderName?: string;
-    accountNumber?: string;
-    ifscCode?: string;
-    bankName?: string;
-  };
-  upiId?: string;
-  phoneNumber?: string;
-  walletAddress?: string;
-  profileSetup?: boolean;
-  walletSession?: WalletSession;
-}
-
 // User sessions storage (in production, use Redis or database)
-const userSessions: Map<number, UserSession> = new Map();
-
-// Persistent wallet sessions storage
-const walletSessions: Map<number, WalletSession> = new Map();
+const userSessions: Map<number, any> = new Map();
 
 // Polling for wallet connections
 const walletPollingInterval = 2000; // Check every 2 seconds
 const walletPolling = new Map<number, NodeJS.Timeout>();
+const buyerWalletPolling = new Map<number, NodeJS.Timeout>();
 
 // Helper function to get user session
-function getUserSession(userId: number): UserSession {
+function getUserSession(userId: number) {
   if (!userSessions.has(userId)) {
     userSessions.set(userId, {});
   }
-  return userSessions.get(userId)!;
+  return userSessions.get(userId);
 }
-
-// Wallet session management functions
-function saveWalletSession(userId: number, walletAddress: string, autoReconnect: boolean = true): void {
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days
-  
-  const walletSession: WalletSession = {
-    userId,
-    walletAddress,
-    connectedAt: now.toISOString(),
-    expiresAt: expiresAt.toISOString(),
-    autoReconnect,
-    lastUsed: now.toISOString()
-  };
-  
-  walletSessions.set(userId, walletSession);
-  
-  // Also update user session
-  const userSession = getUserSession(userId);
-  userSession.walletSession = walletSession;
-  userSession.walletAddress = walletAddress;
-}
-
-function getWalletSession(userId: number): WalletSession | null {
-  const session = walletSessions.get(userId);
-  if (!session) return null;
-  
-  // Check if session is expired
-  const now = new Date();
-  const expiresAt = new Date(session.expiresAt);
-  
-  if (now > expiresAt) {
-    walletSessions.delete(userId);
-    return null;
-  }
-  
-  return session;
-}
-
-function updateWalletSessionLastUsed(userId: number): void {
-  const session = walletSessions.get(userId);
-  if (session) {
-    session.lastUsed = new Date().toISOString();
-    walletSessions.set(userId, session);
-  }
-}
-
-async function ensureWalletConnected(userId: number): Promise<boolean> {
-  // Check if already connected via tonConnectService
-  if (tonConnectService.isWalletConnected(userId)) {
-    updateWalletSessionLastUsed(userId);
-    return true;
-  }
-  
-  // Try to reconnect from stored session
-  const walletSession = getWalletSession(userId);
-  if (walletSession && walletSession.autoReconnect) {
-    // Restore wallet connection
-    const walletInfo = {
-      address: walletSession.walletAddress,
-      publicKey: '', // We don't have the public key in stored sessions
-      connected: true
-    };
-    
-    tonConnectService.connectedWallets.set(userId, walletInfo);
-    updateWalletSessionLastUsed(userId);
-    
-    console.log(`🔄 Auto-reconnected wallet for user ${userId}: ${walletSession.walletAddress}`);
-    return true;
-  }
-  
-  return false;
-}
-
-// Automated Group Management System
-interface GroupCreationResult {
-  success: boolean;
-  groupId?: number;
-  groupTitle?: string;
-  inviteLink?: string;
-  error?: string;
-}
-
-async function createTradeGroupAutomatically(
-  tradeId: string, 
-  sellerId: number, 
-  sellerUsername: string,
-  groupTitle: string
-): Promise<GroupCreationResult> {
-  try {
-    console.log(`🚀 Creating automated trade group for trade: ${tradeId}`);
-    
-    // Method 1: Try using Telegram Bot API to create group (if supported)
-    try {
-      // Note: createChat is not available in Telegram Bot API
-      // We'll use the manual approach instead
-      throw new Error('Bot API does not support creating groups directly');
-    } catch (apiError) {
-      console.log(`⚠️ Bot API group creation failed: ${apiError}`);
-    }
-    
-    // Method 2: Use spare account approach (fallback)
-    return await createGroupWithSpareAccount(tradeId, sellerId, sellerUsername, groupTitle);
-    
-  } catch (error) {
-    console.error(`❌ Group creation failed: ${error}`);
-    return {
-      success: false,
-      error: `Failed to create group: ${error instanceof Error ? error.message : String(error)}`
-    };
-  }
-}
-
-async function createGroupWithSpareAccount(
-  tradeId: string,
-  sellerId: number, 
-  sellerUsername: string,
-  groupTitle: string
-): Promise<GroupCreationResult> {
-  try {
-    console.log(`🔄 Attempting group creation with spare account approach...`);
-    
-    // Create a unique invite link that the seller can use
-    const groupCreationLink = `https://t.me/${bot.botInfo?.username}?startgroup=auto_create_${tradeId}`;
-    
-    // For now, we'll provide instructions for manual group creation
-    // In a real implementation, you would:
-    // 1. Use a spare Telegram account to create the group
-    // 2. Add the bot to the group
-    // 3. Make the bot admin
-    // 4. Generate an invite link
-    // 5. Return the group details
-    
-    return {
-      success: false,
-      error: 'Automated group creation requires manual setup. Please create group manually and add the bot.'
-    };
-    
-  } catch (error) {
-    return {
-      success: false,
-      error: `Spare account method failed: ${error instanceof Error ? error.message : String(error)}`
-    };
-  }
-}
-
-// Enhanced notification system
-class TradeNotificationManager {
-  async notifyTradeUpdate(tradeId: string, event: string, details: any = {}) {
-    const trade = await database.getTradeByTradeId(tradeId);
-    if (!trade) return;
-    
-    console.log(`📢 Trade notification: ${event} for trade ${tradeId}`);
-    
-    // Notify both parties
-    const notifications = [];
-    
-    if (trade.sellerUserId) {
-      notifications.push(this.notifyUser(trade.sellerUserId, event, details));
-    }
-    
-    if (trade.buyerUserId) {
-      notifications.push(this.notifyUser(trade.buyerUserId, event, details));
-    }
-    
-    // Update group if exists
-    if (trade.groupId) {
-      notifications.push(this.updateGroupStatus(trade.groupId, event, details));
-    }
-    
-    await Promise.all(notifications);
-  }
-  
-  private async notifyUser(userId: number, event: string, details: any): Promise<void> {
-    try {
-      const message = this.formatNotificationMessage(event, details);
-      await bot.telegram.sendMessage(userId, message, { parse_mode: 'Markdown' });
-    } catch (error) {
-      console.error(`❌ Failed to notify user ${userId}: ${error}`);
-    }
-  }
-  
-  private async updateGroupStatus(groupId: number, event: string, details: any): Promise<void> {
-    try {
-      const message = this.formatGroupNotificationMessage(event, details);
-      await bot.telegram.sendMessage(groupId, message, { parse_mode: 'Markdown' });
-    } catch (error) {
-      console.error(`❌ Failed to update group ${groupId}: ${error}`);
-    }
-  }
-  
-  private formatNotificationMessage(event: string, details: any): string {
-    switch (event) {
-      case 'buyer_joined':
-        return `🛒 **Buyer Joined Trade**\n\nTrade ID: \`${details.tradeId}\`\nBuyer: ${details.buyerName}\n\nTrade is now active!`;
-      case 'wallet_provided':
-        return `✅ **Buyer Wallet Received**\n\nTrade ID: \`${details.tradeId}\`\nWallet: \`${details.walletAddress}\`\n\nReady for escrow deployment!`;
-      case 'escrow_deployed':
-        return `🚀 **Escrow Contract Deployed**\n\nTrade ID: \`${details.tradeId}\`\nContract: \`${details.escrowAddress}\`\n\nReady for USDT deposit!`;
-      case 'usdt_deposited':
-        return `💰 **USDT Deposited to Escrow**\n\nTrade ID: \`${details.tradeId}\`\nAmount: ${details.amount} USDT\n\nWaiting for buyer's bank transfer!`;
-      case 'payment_sent':
-        return `💳 **Payment Notification**\n\nTrade ID: \`${details.tradeId}\`\nBuyer has sent payment notification.\n\nPlease verify and confirm!`;
-      case 'payment_confirmed':
-        return `✅ **Payment Confirmed**\n\nTrade ID: \`${details.tradeId}\`\nUSDT will be released to buyer shortly!`;
-      case 'trade_completed':
-        return `🎉 **Trade Completed Successfully!**\n\nTrade ID: \`${details.tradeId}\`\nAmount: ${details.amount} USDT\n\nThank you for using our escrow service!`;
-      default:
-        return `📢 **Trade Update**\n\nTrade ID: \`${details.tradeId}\`\nEvent: ${event}`;
-    }
-  }
-  
-  private formatGroupNotificationMessage(event: string, details: any): string {
-    return this.formatNotificationMessage(event, details);
-  }
-}
-
-// Initialize notification manager
-const notificationManager = new TradeNotificationManager();
-
-// Enhanced Error Recovery System
-class ErrorRecoveryManager {
-  private retryAttempts = new Map<string, number>();
-  private maxRetries = 3;
-  
-  async retryOperation<T>(
-    operation: () => Promise<T>,
-    operationId: string,
-    context: any = {}
-  ): Promise<T | null> {
-    const attempts = this.retryAttempts.get(operationId) || 0;
-    
-    if (attempts >= this.maxRetries) {
-      console.error(`❌ Max retries exceeded for operation: ${operationId}`);
-      this.retryAttempts.delete(operationId);
-      return null;
-    }
-    
-    try {
-      const result = await operation();
-      this.retryAttempts.delete(operationId);
-      return result;
-    } catch (error) {
-      const newAttempts = attempts + 1;
-      this.retryAttempts.set(operationId, newAttempts);
-      
-      console.warn(`⚠️ Operation ${operationId} failed (attempt ${newAttempts}/${this.maxRetries}): ${error}`);
-      
-      // Wait before retry (exponential backoff)
-      const delay = Math.pow(2, newAttempts) * 1000;
-      await new Promise(resolve => setTimeout(resolve, delay));
-      
-      return this.retryOperation(operation, operationId, context);
-    }
-  }
-  
-  async recoverWalletConnection(userId: number): Promise<boolean> {
-    const result = await this.retryOperation(
-      async () => {
-        const connected = await ensureWalletConnected(userId);
-        if (!connected) {
-          throw new Error('Failed to reconnect wallet');
-        }
-        return connected;
-      },
-      `wallet_reconnect_${userId}`,
-      { userId }
-    );
-    return result || false;
-  }
-  
-  async recoverGroupCreation(
-    tradeId: string,
-    sellerId: number,
-    sellerUsername: string,
-    groupTitle: string
-  ): Promise<GroupCreationResult> {
-    const result = await this.retryOperation(
-      async () => {
-        const result = await createTradeGroupAutomatically(tradeId, sellerId, sellerUsername, groupTitle);
-        if (!result.success) {
-          throw new Error(result.error || 'Group creation failed');
-        }
-        return result;
-      },
-      `group_creation_${tradeId}`,
-      { tradeId, sellerId }
-    );
-    return result || { success: false, error: 'Max retries exceeded' };
-  }
-  
-  async recoverTradeOperation(
-    tradeId: string,
-    operation: () => Promise<void>
-  ): Promise<boolean> {
-    const result = await this.retryOperation(
-      operation,
-      `trade_operation_${tradeId}`,
-      { tradeId }
-    );
-    return result !== null;
-  }
-}
-
-// Initialize error recovery manager
-const errorRecovery = new ErrorRecoveryManager();
 
 // Generate a unique invite code that looks like real Telegram invite links
 function generateInviteCode(): string {
@@ -431,45 +78,9 @@ function startWalletPolling(userId: number, ctx: any) {
         const session = getUserSession(userId);
         session.walletAddress = normalizedAddress;
         
-        // Save persistent wallet session
-        saveWalletSession(userId, normalizedAddress, true);
-        
-        // Check if this is profile setup or trade flow
-        if (session.step === 'setup_wallet_connect') {
-          // Profile setup flow
-          session.step = 'setup_bank_details';
-          await ctx.reply(
-            `✅ **Wallet Connected!**\n\nConnected wallet: \`${normalizedAddress}\`\n\n🏦 **Step 2: Bank Details**\n\n` +
-            `Please provide your bank account details:\n\n` +
-            `**Account Holder Name:** (as per bank records)`,
-            {
-              parse_mode: 'Markdown',
-              ...Markup.inlineKeyboard([
-                [Markup.button.callback('❌ Cancel', 'cancel_setup')]
-              ])
-            }
-          );
-          return;
-        }
-        
-        // Trade flow
-        // Get seller profile for trade info
-        const sellerProfile = await database.getSellerProfile(userId);
-        if (!sellerProfile) {
-          await ctx.reply(
-            `❌ **Profile Setup Required**\n\n` +
-            `You need to set up your seller profile first.\n\n` +
-            `Use /setup to create your profile.`,
-            {
-              parse_mode: 'Markdown'
-            }
-          );
-          return;
-        }
-        
         // Create a unique trade ID
         const tradeId = `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        const groupTitle = `Escrow Trade: ${sellerProfile.bankDetails.accountHolderName}`;
+        const groupTitle = `Escrow Trade: ${ctx.from?.first_name || ctx.from?.username}`;
         
         // Set up trade amount step
         session.tradeId = tradeId;
@@ -508,7 +119,7 @@ function startWalletPolling(userId: number, ctx: any) {
           return;
         }
         await ctx.reply(
-          `✅ **Wallet Connected!**\n\nConnected wallet: \`${normalizedAddress}\`\n\n👥 **Create Private Group**\n\n**Steps:**\n1. **Create a new group** in Telegram\n2. **Add @ayush_escrow_bot** to the group\n3. **Make bot admin** (for invite links)\n4. **Add your buyer** to the group\n5. **Send this command** in the group: \`/start create_trade_${tradeId}\`\n\n**Trade ID:** \`${tradeId}\`\n\n💰 **Step 3: Trade Amount**\n\nEnter the amount of USDT to trade:`,
+          `✅ **Wallet Connected!**\n\nConnected wallet: \`${normalizedAddress}\`\n\n💰 **Step 2: Set Trade Amount**\n\nEnter the amount of USDT to trade:\n\nExample: \`100\` for 100 USDT`,
           {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard([
@@ -531,6 +142,158 @@ function startWalletPolling(userId: number, ctx: any) {
       walletPolling.delete(userId);
     }
   }, 5 * 60 * 1000);
+}
+
+// Start buyer wallet connection polling
+function startBuyerWalletPolling(userId: number, ctx: any, session: any) {
+  console.log(`🔄 Starting buyer wallet polling for user ${userId}`);
+  
+  const interval = setInterval(async () => {
+    try {
+      const response = await fetch(`${process.env.DOMAIN}/api/wallet-status/${userId}`);
+      if (!response.ok) {
+        return;
+      }
+      
+      const data = await response.json() as any;
+      
+      if (data.connected && data.wallet) {
+        console.log(`✅ Buyer wallet connected: ${data.wallet.address}`);
+        
+        // Stop polling
+        clearInterval(interval);
+        if (buyerWalletPolling.has(userId)) {
+          buyerWalletPolling.delete(userId);
+        }
+        
+        // Store buyer wallet info
+        session.buyerWallet = data.wallet;
+        session.buyerAddress = Address.parse(data.wallet.address).toString({ bounceable: false });
+        session.step = 'deploy_escrow';
+        
+        // Notify in group
+        await ctx.reply(
+          `✅ **Buyer Wallet Connected!**\n\n` +
+          `Buyer: ${ctx.from?.first_name || 'Unknown'}\n` +
+          `Wallet: \`${session.buyerAddress}\`\n` +
+          `Trade ID: \`${session.tradeId}\`\n` +
+          `Amount: **${session.amount} USDT**\n\n` +
+          `🚀 **Deploying Escrow Contract...**\n\n` +
+          `The escrow contract is being deployed automatically. This may take a few minutes.`,
+          { parse_mode: 'Markdown' }
+        );
+        
+        // Deploy escrow contract
+        await deployEscrowContract(session, ctx);
+        
+      }
+    } catch (error) {
+      console.error('Error polling buyer wallet connection:', error);
+    }
+  }, walletPollingInterval);
+  
+  buyerWalletPolling.set(userId, interval);
+  
+  // Stop polling after 5 minutes
+  setTimeout(() => {
+    if (buyerWalletPolling.has(userId)) {
+      clearInterval(buyerWalletPolling.get(userId));
+      buyerWalletPolling.delete(userId);
+    }
+  }, 5 * 60 * 1000); // 5 minutes
+}
+
+// Deploy escrow contract
+async function deployEscrowContract(session: any, ctx: any) {
+  try {
+    console.log(`🚀 Deploying escrow contract for trade ${session.tradeId}`);
+    
+    // Get seller wallet
+    const sellerWallet = tonConnectService.getConnectedWallet(session.sellerId);
+    if (!sellerWallet) {
+      await ctx.reply('❌ Seller wallet not connected. Please reconnect.');
+      return;
+    }
+    
+    // Deploy escrow contract using seller's wallet
+    // For now, use a placeholder mnemonic - in production, this should be handled securely
+    const escrowAddress = await tonScripts.deployEscrow(
+      'placeholder mnemonic for demo', // TODO: Implement secure mnemonic handling
+      session.sellerId,
+      session.sellerUsername || 'Unknown',
+      session.buyerUsername || 'Unknown', 
+      session.amount.toString(),
+      250 // Default commission
+    );
+    
+    if (escrowAddress) {
+      // Store escrow address
+      session.escrowAddress = escrowAddress;
+      session.step = 'seller_deposit';
+      
+      // Save to database
+      await database.saveTrade({
+        escrowAddress: escrowAddress,
+        sellerUserId: session.sellerId,
+        buyerUserId: session.buyerId,
+        sellerUsername: session.sellerUsername || 'Unknown',
+        buyerUsername: session.buyerUsername || 'Unknown',
+        amount: session.amount.toString(),
+        commissionBps: 250,
+        groupId: session.groupId,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+      
+      // Notify in group
+      await ctx.reply(
+        `🎉 **Escrow Contract Deployed!**\n\n` +
+        `**Contract Address:** \`${escrowAddress}\`\n` +
+        `**Trade ID:** \`${session.tradeId}\`\n` +
+        `**Amount:** ${session.amount} USDT\n` +
+        `**Buyer:** \`${session.buyerAddress}\`\n\n` +
+        `💰 **Step 2: Seller Deposit**\n\n` +
+        `The seller will now deposit ${session.amount} USDT to the escrow contract. This will be done automatically from their wallet.`,
+        { parse_mode: 'Markdown' }
+      );
+      
+      // Start seller deposit process
+      await initiateSellerDeposit(session, ctx);
+      
+    } else {
+      await ctx.reply('❌ Failed to deploy escrow contract. Please try again.');
+    }
+    
+  } catch (error) {
+    console.error('Error deploying escrow contract:', error);
+    await ctx.reply('❌ Error deploying escrow contract. Please try again.');
+  }
+}
+
+// Initiate seller deposit
+async function initiateSellerDeposit(session: any, ctx: any) {
+  try {
+    // Notify seller via PM
+    await bot.telegram.sendMessage(session.sellerId,
+      `💰 **Deposit Required**\n\n` +
+      `**Trade ID:** \`${session.tradeId}\`\n` +
+      `**Amount:** ${session.amount} USDT\n` +
+      `**Contract:** \`${session.escrowAddress}\`\n\n` +
+      `**Deposit USDT to escrow contract:**\n\n` +
+      `This will be done automatically from your connected wallet. Please confirm the transaction when prompted.`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('💰 Deposit USDT', `deposit_${session.tradeId}`)],
+          [Markup.button.callback('❌ Cancel Trade', 'cancel_trade')]
+        ])
+      }
+    );
+    
+  } catch (error) {
+    console.error('Error initiating seller deposit:', error);
+  }
 }
 
 // Stop wallet connection polling for a user
@@ -568,23 +331,24 @@ bot.start(async (ctx) => {
       }
       
       session.groupId = ctx.chat.id;
-      session.step = 'sell_amount';
+      session.step = 'waiting_for_buyer';
       
       try {
         // Try to create invite link with admin privileges
         const inviteRes = await ctx.telegram.createChatInviteLink(ctx.chat.id, {
           member_limit: 2,
-          name: session.groupTitle || 'Escrow Trade'
+          name: session.groupTitle
         });
         const inviteLink = inviteRes.invite_link;
         session.groupInviteLink = inviteLink;
         
-        // PM seller with simple instructions
+        // PM seller
         await bot.telegram.sendMessage(sellerId,
-          `🎉 **Escrow Group Ready!**\n\nGroup: ${ctx.chat?.title || 'Private Group'}\nTrade ID: \`${tradeId}\`\n\n✅ **Group Setup Complete**\n\n**Next Steps:**\n• Set trade amount in this PM\n• Add buyer to the group\n• Continue trade in the group\n\n💰 **Trade Amount**\n\nEnter the amount of USDT to trade:`,
+          `🎉 **Escrow Group Ready!**\n\nGroup: ${ctx.chat?.title || 'Private Group'}\nTrade ID: \`${tradeId}\`\nAmount: **${session.amount} USDT**\n\n✅ **Group Setup Complete**\n\n**Next:**\n• Add your buyer to the group\n• Bot will detect buyer and start trade\n• Trade will begin automatically\n\n**Invite Link:** ${inviteLink}`,
           {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard([
+              [Markup.button.url('🔗 Share Invite', inviteLink)],
               [Markup.button.callback('🔌 Disconnect', 'disconnect_wallet')]
             ])
           }
@@ -592,7 +356,7 @@ bot.start(async (ctx) => {
         
         // To group
         await ctx.reply(
-          `🎉 **Escrow Group Ready!**\n\nTrade ID: \`${tradeId}\`\nSeller: ${ctx.from?.first_name || `@${ctx.from?.username}`}\n\n✅ **Group setup complete!**\n\n**Next steps:**\n• Seller will set trade amount in PM\n• Trade details will be shared here\n• Use /status to check progress\n\n**Commands:**\n/status | 'payment received' | 'dispute'`,
+          `🎉 **Escrow Group Ready!**\n\nTrade ID: \`${tradeId}\`\nAmount: **${session.amount} USDT**\nSeller: ${ctx.from?.first_name || `@${ctx.from?.username}`}\n\n✅ **Group setup complete!**\n\n**Waiting for buyer...**\n\n**Next steps:**\n• Seller will add buyer to this group\n• Bot will detect buyer automatically\n• Trade will start once buyer joins\n\n**Commands:**\n/status | 'payment received' | 'dispute'`,
           { parse_mode: 'Markdown' }
         );
       } catch (e) {
@@ -710,102 +474,6 @@ bot.command('myid', async (ctx) => {
   );
 });
 
-// Setup seller profile command - one-time setup for sellers
-bot.command('setup', async (ctx) => {
-  const userId = ctx.from?.id;
-  const username = ctx.from?.username;
-  
-  console.log(`🔧 User ${username} (${userId}) started seller setup`);
-  
-  // Check if profile already exists
-  const existingProfile = await database.getSellerProfile(userId!);
-  if (existingProfile) {
-    await ctx.reply(
-      `✅ **Profile Already Setup!**\n\n` +
-      `**Account Holder:** ${existingProfile.bankDetails.accountHolderName}\n` +
-      `**Bank:** ${existingProfile.bankDetails.bankName}\n` +
-      `**UPI ID:** ${existingProfile.upiId}\n` +
-      `**Wallet:** \`${existingProfile.walletAddress}\`\n\n` +
-      `**Options:**\n` +
-      `• Use /sell to create a new trade\n` +
-      `• Use /editprofile to update your details`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('✏️ Edit Profile', 'edit_profile')],
-          [Markup.button.callback('🚀 Start Selling', 'start_sell_flow')]
-        ])
-      }
-    );
-    return;
-  }
-  
-  const session = getUserSession(userId!);
-  session.step = 'setup_wallet_connect';
-  
-  await ctx.reply(
-    `🔧 **Seller Profile Setup**\n\n` +
-    `Welcome! Let's set up your seller profile.\n\n` +
-    `**What we'll collect:**\n` +
-    `• Your TON wallet address\n` +
-    `• Bank account details\n` +
-    `• UPI ID for payments\n` +
-    `• Phone number (optional)\n\n` +
-    `**Step 1: Connect Your TON Wallet**\n\n` +
-    `Click the button below to connect your wallet:`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.webApp('🔗 Connect Wallet', `${process.env.DOMAIN || 'https://localhost:3000'}/connect?userId=${userId}`)],
-        [Markup.button.callback('❌ Cancel', 'cancel_setup')]
-      ])
-    }
-  );
-});
-
-// Edit profile command
-bot.command('editprofile', async (ctx) => {
-  const userId = ctx.from?.id;
-  const username = ctx.from?.username;
-  
-  console.log(`✏️ User ${username} (${userId}) wants to edit profile`);
-  
-  const existingProfile = await database.getSellerProfile(userId!);
-  if (!existingProfile) {
-    await ctx.reply(
-      `❌ **No Profile Found**\n\n` +
-      `You haven't set up your seller profile yet.\n\n` +
-      `Use /setup to create your profile first.`,
-      {
-        parse_mode: 'Markdown'
-      }
-    );
-    return;
-  }
-  
-  await ctx.reply(
-    `✏️ **Edit Your Profile**\n\n` +
-    `**Current Details:**\n` +
-    `• **Account Holder:** ${existingProfile.bankDetails.accountHolderName}\n` +
-    `• **Bank:** ${existingProfile.bankDetails.bankName}\n` +
-    `• **Account Number:** ${existingProfile.bankDetails.accountNumber}\n` +
-    `• **IFSC:** ${existingProfile.bankDetails.ifscCode}\n` +
-    `• **UPI ID:** ${existingProfile.upiId}\n` +
-    `• **Phone:** ${existingProfile.phoneNumber || 'Not provided'}\n\n` +
-    `**What would you like to update?**`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('🏦 Bank Details', 'edit_bank_details')],
-        [Markup.button.callback('💳 UPI ID', 'edit_upi_id')],
-        [Markup.button.callback('📱 Phone Number', 'edit_phone')],
-        [Markup.button.callback('🔗 Wallet Address', 'edit_wallet')],
-        [Markup.button.callback('✅ Done', 'profile_complete')]
-      ])
-    }
-  );
-});
-
 // Create group command - for sellers to create the actual group
 bot.command('creategroup', async (ctx) => {
   const userId = ctx.from?.id;
@@ -825,7 +493,7 @@ bot.command('creategroup', async (ctx) => {
   try {
     // Create a new group with the bot
     const botUsername = bot.botInfo?.username;
-    const groupTitle = session.groupTitle || `Escrow Trade: @${ctx.from?.username}`;
+    const groupTitle = session.groupTitle || `Escrow Trade: @${ctx.from?.username} ↔ ${session.buyerDisplay}`;
     
     // Generate a unique group invite link
     const groupInviteLink = `https://t.me/${botUsername}?startgroup=create_trade_${session.tradeId}`;
@@ -841,7 +509,7 @@ bot.command('creategroup', async (ctx) => {
       `\`${groupInviteLink}\`\n\n` +
       `**Next Steps:**\n` +
       `1. **Click the link below to create the group**\n` +
-      `2. **Add the buyer to the group**\n` +
+      `2. **Add the buyer:** ${session.buyerDisplay}\n` +
       `3. **Continue trade in the group**\n\n` +
       `**Instructions:**\n` +
       `• Click the link to create a new group\n` +
@@ -921,43 +589,19 @@ bot.command('sell', async (ctx) => {
   
   console.log(`🛒 Seller ${username} (${userId}) started sell flow`);
   
-  // Check if seller has profile setup
-  const sellerProfile = await database.getSellerProfile(userId!);
-  if (!sellerProfile) {
-    await ctx.reply(
-      `❌ **Profile Setup Required**\n\n` +
-      `You need to set up your seller profile first.\n\n` +
-      `**What we'll collect:**\n` +
-      `• Your TON wallet address\n` +
-      `• Bank account details\n` +
-      `• UPI ID for payments\n` +
-      `• Phone number (optional)\n\n` +
-      `**This is a one-time setup!**`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('🔧 Setup Profile', 'start_setup')],
-          [Markup.button.callback('❓ Help', 'sell_help')]
-        ])
-      }
-    );
-    return;
-  }
-  
   await ctx.reply(
     `🛒 **Start Selling**\n\n` +
     `Let's create a new escrow for your USDT sale!\n\n` +
-    `**Your Profile:**\n` +
-    `• **Account:** ${sellerProfile.bankDetails.accountHolderName}\n` +
-    `• **Bank:** ${sellerProfile.bankDetails.bankName}\n` +
-    `• **UPI:** ${sellerProfile.upiId}\n` +
-    `• **Wallet:** \`${sellerProfile.walletAddress}\`\n\n` +
-    `**Ready to create a new trade?**`,
+    `**What you need:**\n` +
+    `• Connect your TON wallet (Telegram Wallet)\n` +
+    `• Buyer's Telegram username\n` +
+    `• Trade amount in USDT\n` +
+    `• Commission rate (default: 2.5%)\n\n` +
+    `**Ready to start?**`,
     {
       parse_mode: 'Markdown',
       ...Markup.inlineKeyboard([
-        [Markup.button.callback('🚀 Create Trade', 'start_sell_flow')],
-        [Markup.button.callback('✏️ Edit Profile', 'edit_profile')],
+        [Markup.button.callback('🚀 Start Trade', 'start_sell_flow')],
         [Markup.button.callback('❓ Help', 'sell_help')]
       ])
     }
@@ -1127,565 +771,73 @@ bot.action('help_main', async (ctx) => {
 // SELLER FLOW CALLBACKS
 // =============================================================================
 
-// Seller profile setup actions
-bot.action('start_setup', async (ctx) => {
-  await ctx.answerCbQuery();
-  
-  const userId = ctx.from!.id;
-  const session = getUserSession(userId);
-  session.step = 'setup_wallet_connect';
-  
-  await ctx.editMessageText(
-    `🔧 **Seller Profile Setup**\n\n` +
-    `Welcome! Let's set up your seller profile.\n\n` +
-    `**What we'll collect:**\n` +
-    `• Your TON wallet address\n` +
-    `• Bank account details\n` +
-    `• UPI ID for payments\n` +
-    `• Phone number (optional)\n\n` +
-    `**Step 1: Connect Your TON Wallet**\n\n` +
-    `Click the button below to connect your wallet:`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.webApp('🔗 Connect Wallet', `${process.env.DOMAIN || 'https://localhost:3000'}/connect?userId=${userId}`)],
-        [Markup.button.callback('❌ Cancel', 'cancel_setup')]
-      ])
-    }
-  );
-});
-
-bot.action('cancel_setup', async (ctx) => {
-  await ctx.answerCbQuery();
-  
-  const userId = ctx.from!.id;
-  const session = getUserSession(userId);
-  session.step = undefined;
-  
-  await ctx.editMessageText(
-    `❌ **Setup Cancelled**\n\n` +
-    `You can start the setup anytime using /setup command.`,
-    {
-      parse_mode: 'Markdown'
-    }
-  );
-});
-
-bot.action('edit_profile', async (ctx) => {
-  await ctx.answerCbQuery();
-  
-  const userId = ctx.from!.id;
-  const existingProfile = await database.getSellerProfile(userId);
-  if (!existingProfile) {
-    await ctx.editMessageText(
-      `❌ **No Profile Found**\n\n` +
-      `You haven't set up your seller profile yet.\n\n` +
-      `Use /setup to create your profile first.`,
-      {
-        parse_mode: 'Markdown'
-      }
-    );
-    return;
-  }
-  
-  await ctx.editMessageText(
-    `✏️ **Edit Your Profile**\n\n` +
-    `**Current Details:**\n` +
-    `• **Account Holder:** ${existingProfile.bankDetails.accountHolderName}\n` +
-    `• **Bank:** ${existingProfile.bankDetails.bankName}\n` +
-    `• **Account Number:** ${existingProfile.bankDetails.accountNumber}\n` +
-    `• **IFSC:** ${existingProfile.bankDetails.ifscCode}\n` +
-    `• **UPI ID:** ${existingProfile.upiId}\n` +
-    `• **Phone:** ${existingProfile.phoneNumber || 'Not provided'}\n\n` +
-    `**What would you like to update?**`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('🏦 Bank Details', 'edit_bank_details')],
-        [Markup.button.callback('💳 UPI ID', 'edit_upi_id')],
-        [Markup.button.callback('📱 Phone Number', 'edit_phone')],
-        [Markup.button.callback('🔗 Wallet Address', 'edit_wallet')],
-        [Markup.button.callback('✅ Done', 'profile_complete')]
-      ])
-    }
-  );
-});
-
-bot.action('skip_phone', async (ctx) => {
-  await ctx.answerCbQuery();
-  
-  const userId = ctx.from!.id;
-  const session = getUserSession(userId);
-  session.phoneNumber = undefined;
-  
-    // Save the profile
-    const profile = {
-      userId: userId,
-      username: ctx.from?.username || '',
-      walletAddress: session.walletAddress!,
-      bankDetails: {
-        accountHolderName: session.bankDetails!.accountHolderName!,
-        accountNumber: session.bankDetails!.accountNumber!,
-        ifscCode: session.bankDetails!.ifscCode!,
-        bankName: session.bankDetails!.bankName!
-      },
-      upiId: session.upiId!,
-      phoneNumber: undefined,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-  
-  await database.saveSellerProfile(profile);
-  session.step = undefined;
-  session.profileSetup = true;
-  
-  await ctx.editMessageText(
-    `🎉 **Profile Setup Complete!**\n\n` +
-    `**Account Holder:** ${profile.bankDetails.accountHolderName}\n` +
-    `**Bank:** ${profile.bankDetails.bankName}\n` +
-    `**Account:** ${profile.bankDetails.accountNumber}\n` +
-    `**IFSC:** ${profile.bankDetails.ifscCode}\n` +
-    `**UPI ID:** ${profile.upiId}\n` +
-    `**Phone:** Not provided\n` +
-    `**Wallet:** \`${profile.walletAddress}\`\n\n` +
-    `✅ **You're ready to start selling!**\n\n` +
-    `Use /sell to create your first trade.`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('🚀 Start Selling', 'start_sell_flow')],
-        [Markup.button.callback('✏️ Edit Profile', 'edit_profile')]
-      ])
-    }
-  );
-});
-
-// Escrow deployment action
-bot.action(/^deploy_escrow_(.+)$/, async (ctx) => {
-  await ctx.answerCbQuery();
-  
-  const tradeId = ctx.match[1];
-  const userId = ctx.from!.id;
-  
-  // Get the trade
-  const trade = await database.getTradeByTradeId(tradeId);
-  if (!trade || trade.sellerUserId !== userId) {
-    await ctx.editMessageText(
-      `❌ **Trade Not Found**\n\n` +
-      `This trade doesn't exist or you're not authorized to deploy it.`,
-      {
-        parse_mode: 'Markdown'
-      }
-    );
-    return;
-  }
-  
-  if (trade.status !== 'deposited') {
-    await ctx.editMessageText(
-      `❌ **Invalid Trade Status**\n\n` +
-      `Trade status: ${trade.status}\n` +
-      `Expected: deposited`,
-      {
-        parse_mode: 'Markdown'
-      }
-    );
-    return;
-  }
-  
-  // Start escrow deployment process
-  await ctx.editMessageText(
-    `🚀 **Deploying Escrow Contract...**\n\n` +
-    `**Trade ID:** \`${tradeId}\`\n` +
-    `**Amount:** ${trade.amount} USDT\n` +
-    `**Buyer:** ${trade.buyerUsername}\n` +
-    `**Buyer Wallet:** \`${trade.buyerWalletAddress}\`\n\n` +
-    `⏳ **Please wait while we deploy the contract...**`,
-    {
-      parse_mode: 'Markdown'
-    }
-  );
-  
-  try {
-    // Deploy escrow contract
-    // For now, we'll simulate the deployment since we don't have the seller's mnemonic
-    // In a real implementation, you would need to get the seller's wallet mnemonic
-    const escrowAddress = `0:escrow_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    // Note: In production, you would call:
-    // const escrowAddress = await tonScripts.deployEscrow(
-    //   sellerMnemonic, // This would need to be securely stored/retrieved
-    //   userId,
-    //   ctx.from?.username || 'unknown',
-    //   trade.buyerUsername!,
-    //   trade.amount,
-    //   trade.commissionBps
-    // );
-    
-    if (escrowAddress) {
-      // Update trade with escrow address
-      trade.escrowAddress = escrowAddress;
-      trade.status = 'payment_pending';
-      trade.updatedAt = new Date().toISOString();
-      await database.saveTrade(trade);
-      
-      // Simple notification
-      console.log(`📢 Escrow deployed for trade ${tradeId}: ${escrowAddress}`);
-      
-      await ctx.editMessageText(
-        `✅ **Escrow Contract Deployed!**\n\n` +
-        `**Contract Address:** \`${escrowAddress}\`\n` +
-        `**Trade ID:** \`${tradeId}\`\n` +
-        `**Amount:** ${trade.amount} USDT\n\n` +
-        `**Next Steps:**\n` +
-        `• Deposit ${trade.amount} USDT to escrow contract\n` +
-        `• Wait for buyer's bank transfer\n` +
-        `• Confirm payment received\n` +
-        `• USDT will be released to buyer\n\n` +
-        `**Ready to deposit USDT to escrow?**`,
-        {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback('💰 Deposit USDT', `deposit_usdt_${tradeId}`)],
-            [Markup.button.callback('❌ Cancel Trade', `cancel_trade_${tradeId}`)]
-          ])
-        }
-      );
-      
-      // Notify buyer about escrow deployment
-      await bot.telegram.sendMessage(
-        trade.buyerUserId!,
-        `✅ **Escrow Contract Deployed!**\n\n` +
-        `**Contract Address:** \`${escrowAddress}\`\n` +
-        `**Trade ID:** \`${tradeId}\`\n` +
-        `**Amount:** ${trade.amount} USDT\n\n` +
-        `**Next Steps:**\n` +
-        `• Seller will deposit USDT to escrow\n` +
-        `• Make your bank transfer\n` +
-        `• Seller confirms payment\n` +
-        `• USDT released to your wallet\n\n` +
-        `**Your wallet:** \`${trade.buyerWalletAddress}\``,
-        {
-          parse_mode: 'Markdown'
-        }
-      );
-      
-      // Update group
-      if (trade.groupId) {
-        await bot.telegram.sendMessage(
-          trade.groupId,
-          `✅ **Escrow Contract Deployed!**\n\n` +
-          `**Contract:** \`${escrowAddress}\`\n` +
-          `**Trade ID:** \`${tradeId}\`\n` +
-          `**Amount:** ${trade.amount} USDT\n\n` +
-          `**Status:** Seller depositing USDT to escrow\n` +
-          `**Next:** Buyer makes bank transfer`,
-          { parse_mode: 'Markdown' }
-        );
-      }
-    } else {
-      await ctx.editMessageText(
-        `❌ **Escrow Deployment Failed**\n\n` +
-        `Failed to deploy escrow contract. Please try again or contact admin.`,
-        {
-          parse_mode: 'Markdown'
-        }
-      );
-    }
-  } catch (error) {
-    console.error('Escrow deployment error:', error);
-    await ctx.editMessageText(
-      `❌ **Escrow Deployment Error**\n\n` +
-      `An error occurred while deploying the contract.\n\n` +
-      `Error: ${error instanceof Error ? error.message : String(error)}`,
-      {
-        parse_mode: 'Markdown'
-      }
-    );
-  }
-});
-
-// Trade cancellation action
-bot.action(/^cancel_trade_(.+)$/, async (ctx) => {
-  await ctx.answerCbQuery();
-  
-  const tradeId = ctx.match[1];
-  const userId = ctx.from!.id;
-  
-  // Get the trade
-  const trade = await database.getTradeByTradeId(tradeId);
-  if (!trade || (trade.sellerUserId !== userId && trade.buyerUserId !== userId)) {
-    await ctx.editMessageText(
-      `❌ **Trade Not Found**\n\n` +
-      `This trade doesn't exist or you're not authorized to cancel it.`,
-      {
-        parse_mode: 'Markdown'
-      }
-    );
-    return;
-  }
-  
-  // Update trade status
-  trade.status = 'cancelled';
-  trade.updatedAt = new Date().toISOString();
-  await database.saveTrade(trade);
-  
-  await ctx.editMessageText(
-    `❌ **Trade Cancelled**\n\n` +
-    `**Trade ID:** \`${tradeId}\`\n` +
-    `**Amount:** ${trade.amount} USDT\n` +
-    `**Cancelled by:** ${ctx.from?.first_name || ctx.from?.username}\n\n` +
-    `The trade has been cancelled successfully.`,
-    {
-      parse_mode: 'Markdown'
-    }
-  );
-  
-  // Notify the other party
-  const otherPartyId = trade.sellerUserId === userId ? trade.buyerUserId : trade.sellerUserId;
-  if (otherPartyId) {
-    await bot.telegram.sendMessage(
-      otherPartyId,
-      `❌ **Trade Cancelled**\n\n` +
-      `**Trade ID:** \`${tradeId}\`\n` +
-      `**Amount:** ${trade.amount} USDT\n` +
-      `**Cancelled by:** ${ctx.from?.first_name || ctx.from?.username}\n\n` +
-      `The trade has been cancelled.`,
-      {
-        parse_mode: 'Markdown'
-      }
-    );
-  }
-  
-  // Update group
-  if (trade.groupId) {
-    await bot.telegram.sendMessage(
-      trade.groupId,
-      `❌ **Trade Cancelled**\n\n` +
-      `**Trade ID:** \`${tradeId}\`\n` +
-      `**Amount:** ${trade.amount} USDT\n` +
-      `**Cancelled by:** ${ctx.from?.first_name || ctx.from?.username}\n\n` +
-      `This trade has been cancelled.`,
-      { parse_mode: 'Markdown' }
-    );
-  }
-});
-
-// USDT deposit action
-bot.action(/^deposit_usdt_(.+)$/, async (ctx) => {
-  await ctx.answerCbQuery();
-  
-  const tradeId = ctx.match[1];
-  const userId = ctx.from!.id;
-  
-  // Get the trade
-  const trade = await database.getTradeByTradeId(tradeId);
-  if (!trade || trade.sellerUserId !== userId) {
-    await ctx.editMessageText(
-      `❌ **Trade Not Found**\n\n` +
-      `This trade doesn't exist or you're not authorized to deposit to it.`,
-      {
-        parse_mode: 'Markdown'
-      }
-    );
-    return;
-  }
-  
-  if (trade.status !== 'payment_pending') {
-    await ctx.editMessageText(
-      `❌ **Invalid Trade Status**\n\n` +
-      `Trade status: ${trade.status}\n` +
-      `Expected: payment_pending`,
-      {
-        parse_mode: 'Markdown'
-      }
-    );
-    return;
-  }
-  
-  // Check if seller has connected wallet
-  if (!tonConnectService.isWalletConnected(userId)) {
-    await ctx.editMessageText(
-      `❌ **Wallet Not Connected**\n\n` +
-      `You need to connect your TON wallet to deposit USDT.\n\n` +
-      `Please connect your wallet first.`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.webApp('🔗 Connect Wallet', `${process.env.DOMAIN || 'https://localhost:3000'}/connect?userId=${userId}`)],
-          [Markup.button.callback('❌ Cancel', `cancel_trade_${tradeId}`)]
-        ])
-      }
-    );
-    return;
-  }
-  
-  // Start USDT deposit process
-  await ctx.editMessageText(
-    `💰 **Depositing USDT to Escrow...**\n\n` +
-    `**Trade ID:** \`${tradeId}\`\n` +
-    `**Amount:** ${trade.amount} USDT\n` +
-    `**Escrow Contract:** \`${trade.escrowAddress}\`\n\n` +
-    `⏳ **Please wait while we process the deposit...**\n\n` +
-    `**This may take a few minutes to confirm on the blockchain.**`,
-    {
-      parse_mode: 'Markdown'
-    }
-  );
-  
-  try {
-    // Simulate USDT deposit (in production, this would call actual TON contract)
-    // For now, we'll simulate the deposit and update the trade status
-    
-    // In a real implementation, you would:
-    // 1. Get seller's wallet address
-    // 2. Check USDT balance
-    // 3. Create transfer transaction to escrow contract
-    // 4. Wait for confirmation
-    // 5. Update trade status
-    
-    const sellerWallet = tonConnectService.getConnectedWallet(userId);
-    const depositTxHash = `tx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    // Update trade with deposit info
-    trade.depositTxHash = depositTxHash;
-    trade.status = 'payment_pending';
-    trade.updatedAt = new Date().toISOString();
-    await database.saveTrade(trade);
-    
-    // Simple notification
-    console.log(`📢 USDT deposited for trade ${tradeId}: ${depositTxHash}`);
-    
-    await ctx.editMessageText(
-      `✅ **USDT Deposit Successful!**\n\n` +
-      `**Trade ID:** \`${tradeId}\`\n` +
-      `**Amount:** ${trade.amount} USDT\n` +
-      `**Escrow Contract:** \`${trade.escrowAddress}\`\n` +
-      `**Transaction Hash:** \`${depositTxHash}\`\n\n` +
-      `✅ **Escrow is now funded and secure!**\n\n` +
-      `**Next Steps:**\n` +
-      `• Wait for buyer's bank transfer\n` +
-      `• Confirm payment received\n` +
-      `• USDT will be released to buyer\n\n` +
-      `**Current Status:** Waiting for buyer's bank transfer`,
-      {
-        parse_mode: 'Markdown'
-      }
-    );
-    
-    // Notify buyer about USDT deposit
-    await bot.telegram.sendMessage(
-      trade.buyerUserId!,
-      `✅ **USDT Deposited to Escrow!**\n\n` +
-      `**Trade ID:** \`${tradeId}\`\n` +
-      `**Amount:** ${trade.amount} USDT\n` +
-      `**Escrow Contract:** \`${trade.escrowAddress}\`\n` +
-      `**Transaction Hash:** \`${depositTxHash}\`\n\n` +
-      `✅ **Escrow is now funded and secure!**\n\n` +
-      `**Next Steps:**\n` +
-      `• Make your bank transfer to seller\n` +
-      `• Come back and type "payment sent"\n` +
-      `• Seller will confirm payment\n` +
-      `• USDT will be released to your wallet\n\n` +
-      `**Your wallet:** \`${trade.buyerWalletAddress}\`\n\n` +
-      `**Seller's Bank Details:**\n` +
-      `• **Account:** ${(await database.getSellerProfile(trade.sellerUserId))?.bankDetails.accountHolderName}\n` +
-      `• **Bank:** ${(await database.getSellerProfile(trade.sellerUserId))?.bankDetails.bankName}\n` +
-      `• **Account #:** ${(await database.getSellerProfile(trade.sellerUserId))?.bankDetails.accountNumber}\n` +
-      `• **IFSC:** ${(await database.getSellerProfile(trade.sellerUserId))?.bankDetails.ifscCode}\n` +
-      `• **UPI ID:** ${(await database.getSellerProfile(trade.sellerUserId))?.upiId}`,
-      {
-        parse_mode: 'Markdown'
-      }
-    );
-    
-    // Update group
-    if (trade.groupId) {
-      await bot.telegram.sendMessage(
-        trade.groupId,
-        `✅ **USDT Deposited to Escrow!**\n\n` +
-        `**Trade ID:** \`${tradeId}\`\n` +
-        `**Amount:** ${trade.amount} USDT\n` +
-        `**Escrow Contract:** \`${trade.escrowAddress}\`\n` +
-        `**Transaction Hash:** \`${depositTxHash}\`\n\n` +
-        `✅ **Escrow is now funded and secure!**\n\n` +
-        `**Status:** Waiting for buyer's bank transfer`,
-        { parse_mode: 'Markdown' }
-      );
-    }
-    
-  } catch (error) {
-    console.error('USDT deposit error:', error);
-    await ctx.editMessageText(
-      `❌ **USDT Deposit Failed**\n\n` +
-      `An error occurred while depositing USDT to escrow.\n\n` +
-      `Error: ${error instanceof Error ? error.message : String(error)}\n\n` +
-      `Please try again or contact admin.`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('🔄 Try Again', `deposit_usdt_${tradeId}`)],
-          [Markup.button.callback('❌ Cancel Trade', `cancel_trade_${tradeId}`)]
-        ])
-      }
-    );
-  }
-});
-
 bot.action('start_sell_flow', async (ctx) => {
   await ctx.answerCbQuery();
   
   const userId = ctx.from!.id;
   const session = getUserSession(userId);
   
-  // Check if seller has profile setup
-  const sellerProfile = await database.getSellerProfile(userId);
-  if (!sellerProfile) {
-    await ctx.editMessageText(
-      `❌ **Profile Setup Required**\n\n` +
-      `You need to set up your seller profile first.\n\n` +
-      `Use /setup to create your profile.`,
-      {
-        parse_mode: 'Markdown'
-      }
-    );
-    return;
-  }
-  
-  // Check if wallet is already connected or can be auto-reconnected
-  const isWalletConnected = await ensureWalletConnected(userId);
-  if (isWalletConnected) {
+  // Check if wallet is already connected
+  if (tonConnectService.isWalletConnected(userId)) {
     const wallet = tonConnectService.getConnectedWallet(userId);
     session.walletAddress = wallet!.address;
     
     // Create a unique trade ID
     const tradeId = `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const groupTitle = `Escrow Trade: ${sellerProfile.bankDetails.accountHolderName}`;
+    const groupTitle = `Escrow Trade: ${ctx.from?.first_name || ctx.from?.username}`;
     
     // Set up trade amount step
     session.tradeId = tradeId;
     session.groupTitle = groupTitle;
     session.step = 'sell_amount';
     
-        // Simple manual group creation flow
-        await ctx.reply(
-          `✅ **Wallet Connected!**\n\nConnected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n👥 **Create Group Manually**\n\n**Steps:**\n1. **Create a new group** in Telegram\n2. **Add @ayush_escrow_bot** to the group\n3. **Make bot admin** (for invite links)\n4. **Add your buyer** to the group\n5. **Send this command** in the group: \`/start create_trade_${tradeId}\`\n\n**Trade ID:** \`${tradeId}\`\n\n💰 **Step 1: Trade Amount**\n\nEnter the amount of USDT to trade:`,
-          {
-            parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard([
-              [Markup.button.callback('❌ Cancel', 'cancel_sell')]
-            ])
-          }
-        );
+    // Get bot info with detailed debugging
+    let botUsername = bot.botInfo?.username;
+    console.log('Initial bot.botInfo:', bot.botInfo);
+    console.log('Initial botUsername:', botUsername);
+    
+    if (!botUsername) {
+      try {
+        const me = await bot.telegram.getMe();
+        console.log('getMe() result:', me);
+        botUsername = me.username;
+        console.log('Bot username from getMe:', botUsername);
+      } catch (error) {
+        console.error('Error getting bot info:', error);
+      }
+    }
+    
+    console.log('Final bot username:', botUsername);
+    
+    // If still no username, provide manual group creation instructions
+    if (!botUsername) {
+      await ctx.reply(
+        `✅ **Wallet Connected!**\n\nConnected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n👥 **Create Group Manually**\n\n**Steps:**\n1. **Create a new group** in Telegram\n2. **Add your bot** to the group\n3. **Send this command** in the group: \`/start create_trade_${tradeId}\`\n4. **Add your buyer** to the group\n\n**Trade ID:** \`${tradeId}\`\n\n💰 **Step 3: Trade Amount**\n\nEnter the amount of USDT to trade:`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('❌ Cancel', 'cancel_sell')]
+          ])
+        }
+      );
+      return;
+    }
+    await ctx.reply(
+      `✅ **Wallet Connected!**\n\nConnected wallet: \`${Address.parse(wallet!.address).toString({ bounceable: false })}\`\n\n💰 **Step 2: Set Trade Amount**\n\nEnter the amount of USDT to trade:\n\nExample: \`100\` for 100 USDT`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('❌ Cancel', 'cancel_sell')]
+        ])
+      }
+    );
   } else {
     session.step = 'sell_wallet_connect';
     
     try {
       // Generate connection URL with user and bot info
       const domain = process.env.DOMAIN || 'http://localhost:3000';
-      // Use domain as-is if it already has protocol, otherwise add https://
-      const connectionUrl = domain.startsWith('http') 
-        ? `${domain}/connect?user_id=${userId}&bot_token=${BOT_TOKEN}`
-        : `https://${domain}/connect?user_id=${userId}&bot_token=${BOT_TOKEN}`;
+      const connectionUrl = `${domain}/connect?user_id=${userId}&bot_token=${BOT_TOKEN}`;
       
       await ctx.reply(
         `🔗 **Step 1: Connect Wallet**\n\n` +
@@ -1807,7 +959,7 @@ bot.action('cancel_sell', async (ctx) => {
   
   const userId = ctx.from!.id;
   const session = getUserSession(userId);
-  session.step = undefined;
+  session.step = null;
   
   // Stop wallet polling
   stopWalletPolling(userId);
@@ -1995,6 +1147,90 @@ bot.action(/^status_(.+)$/, async (ctx) => {
 // =============================================================================
 // TRADE ACTION CALLBACKS
 // =============================================================================
+
+// Handle deposit button for trade ID
+bot.action(/^deposit_trade_(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const tradeId = ctx.match[1];
+  
+  // Find the session for this trade
+  const sessions = Array.from(userSessions.values());
+  const session = sessions.find(s => s.tradeId === tradeId);
+  
+  if (!session) {
+    await ctx.reply('❌ Trade session not found. Please restart the trade.');
+    return;
+  }
+  
+  if (!session.escrowAddress) {
+    await ctx.reply('❌ Escrow contract not deployed yet. Please wait.');
+    return;
+  }
+  
+  await ctx.reply(
+    `💰 **Deposit USDT**\n\n` +
+    `**Trade ID:** \`${tradeId}\`\n` +
+    `**Escrow Address:**\n` +
+    `\`${session.escrowAddress}\`\n\n` +
+    `**Amount:** ${session.amount} USDT\n\n` +
+    `**Instructions:**\n` +
+    `1. Open your TON wallet\n` +
+    `2. Send exactly ${session.amount} USDT to the escrow address\n` +
+    `3. Wait for confirmation\n\n` +
+    `**Important:**\n` +
+    `• Send exact amount: ${session.amount} USDT\n` +
+    `• Only send USDT (not TON)\n` +
+    `• Transaction may take a few minutes\n\n` +
+    `**Need help?** Contact @admin`,
+    {
+      parse_mode: 'Markdown',
+      ...Markup.inlineKeyboard([
+        [Markup.button.callback('📊 Check Status', `status_${session.escrowAddress}`)],
+        [Markup.button.callback('❓ Help', 'deposit_help')]
+      ])
+    }
+  );
+});
+
+// Handle cancel trade
+bot.action('cancel_trade', async (ctx) => {
+  await ctx.answerCbQuery();
+  
+  // Find session by user ID
+  const userId = ctx.from?.id;
+  if (!userId) return;
+  
+  const session = getUserSession(userId);
+  
+  if (session.tradeId) {
+    // Clear the session
+    userSessions.delete(userId);
+    
+    await ctx.reply(
+      `❌ **Trade Cancelled**\n\n` +
+      `Trade ID: \`${session.tradeId}\`\n\n` +
+      `You can start a new trade anytime with /sell`,
+      { parse_mode: 'Markdown' }
+    );
+    
+    // Notify in group if it exists
+    if (session.groupId) {
+      try {
+        await bot.telegram.sendMessage(session.groupId,
+          `❌ **Trade Cancelled**\n\n` +
+          `Trade ID: \`${session.tradeId}\`\n` +
+          `Cancelled by: ${ctx.from?.first_name || ctx.from?.username}\n\n` +
+          `The trade has been cancelled.`,
+          { parse_mode: 'Markdown' }
+        );
+      } catch (error) {
+        console.error('Error notifying group of cancellation:', error);
+      }
+    }
+  } else {
+    await ctx.reply('❌ No active trade to cancel.');
+  }
+});
 
 // Deposit callback
 bot.action(/^deposit_(.+)$/, async (ctx) => {
@@ -2548,7 +1784,7 @@ bot.on('message', async (ctx) => {
   // Handle different trade commands in group
   if (text.startsWith('/status')) {
     const args = text.split(' ');
-      const escrowAddress = args[1] || trade.escrowAddress || '';
+    const escrowAddress = args[1] || trade.escrowAddress;
     
     try {
       const tradeInfo = await escrowUtils.getTradeInfo(escrowAddress);
@@ -2591,50 +1827,128 @@ bot.on('message', async (ctx) => {
   }
   
   // Handle payment confirmation in group
-  else if (text.toLowerCase().includes('payment received') || text.toLowerCase().includes('paid')) {
-    // Only seller can confirm payment
-    if (userId === trade.sellerUserId) {
+  if (text.toLowerCase().includes('payment received') || text.toLowerCase().includes('payment sent')) {
+    // Check if this is the seller
+    if (ctx.from?.id === trade.sellerUserId) {
       await ctx.reply(
-        `✅ **Payment Confirmation**\n\n` +
-        `@${ctx.from?.username} has confirmed receiving payment.\n\n` +
-        `**Next:** Bot will release USDT to buyer.\n\n` +
-        `**Are you sure you want to confirm payment?**`,
+        `✅ **Payment Confirmed by Seller**\n\n` +
+        `**Trade ID:** \`${trade.escrowAddress}\`\n` +
+        `**Amount:** ${trade.amount} USDT\n\n` +
+        `🚀 **Releasing USDT to Buyer...**\n\n` +
+        `The escrow will now automatically release USDT to the buyer's wallet.`,
         {
           parse_mode: 'Markdown',
           ...Markup.inlineKeyboard([
-            [Markup.button.callback('✅ Yes, Confirm', `confirm_yes_${trade.escrowAddress}`)],
-            [Markup.button.callback('❌ No, Cancel', `confirm_no_${trade.escrowAddress}`)]
+            [Markup.button.callback('📊 Check Status', `status_${trade.escrowAddress}`)]
           ])
         }
       );
-    } else {
-      await ctx.reply('❌ Only the seller can confirm payment received.');
+      
+      // Update trade status
+      await database.updateTradeStatus(trade.escrowAddress, 'completed');
+      
+      // Notify buyer
+      if (trade.buyerUserId) {
+        try {
+          await bot.telegram.sendMessage(trade.buyerUserId,
+            `🎉 **Payment Confirmed!**\n\n` +
+            `**Trade ID:** \`${trade.escrowAddress}\`\n` +
+            `**Amount:** ${trade.amount} USDT\n\n` +
+            `✅ **USDT Released**\n\n` +
+            `The USDT has been released to your wallet. Check your TON wallet for the incoming transaction.`,
+            { parse_mode: 'Markdown' }
+          );
+        } catch (error) {
+          console.error('Error notifying buyer:', error);
+        }
+      }
+    } else if (ctx.from?.id === trade.buyerUserId) {
+      await ctx.reply(
+        `📤 **Payment Sent Notification**\n\n` +
+        `**Trade ID:** \`${trade.escrowAddress}\`\n` +
+        `**Amount:** ${trade.amount} USDT\n\n` +
+        `⏳ **Waiting for Seller Confirmation**\n\n` +
+        `Please wait for the seller to confirm receipt of your payment. Once confirmed, USDT will be released to your wallet.`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('📊 Check Status', `status_${trade.escrowAddress}`)]
+          ])
+        }
+      );
     }
   }
   
-  // Handle dispute raising
-  else if (text.toLowerCase().includes('dispute') || text.toLowerCase().includes('problem')) {
+  // Handle bank details sharing
+  if (text.toLowerCase().includes('bank details') || text.toLowerCase().includes('account details')) {
+    if (ctx.from?.id === trade.sellerUserId) {
+      await ctx.reply(
+        `🏦 **Bank Details Shared**\n\n` +
+        `**Trade ID:** \`${trade.escrowAddress}\`\n` +
+        `**Amount:** ${trade.amount} USDT\n\n` +
+        `✅ **Payment Instructions Sent**\n\n` +
+        `The buyer can now make the bank transfer. Once completed, please confirm receipt.`,
+        {
+          parse_mode: 'Markdown',
+          ...Markup.inlineKeyboard([
+            [Markup.button.callback('📊 Check Status', `status_${trade.escrowAddress}`)]
+          ])
+        }
+      );
+      
+      // Notify buyer to make payment
+      if (trade.buyerUserId) {
+        try {
+          await bot.telegram.sendMessage(trade.buyerUserId,
+            `💰 **Payment Required**\n\n` +
+            `**Trade ID:** \`${trade.escrowAddress}\`\n` +
+            `**Amount:** ${trade.amount} USDT\n\n` +
+            `🏦 **Make Bank Transfer**\n\n` +
+            `Please make the bank transfer as discussed. Once completed, send "payment sent" in the group.`,
+            { parse_mode: 'Markdown' }
+          );
+        } catch (error) {
+          console.error('Error notifying buyer:', error);
+        }
+      }
+    }
+  }
+  
+  // Handle dispute
+  if (text.toLowerCase().includes('dispute') || text.toLowerCase().includes('problem')) {
     await ctx.reply(
-      `⚠️ **Raise Dispute**\n\n` +
-      `**When to raise a dispute:**\n` +
-      `• Seller not responding\n` +
-      `• Payment made but no confirmation\n` +
-      `• Seller asking for more money\n` +
-      `• Any suspicious behavior\n\n` +
-      `**What happens next:**\n` +
-      `• Admin reviews the case\n` +
-      `• You provide payment proof\n` +
-      `• Admin makes fair decision\n` +
-      `• Funds released accordingly\n\n` +
-      `**Are you sure you want to raise a dispute?**`,
+      `⚠️ **Dispute Raised**\n\n` +
+      `**Trade ID:** \`${trade.escrowAddress}\`\n` +
+      `**Raised by:** ${ctx.from?.first_name || ctx.from?.username}\n\n` +
+      `🔍 **Admin Notification Sent**\n\n` +
+      `An admin has been notified and will review the dispute. Please provide details about the issue.`,
       {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-          [Markup.button.callback('⚠️ Yes, Raise Dispute', `dispute_yes_${trade.escrowAddress}`)],
-          [Markup.button.callback('❌ No, Cancel', `dispute_no_${trade.escrowAddress}`)]
+          [Markup.button.callback('📊 Check Status', `status_${trade.escrowAddress}`)],
+          [Markup.button.callback('💬 Contact Admin', 'contact_admin')]
         ])
       }
     );
+    
+    // Notify admin
+    try {
+      await bot.telegram.sendMessage(Number(process.env.ADMIN_USER_ID),
+        `⚠️ **DISPUTE RAISED**\n\n` +
+        `**Trade ID:** \`${trade.escrowAddress}\`\n` +
+        `**Amount:** ${trade.amount} USDT\n` +
+        `**Raised by:** ${ctx.from?.first_name || ctx.from?.username} (${ctx.from?.id})\n` +
+        `**Group:** ${ctx.chat?.title || 'Unknown'}\n` +
+        `**Time:** ${new Date().toLocaleString()}\n\n` +
+        `Please review and resolve the dispute.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (error) {
+      console.error('Error notifying admin:', error);
+    }
+    
+    // Update trade status
+    await database.updateTradeStatus(trade.escrowAddress, 'dispute');
   }
 });
 
@@ -2651,360 +1965,13 @@ bot.on('text', async (ctx) => {
   const session = getUserSession(userId);
   
   if (text === '/cancel') {
-    session.step = undefined;
+    session.step = null;
     await ctx.reply('❌ Operation cancelled');
     return;
   }
   
   // Skip text processing if in create_group step
   if (session.step === 'create_group') return;
-  
-  // =============================================================================
-  // SELLER PROFILE SETUP HANDLERS
-  // =============================================================================
-  
-  if (session.step === 'setup_bank_details') {
-    // Collecting account holder name
-    session.bankDetails = session.bankDetails || {};
-    session.bankDetails.accountHolderName = text;
-    session.step = 'setup_bank_name';
-    
-    await ctx.reply(
-      `✅ **Account Holder:** ${text}\n\n🏦 **Bank Name**\n\n` +
-      `Enter your bank name:\n\n` +
-      `Example: "State Bank of India" or "HDFC Bank"`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('❌ Cancel', 'cancel_setup')]
-        ])
-      }
-    );
-  } else if (session.step === 'setup_bank_name') {
-    session.bankDetails!.bankName = text;
-    session.step = 'setup_account_number';
-    
-    await ctx.reply(
-      `✅ **Bank:** ${text}\n\n🏦 **Account Number**\n\n` +
-      `Enter your bank account number:\n\n` +
-      `Example: "1234567890123"`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('❌ Cancel', 'cancel_setup')]
-        ])
-      }
-    );
-  } else if (session.step === 'setup_account_number') {
-    session.bankDetails!.accountNumber = text;
-    session.step = 'setup_ifsc';
-    
-    await ctx.reply(
-      `✅ **Account Number:** ${text}\n\n🏦 **IFSC Code**\n\n` +
-      `Enter your bank's IFSC code:\n\n` +
-      `Example: "SBIN0001234" or "HDFC0001234"`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('❌ Cancel', 'cancel_setup')]
-        ])
-      }
-    );
-  } else if (session.step === 'setup_ifsc') {
-    session.bankDetails!.ifscCode = text.toUpperCase();
-    session.step = 'setup_upi';
-    
-    await ctx.reply(
-      `✅ **IFSC Code:** ${text.toUpperCase()}\n\n💳 **UPI ID**\n\n` +
-      `Enter your UPI ID for receiving payments:\n\n` +
-      `Example: "yourname@paytm" or "yourname@ybl"`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('❌ Cancel', 'cancel_setup')]
-        ])
-      }
-    );
-  } else if (session.step === 'setup_upi') {
-    session.upiId = text;
-    session.step = 'setup_phone';
-    
-    await ctx.reply(
-      `✅ **UPI ID:** ${text}\n\n📱 **Phone Number** (Optional)\n\n` +
-      `Enter your phone number or type "skip":\n\n` +
-      `Example: "9876543210" or "skip"`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('⏭️ Skip', 'skip_phone')],
-          [Markup.button.callback('❌ Cancel', 'cancel_setup')]
-        ])
-      }
-    );
-  } else if (session.step === 'setup_phone') {
-    if (text.toLowerCase() === 'skip') {
-      session.phoneNumber = undefined;
-    } else {
-      session.phoneNumber = text;
-    }
-    
-    // Save the profile
-    const profile = {
-      userId: userId,
-      username: ctx.from?.username || '',
-      walletAddress: session.walletAddress!,
-      bankDetails: {
-        accountHolderName: session.bankDetails!.accountHolderName!,
-        accountNumber: session.bankDetails!.accountNumber!,
-        ifscCode: session.bankDetails!.ifscCode!,
-        bankName: session.bankDetails!.bankName!
-      },
-      upiId: session.upiId!,
-      phoneNumber: session.phoneNumber,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    
-    await database.saveSellerProfile(profile);
-    session.step = undefined;
-    session.profileSetup = true;
-    
-    await ctx.reply(
-      `🎉 **Profile Setup Complete!**\n\n` +
-      `**Account Holder:** ${profile.bankDetails.accountHolderName}\n` +
-      `**Bank:** ${profile.bankDetails.bankName}\n` +
-      `**Account:** ${profile.bankDetails.accountNumber}\n` +
-      `**IFSC:** ${profile.bankDetails.ifscCode}\n` +
-      `**UPI ID:** ${profile.upiId}\n` +
-      `**Phone:** ${profile.phoneNumber || 'Not provided'}\n` +
-      `**Wallet:** \`${profile.walletAddress}\`\n\n` +
-      `✅ **You're ready to start selling!**\n\n` +
-      `Use /sell to create your first trade.`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.callback('🚀 Start Selling', 'start_sell_flow')],
-          [Markup.button.callback('✏️ Edit Profile', 'edit_profile')]
-        ])
-      }
-    );
-  }
-  
-  // =============================================================================
-  // BUYER WALLET COLLECTION HANDLERS
-  // =============================================================================
-  
-  // Check if this user is a buyer in an active trade
-  const buyerTrades = await database.getTradesByUser(userId, 'buyer');
-  const activeBuyerTrade = buyerTrades.find(t => t.status === 'active' && !t.buyerWalletAddress);
-  
-  if (activeBuyerTrade) {
-    // This is a buyer providing their wallet address
-    try {
-      // Validate TON address format
-      const address = Address.parse(text);
-      const normalizedAddress = address.toString({ bounceable: false });
-      
-      // Update trade with buyer wallet address
-      activeBuyerTrade.buyerWalletAddress = normalizedAddress;
-      activeBuyerTrade.status = 'deposited';
-      activeBuyerTrade.updatedAt = new Date().toISOString();
-      
-      await database.saveTrade(activeBuyerTrade);
-      
-      // Simple notification
-      console.log(`📢 Wallet provided for trade ${activeBuyerTrade.tradeId}: ${normalizedAddress}`);
-      
-      // Get seller profile for bank details
-      const sellerProfile = await database.getSellerProfile(activeBuyerTrade.sellerUserId);
-      
-      // Confirm wallet address to buyer
-      await ctx.reply(
-        `✅ **Wallet Address Confirmed!**\n\n` +
-        `**Your Wallet:** \`${normalizedAddress}\`\n` +
-        `**Trade ID:** \`${activeBuyerTrade.tradeId}\`\n` +
-        `**Amount:** ${activeBuyerTrade.amount} USDT\n\n` +
-        `**Step 2: Make Bank Transfer**\n\n` +
-        `**Transfer Details:**\n` +
-        `• **Account Holder:** ${sellerProfile?.bankDetails.accountHolderName}\n` +
-        `• **Bank:** ${sellerProfile?.bankDetails.bankName}\n` +
-        `• **Account Number:** ${sellerProfile?.bankDetails.accountNumber}\n` +
-        `• **IFSC Code:** ${sellerProfile?.bankDetails.ifscCode}\n` +
-        `• **UPI ID:** ${sellerProfile?.upiId}\n\n` +
-        `**Amount to Transfer:** ${activeBuyerTrade.amount} USDT equivalent in INR\n\n` +
-        `**After Transfer:**\n` +
-        `1. Take screenshot of payment proof\n` +
-        `2. Come back to the group\n` +
-        `3. Type "payment sent" to notify seller\n` +
-        `4. Wait for seller confirmation\n` +
-        `5. USDT will be released to your wallet`,
-        {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback('❌ Cancel Trade', `cancel_trade_${activeBuyerTrade.tradeId}`)]
-          ])
-        }
-      );
-      
-      // Notify seller about buyer wallet address
-      await bot.telegram.sendMessage(
-        activeBuyerTrade.sellerUserId,
-        `🛒 **Buyer Wallet Address Received!**\n\n` +
-        `**Buyer:** ${activeBuyerTrade.buyerUsername}\n` +
-        `**Wallet:** \`${normalizedAddress}\`\n` +
-        `**Trade ID:** \`${activeBuyerTrade.tradeId}\`\n` +
-        `**Amount:** ${activeBuyerTrade.amount} USDT\n\n` +
-        `**Next Steps:**\n` +
-        `• Deploy escrow contract\n` +
-        `• Deposit USDT to escrow\n` +
-        `• Wait for buyer's bank transfer\n` +
-        `• Confirm payment received\n` +
-        `• Release USDT to buyer\n\n` +
-        `**Ready to deploy escrow contract?**`,
-        {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback('🚀 Deploy Escrow', `deploy_escrow_${activeBuyerTrade.tradeId}`)],
-            [Markup.button.callback('❌ Cancel Trade', `cancel_trade_${activeBuyerTrade.tradeId}`)]
-          ])
-        }
-      );
-      
-      // Update group with buyer wallet info
-      if (activeBuyerTrade.groupId) {
-        await bot.telegram.sendMessage(
-          activeBuyerTrade.groupId,
-          `✅ **Buyer Wallet Address Confirmed!**\n\n` +
-          `**Buyer:** ${activeBuyerTrade.buyerUsername}\n` +
-          `**Wallet:** \`${normalizedAddress}\`\n` +
-          `**Trade ID:** \`${activeBuyerTrade.tradeId}\`\n` +
-          `**Amount:** ${activeBuyerTrade.amount} USDT\n\n` +
-          `**Next Steps:**\n` +
-          `• Seller will deploy escrow contract\n` +
-          `• Buyer makes bank transfer\n` +
-          `• Seller confirms payment\n` +
-          `• USDT released to buyer`,
-          { parse_mode: 'Markdown' }
-        );
-      }
-      
-      return; // Exit early, don't process as seller flow
-    } catch (error) {
-      await ctx.reply(
-        `❌ **Invalid Wallet Address**\n\n` +
-        `Please provide a valid TON wallet address.\n\n` +
-        `**Format:** \`UQ...\` or \`EQ...\`\n` +
-        `**Example:** \`UQCZaYzBq6OMu7ncePyB8CkbBF75a-eUTPKE8zBa9RBobarj\`\n\n` +
-        `Try again:`,
-        {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([
-            [Markup.button.callback('❌ Cancel Trade', `cancel_trade_${activeBuyerTrade.tradeId}`)]
-          ])
-        }
-      );
-      return;
-    }
-  }
-  
-  // =============================================================================
-  // BANK TRANSFER FLOW HANDLERS
-  // =============================================================================
-  
-  // Check for payment sent notifications
-  if (text.toLowerCase().includes('payment sent') || text.toLowerCase().includes('payment made') || text.toLowerCase().includes('transfer sent')) {
-    // Check if this user is a buyer in a payment_pending trade
-    const buyerTrades = await database.getTradesByUser(userId, 'buyer');
-    const pendingTrade = buyerTrades.find(t => t.status === 'payment_pending' && t.buyerWalletAddress);
-    
-    if (pendingTrade) {
-      // Buyer is notifying about payment
-      await ctx.reply(
-        `✅ **Payment Notification Received!**\n\n` +
-        `**Trade ID:** \`${pendingTrade.tradeId}\`\n` +
-        `**Amount:** ${pendingTrade.amount} USDT\n\n` +
-        `**Message:** Payment sent notification received.\n\n` +
-        `**Next Steps:**\n` +
-        `• Seller will verify the payment\n` +
-        `• Once confirmed, USDT will be released\n` +
-        `• You'll receive notification when complete\n\n` +
-        `**Please wait for seller confirmation...** ⏳`,
-        {
-          parse_mode: 'Markdown'
-        }
-      );
-      
-      // Notify seller about payment notification
-      await bot.telegram.sendMessage(
-        pendingTrade.sellerUserId,
-        `💰 **Payment Notification from Buyer!**\n\n` +
-        `**Buyer:** ${pendingTrade.buyerUsername}\n` +
-        `**Trade ID:** \`${pendingTrade.tradeId}\`\n` +
-        `**Amount:** ${pendingTrade.amount} USDT\n\n` +
-        `**Message:** Buyer has sent payment notification.\n\n` +
-        `**Please check your bank account and confirm:**\n` +
-        `• Verify the amount received\n` +
-        `• Check the payment reference\n` +
-        `• Confirm it's from the correct buyer\n\n` +
-        `**After verification:**\n` +
-        `• Type "payment received" in the group\n` +
-        `• USDT will be released to buyer\n\n` +
-        `**Your Bank Details:**\n` +
-        `• **Account:** ${(await database.getSellerProfile(pendingTrade.sellerUserId))?.bankDetails.accountHolderName}\n` +
-        `• **Bank:** ${(await database.getSellerProfile(pendingTrade.sellerUserId))?.bankDetails.bankName}\n` +
-        `• **Account #:** ${(await database.getSellerProfile(pendingTrade.sellerUserId))?.bankDetails.accountNumber}\n` +
-        `• **IFSC:** ${(await database.getSellerProfile(pendingTrade.sellerUserId))?.bankDetails.ifscCode}\n` +
-        `• **UPI ID:** ${(await database.getSellerProfile(pendingTrade.sellerUserId))?.upiId}`,
-        {
-          parse_mode: 'Markdown'
-        }
-      );
-      
-      // Simple notification
-      console.log(`📢 Payment notification for trade ${pendingTrade.tradeId}`);
-      
-      return; // Exit early, don't process as seller flow
-    }
-  }
-  
-  // Check for payment received confirmations
-  if (text.toLowerCase().includes('payment received') || text.toLowerCase().includes('payment confirmed') || text.toLowerCase().includes('received payment')) {
-    // Check if this user is a seller in a payment_pending trade
-    const sellerTrades = await database.getTradesByUser(userId, 'seller');
-    const pendingTrade = sellerTrades.find(t => t.status === 'payment_pending' && t.buyerWalletAddress);
-    
-    if (pendingTrade) {
-      // Seller is confirming payment received
-      await ctx.reply(
-        `✅ **Payment Confirmed!**\n\n` +
-        `**Trade ID:** \`${pendingTrade.tradeId}\`\n` +
-        `**Amount:** ${pendingTrade.amount} USDT\n\n` +
-        `**Message:** Payment received confirmation.\n\n` +
-        `**Next Steps:**\n` +
-        `• USDT will be released to buyer\n` +
-        `• Transaction will be processed\n` +
-        `• Trade will be completed\n\n` +
-        `**Processing release...** ⏳`,
-        {
-          parse_mode: 'Markdown'
-        }
-      );
-      
-      // Update trade status and trigger USDT release
-      pendingTrade.status = 'payment_confirmed';
-      pendingTrade.bankTransferConfirmed = true;
-      pendingTrade.updatedAt = new Date().toISOString();
-      await database.saveTrade(pendingTrade);
-      
-      // Simple notification
-      console.log(`📢 Payment confirmed for trade ${pendingTrade.tradeId}`);
-      
-      // Trigger USDT release to buyer
-      await releaseUSDTToBuyer(pendingTrade);
-      
-      return; // Exit early, don't process as seller flow
-    }
-  }
   
   // =============================================================================
   // SELLER FLOW HANDLERS
@@ -3024,17 +1991,31 @@ bot.on('text', async (ctx) => {
       return;
     }
     
-    session.amount = amount.toString();
-    session.step = 'sell_commission';
+    session.amount = amount;
+    
+    // Generate unique trade ID
+    const tradeId = `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    session.tradeId = tradeId;
+    session.step = 'sell_group_creation';
     
     await ctx.reply(
-      `📊 **Step 4: Commission Rate**\n\n` +
-      `Enter commission rate in basis points (default: 250 = 2.5%):\n\n` +
-      `• 100 = 1%\n` +
-      `• 250 = 2.5%\n` +
-      `• 500 = 5%\n\n` +
-      `Type a number or "default" for 2.5%:`,
-      { parse_mode: 'Markdown' }
+      `✅ **Trade Amount Set!**\n\n` +
+      `Amount: **${amount} USDT**\n` +
+      `Trade ID: \`${tradeId}\`\n\n` +
+      `👥 **Step 3: Create Trade Group**\n\n` +
+      `**Steps:**\n` +
+      `1. **Create a new group** in Telegram\n` +
+      `2. **Add @ayush_escrow_bot** to the group\n` +
+      `3. **Make bot admin** (for invite links)\n` +
+      `4. **Add your buyer** to the group\n` +
+      `5. **Send this command** in the group: \`/start create_trade_${tradeId}\`\n\n` +
+      `**Trade ID:** \`${tradeId}\``,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('❌ Cancel', 'cancel_sell')]
+        ])
+      }
     );
   } else if (session.step === 'sell_commission') {
     let commissionBps = 250; // Default 2.5%
@@ -3053,7 +2034,7 @@ bot.on('text', async (ctx) => {
     }
     
     session.commissionBps = commissionBps;
-    session.step = undefined;
+    session.step = null;
     
     // Deploy escrow
     await ctx.reply('🚀 Deploying escrow contract...');
@@ -3064,7 +2045,7 @@ bot.on('text', async (ctx) => {
         throw new Error('Wallet not connected');
       }
       
-      const amountUnits = escrowUtils.parseAmount(session.amount?.toString() || '0');
+      const amountUnits = escrowUtils.parseAmount(session.amount.toString());
       
       // For now, we'll use a mock mnemonic for deployment
       // In production, this would use the connected wallet's signing capability
@@ -3074,7 +2055,7 @@ bot.on('text', async (ctx) => {
         mockMnemonic, // This will be replaced with wallet signing in production
         userId!,
         ctx.from?.username || 'unknown',
-        session.buyerUsername || 'unknown',
+        session.buyerUsername,
         amountUnits,
         commissionBps
       );
@@ -3084,12 +2065,11 @@ bot.on('text', async (ctx) => {
         
         // Store trade info for group access
         const tradeInfo = {
-          tradeId: session.tradeId!,
           escrowAddress,
           sellerUserId: userId!,
           sellerUsername: ctx.from?.username || 'unknown',
-          buyerUsername: session.buyerUsername || 'unknown',
-          amount: session.amount?.toString() || '0',
+          buyerUsername: session.buyerUsername,
+          amount: session.amount.toString(),
           commissionBps,
           groupId: session.groupId,
           groupTitle: session.groupTitle,
@@ -3109,14 +2089,14 @@ bot.on('text', async (ctx) => {
           `**Trade Summary:**\n` +
           `• Seller: @${ctx.from?.username}\n` +
           `• Wallet: \`${wallet.address}\`\n` +
-          `• Buyer: @${session.buyerUsername || 'unknown'}\n` +
-          `• Amount: ${session.amount || '0'} USDT\n` +
+          `• Buyer: @${session.buyerUsername}\n` +
+          `• Amount: ${session.amount} USDT\n` +
           `• Commission: ${commissionBps / 100}%\n\n` +
           `**Fee Breakdown:**\n` +
           `• Platform fee: ${escrowUtils.formatAmount(fees.totalFee)} USDT\n` +
           `• To buyer: ${escrowUtils.formatAmount(fees.toBuyer)} USDT\n\n` +
           `**Next Steps:**\n` +
-          `1. Deposit ${session.amount || '0'} USDT into the escrow\n` +
+          `1. Deposit ${session.amount} USDT into the escrow\n` +
           `2. Continue in the private group\n` +
           `3. Wait for buyer's off-chain payment\n` +
           `4. Confirm payment to release USDT\n\n` +
@@ -3138,12 +2118,12 @@ bot.on('text', async (ctx) => {
             `**Contract Address:**\n` +
             `\`${escrowAddress}\`\n\n` +
             `**Trade Details:**\n` +
-            `• Amount: ${session.amount || '0'} USDT\n` +
+            `• Amount: ${session.amount} USDT\n` +
             `• Commission: ${commissionBps / 100}%\n` +
             `• Platform fee: ${escrowUtils.formatAmount(fees.totalFee)} USDT\n` +
             `• Buyer receives: ${escrowUtils.formatAmount(fees.toBuyer)} USDT\n\n` +
             `**Next Steps:**\n` +
-            `1. **Seller:** Deposit ${session.amount || '0'} USDT to the contract\n` +
+            `1. **Seller:** Deposit ${session.amount} USDT to the contract\n` +
             `2. **Buyer:** Make off-chain payment to seller\n` +
             `3. **Seller:** Confirm payment received\n` +
             `4. **Bot:** Release USDT to buyer\n\n` +
@@ -3183,7 +2163,7 @@ bot.on('text', async (ctx) => {
       return;
     }
     
-    session.step = undefined;
+    session.step = null;
     
     await ctx.reply(
       `🚨 **Emergency Withdrawal Initiated**\n\n` +
@@ -3205,7 +2185,7 @@ bot.on('text', async (ctx) => {
       return;
     }
     
-    session.step = undefined;
+    session.step = null;
     
     await ctx.reply(
       `🔄 **Retrying Transfer**\n\n` +
@@ -3227,7 +2207,7 @@ bot.on('text', async (ctx) => {
       return;
     }
     
-    session.step = undefined;
+    session.step = null;
     
     await ctx.reply(
       `⏰ **Cancelling Expired Trade**\n\n` +
@@ -3251,238 +2231,92 @@ bot.on('new_chat_members', async (ctx) => {
   
   console.log(`👥 New members joined group ${groupId}: ${newMembers.map(m => `${m.username || m.first_name} (${m.id})`).join(', ')}`);
   
-  // Process new members
+  // Check if this is a recognized trade group
+  const trade = await database.getTradeByGroupId(groupId);
+  
   for (const member of newMembers) {
-    if (member.id !== ctx.botInfo.id) { // Don't process the bot itself
-      // Check if this is a recognized trade group
-      const trade = await database.getTradeByGroupId(groupId);
+    if (member.id !== ctx.botInfo.id) { // Don't welcome the bot itself
       
       if (trade) {
-        // Check if this is the seller (already known)
-        if (member.id === trade.sellerUserId) {
-          await ctx.reply(
-            `👋 **Welcome back, Seller!**\n\n` +
-            `**Trade ID:** \`${trade.tradeId}\`\n` +
-            `**Amount:** ${trade.amount} USDT\n` +
-            `**Status:** ${trade.status}\n\n` +
-            `**Available Commands:**\n` +
-            `• \`/status\` - Check trade status\n` +
-            `• \`payment received\` - Confirm payment\n` +
-            `• \`dispute\` - Raise dispute\n\n` +
-            `**Let's complete this trade securely!** 🔒`,
-            { parse_mode: 'Markdown' }
-          );
-        } else {
-          // This is a new buyer - start buyer flow
-          await handleNewBuyer(ctx, member, trade);
-        }
-      } else {
-        // No trade found - this might be a new group or seller hasn't set up yet
+        // Existing trade - welcome buyer
         await ctx.reply(
-          `👋 **Welcome to the escrow group!**\n\n` +
-          `This is a secure trading group. The seller will set up trade details soon.\n\n` +
+          `👋 **Welcome to the Trade Group!**\n\n` +
+          `**Trade ID:** \`${trade.escrowAddress}\`\n` +
+          `**Amount:** ${trade.amount} USDT\n` +
+          `**Status:** ${trade.status}\n\n` +
           `**Available Commands:**\n` +
           `• \`/status\` - Check trade status\n` +
           `• \`payment received\` - Confirm payment (seller only)\n` +
           `• \`dispute\` - Raise dispute\n\n` +
-          `**Please wait for trade setup...** ⏳`,
+          `**Let's complete this trade securely!** 🔒`,
           { parse_mode: 'Markdown' }
         );
+      } else {
+        // Check if this is a waiting trade group
+        const waitingSessions = Array.from(userSessions.values()).filter(
+          session => session.groupId === groupId && session.step === 'waiting_for_buyer'
+        );
+        
+        if (waitingSessions.length > 0) {
+          const session = waitingSessions[0];
+          
+          // This is the buyer! Start the trade flow
+          session.buyerId = member.id;
+          session.sellerId = Array.from(userSessions.keys()).find(id => {
+            const userSession = userSessions.get(id);
+            return userSession.groupId === groupId && userSession.step === 'waiting_for_buyer';
+          });
+          session.step = 'buyer_wallet_request';
+          
+          // Start buyer wallet polling
+          startBuyerWalletPolling(member.id, ctx, session);
+          
+          // Welcome buyer and ask for wallet
+          await ctx.reply(
+            `👋 **Welcome Buyer!**\n\n` +
+            `**Trade Details:**\n` +
+            `• Amount: **${session.amount} USDT**\n` +
+            `• Trade ID: \`${session.tradeId}\`\n` +
+            `• Seller: ${ctx.from?.first_name || 'Unknown'}\n\n` +
+            `🔗 **Step 1: Connect Your Wallet**\n\n` +
+            `To receive USDT, please connect your TON wallet:`,
+            {
+              parse_mode: 'Markdown',
+              ...Markup.inlineKeyboard([
+                [Markup.button.webApp('🔗 Connect Wallet', `${process.env.DOMAIN}/connect?user=${member.id}&trade=${session.tradeId}`)],
+                [Markup.button.callback('❌ Cancel Trade', 'cancel_trade')]
+              ])
+            }
+          );
+          
+          // Notify seller
+          await bot.telegram.sendMessage(session.sellerId!,
+            `🎉 **Buyer Joined!**\n\n` +
+            `Buyer: ${member.first_name || member.username || 'Unknown'}\n` +
+            `Trade ID: \`${session.tradeId}\`\n` +
+            `Amount: **${session.amount} USDT**\n\n` +
+            `✅ **Trade Started!**\n\n` +
+            `The buyer is connecting their wallet. Once connected, the escrow contract will be deployed automatically.`,
+            { parse_mode: 'Markdown' }
+          );
+        } else {
+          // General welcome
+          await ctx.reply(
+            `👋 **Welcome to the escrow group!**\n\n` +
+            `This is a secure trading group. The seller will set up trade details soon.\n\n` +
+            `**Available Commands:**\n` +
+            `• \`/status\` - Check trade status\n` +
+            `• \`payment received\` - Confirm payment (seller only)\n` +
+            `• \`dispute\` - Raise dispute\n\n` +
+            `**Please wait for trade setup...** ⏳`,
+            { parse_mode: 'Markdown' }
+          );
+        }
       }
-      break; // Only process one new member per batch
+      break; // Only send one welcome message per batch
     }
   }
 });
-
-// Handle new buyer joining the trade group
-async function handleNewBuyer(ctx: any, buyer: any, trade: any) {
-  console.log(`🛒 New buyer detected: ${buyer.username || buyer.first_name} (${buyer.id})`);
-  
-  // Update trade record with buyer information
-  trade.buyerUserId = buyer.id;
-  trade.buyerUsername = buyer.username || buyer.first_name;
-  trade.status = 'active';
-  trade.updatedAt = new Date().toISOString();
-  
-  await database.saveTrade(trade);
-  
-  // Simple notification (removed complex notification system for now)
-  console.log(`📢 Buyer joined trade ${trade.tradeId}: ${buyer.first_name || buyer.username}`);
-  
-  // Get seller profile for bank details
-  const sellerProfile = await database.getSellerProfile(trade.sellerUserId);
-  
-  // Welcome buyer with trade information
-  await ctx.reply(
-    `🛒 **Buyer Joined!**\n\n` +
-    `**Buyer:** ${buyer.first_name || `@${buyer.username}`}\n` +
-    `**Trade ID:** \`${trade.tradeId}\`\n` +
-    `**Amount:** ${trade.amount} USDT\n\n` +
-    `✅ **Trade is now active!**\n\n` +
-    `**Next Steps:**\n` +
-    `• Buyer needs to provide wallet address\n` +
-    `• Seller will deploy escrow contract\n` +
-    `• Buyer makes bank transfer\n` +
-    `• Seller confirms payment\n` +
-    `• USDT released to buyer`,
-    { parse_mode: 'Markdown' }
-  );
-  
-  // Send buyer wallet collection request
-  await ctx.telegram.sendMessage(
-    buyer.id,
-    `🛒 **Welcome to the Trade!**\n\n` +
-    `**Trade Details:**\n` +
-    `• **Trade ID:** \`${trade.tradeId}\`\n` +
-    `• **Amount:** ${trade.amount} USDT\n` +
-    `• **Seller:** ${trade.sellerUsername}\n\n` +
-    `**Step 1: Provide Your Wallet Address**\n\n` +
-    `Please provide your TON wallet address where you want to receive the USDT:\n\n` +
-    `**Format:** \`UQ...\` or \`EQ...\`\n` +
-    `**Example:** \`UQCZaYzBq6OMu7ncePyB8CkbBF75a-eUTPKE8zBa9RBobarj\`\n\n` +
-    `Type your wallet address:`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('❌ Cancel Trade', `cancel_trade_${trade.tradeId}`)]
-      ])
-    }
-  );
-  
-  // Notify seller about buyer joining
-  await ctx.telegram.sendMessage(
-    trade.sellerUserId,
-    `🛒 **Buyer Joined Your Trade!**\n\n` +
-    `**Buyer:** ${buyer.first_name || `@${buyer.username}`}\n` +
-    `**Trade ID:** \`${trade.tradeId}\`\n` +
-    `**Amount:** ${trade.amount} USDT\n\n` +
-    `**Next Steps:**\n` +
-    `• Buyer is providing wallet address\n` +
-    `• You'll deploy escrow contract\n` +
-    `• Buyer makes bank transfer to your account\n` +
-    `• You confirm payment received\n` +
-    `• USDT released to buyer\n\n` +
-    `**Your Bank Details (for buyer):**\n` +
-    `• **Account:** ${sellerProfile?.bankDetails.accountHolderName || 'Not set'}\n` +
-    `• **Bank:** ${sellerProfile?.bankDetails.bankName || 'Not set'}\n` +
-    `• **Account #:** ${sellerProfile?.bankDetails.accountNumber || 'Not set'}\n` +
-    `• **IFSC:** ${sellerProfile?.bankDetails.ifscCode || 'Not set'}\n` +
-    `• **UPI ID:** ${sellerProfile?.upiId || 'Not set'}`,
-    {
-      parse_mode: 'Markdown'
-    }
-  );
-}
-
-// Release USDT to buyer after payment confirmation
-async function releaseUSDTToBuyer(trade: any) {
-  console.log(`🚀 Releasing USDT to buyer for trade: ${trade.tradeId}`);
-  
-  try {
-    // In a real implementation, this would:
-    // 1. Call the escrow contract's release function
-    // 2. Transfer USDT from escrow to buyer's wallet
-    // 3. Wait for transaction confirmation
-    // 4. Update trade status
-    
-    // For now, we'll simulate the release
-    const releaseTxHash = `tx_release_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    // Update trade with release info
-    trade.status = 'completed';
-    trade.releaseTxHash = releaseTxHash;
-    trade.updatedAt = new Date().toISOString();
-    await database.saveTrade(trade);
-    
-    // Simple notification
-    console.log(`📢 Trade completed: ${trade.tradeId} - ${releaseTxHash}`);
-    
-    // Notify buyer about USDT release
-    await bot.telegram.sendMessage(
-      trade.buyerUserId!,
-      `🎉 **Trade Completed Successfully!**\n\n` +
-      `**Trade ID:** \`${trade.tradeId}\`\n` +
-      `**Amount:** ${trade.amount} USDT\n` +
-      `**Your Wallet:** \`${trade.buyerWalletAddress}\`\n` +
-      `**Transaction Hash:** \`${releaseTxHash}\`\n\n` +
-      `✅ **USDT has been released to your wallet!**\n\n` +
-      `**Trade Summary:**\n` +
-      `• Seller: ${trade.sellerUsername}\n` +
-      `• Amount: ${trade.amount} USDT\n` +
-      `• Status: Completed\n` +
-      `• Date: ${new Date().toLocaleDateString()}\n\n` +
-      `**Thank you for using our escrow service!** 🎉`,
-      {
-        parse_mode: 'Markdown'
-      }
-    );
-    
-    // Notify seller about trade completion
-    await bot.telegram.sendMessage(
-      trade.sellerUserId,
-      `🎉 **Trade Completed Successfully!**\n\n` +
-      `**Trade ID:** \`${trade.tradeId}\`\n` +
-      `**Amount:** ${trade.amount} USDT\n` +
-      `**Buyer:** ${trade.buyerUsername}\n` +
-      `**Transaction Hash:** \`${releaseTxHash}\`\n\n` +
-      `✅ **USDT has been released to buyer!**\n\n` +
-      `**Trade Summary:**\n` +
-      `• Buyer: ${trade.buyerUsername}\n` +
-      `• Amount: ${trade.amount} USDT\n` +
-      `• Status: Completed\n` +
-      `• Date: ${new Date().toLocaleDateString()}\n\n` +
-      `**Thank you for using our escrow service!** 🎉`,
-      {
-        parse_mode: 'Markdown'
-      }
-    );
-    
-    // Update group with completion message
-    if (trade.groupId) {
-      await bot.telegram.sendMessage(
-        trade.groupId,
-        `🎉 **Trade Completed Successfully!**\n\n` +
-        `**Trade ID:** \`${trade.tradeId}\`\n` +
-        `**Amount:** ${trade.amount} USDT\n` +
-        `**Buyer:** ${trade.buyerUsername}\n` +
-        `**Seller:** ${trade.sellerUsername}\n` +
-        `**Transaction Hash:** \`${releaseTxHash}\`\n\n` +
-        `✅ **USDT has been released to buyer!**\n\n` +
-        `**Both parties have successfully completed the trade.**\n\n` +
-        `**Thank you for using our escrow service!** 🎉`,
-        { parse_mode: 'Markdown' }
-      );
-    }
-    
-    console.log(`✅ USDT release completed for trade: ${trade.tradeId}`);
-    
-  } catch (error) {
-    console.error('USDT release error:', error);
-    
-    // Notify both parties about the error
-    await bot.telegram.sendMessage(
-      trade.sellerUserId,
-      `❌ **USDT Release Failed**\n\n` +
-      `**Trade ID:** \`${trade.tradeId}\`\n` +
-      `**Error:** ${error instanceof Error ? error.message : String(error)}\n\n` +
-      `Please contact admin for assistance.`,
-      {
-        parse_mode: 'Markdown'
-      }
-    );
-    
-    await bot.telegram.sendMessage(
-      trade.buyerUserId!,
-      `❌ **USDT Release Failed**\n\n` +
-      `**Trade ID:** \`${trade.tradeId}\`\n` +
-      `**Error:** ${error instanceof Error ? error.message : String(error)}\n\n` +
-      `Please contact admin for assistance.`,
-      {
-        parse_mode: 'Markdown'
-      }
-    );
-  }
-}
 
 // =============================================================================
 // ERROR HANDLING
@@ -3506,14 +2340,9 @@ async function startBot() {
   console.log('👑 Admin user ID:', ADMIN_USER_ID);
   
   try {
-    // Test TON connection (optional - don't fail if it doesn't work)
-    try {
-      await tonClient.testConnection();
-      console.log('✅ TON client connected');
-    } catch (tonError) {
-      console.error('⚠️ TON connection failed (continuing anyway):', (tonError as Error).message || tonError);
-      console.log('💡 Bot will work but TON features may be limited');
-    }
+    // Test TON connection
+    await tonClient.testConnection();
+    console.log('✅ TON client connected');
     
     // Start bot
     await bot.launch();
