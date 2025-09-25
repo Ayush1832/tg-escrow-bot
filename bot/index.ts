@@ -313,46 +313,78 @@ async function checkForExistingBuyer(ctx: any, session: any, tradeId: string) {
   try {
     console.log(`🔍 Checking for existing buyer in group ${ctx.chat?.id}`);
     
-    // Get chat info to check member count
-    const chatInfo = await ctx.telegram.getChat(ctx.chat.id);
-    console.log(`📊 Chat has ${chatInfo.member_count} members`);
+    // Since member_count is unreliable, let's try a different approach
+    // We'll assume there might be a buyer and provide the option for them to connect
     
-    // If there are more than 2 members (seller + bot), there's likely a buyer
-    if (chatInfo.member_count > 2) {
-      console.log(`👥 Detected ${chatInfo.member_count - 2} potential buyer(s) in group`);
+    console.log(`📊 Assuming buyer might be present, providing connection option`);
+    
+    // Post a message asking the buyer to identify themselves
+    await ctx.reply(
+      `🔍 **Buyer Detection**\n\n` +
+      `**If you are the buyer for this trade, please connect your wallet:**\n\n` +
+      `**Trade Details:**\n` +
+      `• Amount: **${session.amount} USDT**\n` +
+      `• Trade ID: \`${tradeId}\`\n` +
+      `• Seller: ${ctx.from?.first_name || ctx.from?.username}\n\n` +
+      `**Click the button below to start the trade:**`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.webApp('🔗 I am the Buyer - Connect Wallet', `${process.env.DOMAIN}/connect?trade=${session.tradeId}`)],
+          [Markup.button.callback('❌ Cancel Trade', 'cancel_trade')]
+        ])
+      }
+    );
+    
+    // Notify seller
+    await bot.telegram.sendMessage(session.sellerId!,
+      `🔍 **Buyer Detection**\n\n` +
+      `Trade ID: \`${tradeId}\`\n` +
+      `Amount: **${session.amount} USDT**\n\n` +
+      `I've posted a message in the group asking the buyer to connect their wallet.\n\n` +
+      `**Next:** The buyer should click the "Connect Wallet" button to start the trade.`,
+      { parse_mode: 'Markdown' }
+    );
+    
+  } catch (error) {
+    console.error('Error checking for existing buyer:', error);
+  }
+}
+
+// Check if buyer is connecting wallet from a trade group
+async function checkBuyerWalletConnection(ctx: any, userId: number) {
+  try {
+    // Check if this user is in any trade groups waiting for buyer
+    const sessions = Array.from(userSessions.values());
+    const waitingSession = sessions.find(session => 
+      session.step === 'waiting_for_buyer' && 
+      session.groupId && 
+      session.groupId === ctx.chat?.id
+    );
+    
+    if (waitingSession) {
+      console.log(`🎯 Buyer ${userId} connecting wallet in trade group ${ctx.chat?.id}`);
       
-      // Post a message asking the buyer to identify themselves
+      // Set this user as the buyer
+      waitingSession.buyerId = userId;
+      waitingSession.step = 'buyer_wallet_request';
+      
+      // Start buyer wallet polling
+      startBuyerWalletPolling(userId, ctx, waitingSession);
+      
+      // Update the group message
       await ctx.reply(
-        `🔍 **Buyer Detection**\n\n` +
-        `I can see there are ${chatInfo.member_count - 2} additional member(s) in this group.\n\n` +
-        `**If you are the buyer for this trade, please:**\n` +
-        `• Send any message in this group\n` +
-        `• Or click the "Connect Wallet" button below\n\n` +
-        `**Trade Details:**\n` +
-        `• Amount: **${session.amount} USDT**\n` +
-        `• Trade ID: \`${tradeId}\`\n` +
-        `• Seller: ${ctx.from?.first_name || ctx.from?.username}`,
-        {
-          parse_mode: 'Markdown',
-          ...Markup.inlineKeyboard([
-            [Markup.button.webApp('🔗 I am the Buyer - Connect Wallet', `${process.env.DOMAIN}/connect?trade=${session.tradeId}`)],
-            [Markup.button.callback('❌ Cancel Trade', 'cancel_trade')]
-          ])
-        }
-      );
-      
-      // Notify seller
-      await bot.telegram.sendMessage(session.sellerId!,
-        `🔍 **Buyer Detection**\n\n` +
-        `Trade ID: \`${tradeId}\`\n` +
-        `Amount: **${session.amount} USDT**\n\n` +
-        `I detected ${chatInfo.member_count - 2} additional member(s) in the group.\n\n` +
-        `**Next:** The buyer should connect their wallet to start the trade.`,
+        `✅ **Buyer Identified!**\n\n` +
+        `Buyer: ${ctx.from?.first_name || ctx.from?.username}\n` +
+        `Trade ID: \`${waitingSession.tradeId}\`\n` +
+        `Amount: **${waitingSession.amount} USDT**\n\n` +
+        `🔗 **Connecting Wallet...**\n\n` +
+        `Please complete the wallet connection process.`,
         { parse_mode: 'Markdown' }
       );
     }
   } catch (error) {
-    console.error('Error checking for existing buyer:', error);
+    console.error('Error checking buyer wallet connection:', error);
   }
 }
 
@@ -917,6 +949,9 @@ bot.action('start_sell_flow', async (ctx) => {
       
       // Start polling for wallet connection
       startWalletPolling(userId, ctx);
+      
+      // Check if this is a buyer connecting from a trade group
+      await checkBuyerWalletConnection(ctx, userId);
     } catch (error) {
       console.error('Error generating connection link:', error);
       await ctx.reply(
