@@ -1299,8 +1299,13 @@ bot.action(/^buyer_connect_(.+)$/, async (ctx) => {
   const buyerId = ctx.from?.id;
   if (!buyerId) return;
 
+  console.log(`🎯 Setting buyer ID ${buyerId} for trade ${tradeId}`);
+  console.log(`📊 Session before update:`, { tradeId: session.tradeId, sellerId: session.sellerId, amount: session.amount });
+
   session.buyerId = buyerId;
   session.step = 'buyer_wallet_request';
+
+  console.log(`📊 Session after update:`, { tradeId: session.tradeId, sellerId: session.sellerId, buyerId: session.buyerId, amount: session.amount });
 
   // Start buyer wallet polling
   startBuyerWalletPolling(buyerId, ctx, session);
@@ -1345,14 +1350,20 @@ bot.action(/^buyer_connect_(.+)$/, async (ctx) => {
 // Handle wallet connection request from group
 bot.action(/^connect_wallet_(.+)_(.+)$/, async (ctx) => {
   await ctx.answerCbQuery();
-  const buyerId = ctx.match[1];
+  const buyerId = parseInt(ctx.match[1]);
   const tradeId = ctx.match[2];
+
+  console.log(`🔗 Wallet connection requested - Buyer ID: ${buyerId}, Trade ID: ${tradeId}`);
 
   // Find the session for this trade
   const sessions = Array.from(userSessions.values());
   const session = sessions.find(s => s.tradeId === tradeId);
 
+  console.log(`📊 Found ${sessions.length} sessions, looking for trade: ${tradeId}`);
+  console.log(`📊 Session found:`, session ? 'Yes' : 'No');
+
   if (!session) {
+    console.error(`❌ No session found for trade ID: ${tradeId}`);
     await ctx.reply('❌ Trade session not found. Please restart the trade.');
     return;
   }
