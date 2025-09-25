@@ -1307,8 +1307,11 @@ bot.action(/^buyer_connect_(.+)$/, async (ctx) => {
 
   console.log(`📊 Session after update:`, { tradeId: session.tradeId, sellerId: session.sellerId, buyerId: session.buyerId, amount: session.amount });
 
-  // Start buyer wallet polling
-  startBuyerWalletPolling(buyerId, ctx, session);
+  // Proceed directly to escrow deployment (no wallet connection needed for buyer)
+  session.step = 'deploy_escrow';
+  
+  // Deploy escrow contract immediately
+  await deployEscrowContract(session, ctx);
 
   // Update the group message
   await ctx.reply(
@@ -1316,15 +1319,9 @@ bot.action(/^buyer_connect_(.+)$/, async (ctx) => {
     `Buyer: ${ctx.from?.first_name || ctx.from?.username}\n` +
     `Trade ID: \`${tradeId}\`\n` +
     `Amount: **${session.amount} USDT**\n\n` +
-    `🔗 **Connect Your Wallet**\n\n` +
-    `Please click the button below to connect your TON wallet:`,
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('🔗 Connect Wallet', `connect_wallet_${buyerId}_${session.tradeId}`)],
-        [Markup.button.callback('❌ Cancel Trade', 'cancel_trade')]
-      ])
-    }
+    `🎉 **Trade Ready to Start!**\n\n` +
+    `The buyer has been identified. The escrow contract will now be deployed and the seller will deposit USDT.`,
+    { parse_mode: 'Markdown' }
   );
 
   // Notify seller
@@ -1336,7 +1333,7 @@ bot.action(/^buyer_connect_(.+)$/, async (ctx) => {
         `Trade ID: \`${tradeId}\`\n` +
         `Amount: **${session.amount} USDT**\n\n` +
         `✅ **Trade Started!**\n\n` +
-        `The buyer is connecting their wallet. Once connected, the escrow contract will be deployed automatically.`,
+        `The escrow contract is being deployed and you will be asked to deposit USDT shortly.`,
         { parse_mode: 'Markdown' }
       );
     } catch (error) {
@@ -1344,67 +1341,6 @@ bot.action(/^buyer_connect_(.+)$/, async (ctx) => {
     }
   } else {
     console.error('Seller ID not found in session:', session);
-  }
-});
-
-// Handle wallet connection request from group
-bot.action(/^connect_wallet_(.+)_(.+)$/, async (ctx) => {
-  await ctx.answerCbQuery();
-  const buyerId = parseInt(ctx.match[1]);
-  const tradeId = ctx.match[2];
-
-  console.log(`🔗 Wallet connection requested - Buyer ID: ${buyerId}, Trade ID: ${tradeId}`);
-
-  // Find the session for this trade
-  const sessions = Array.from(userSessions.values());
-  const session = sessions.find(s => s.tradeId === tradeId);
-
-  console.log(`📊 Found ${sessions.length} sessions, looking for trade: ${tradeId}`);
-  console.log(`📊 Session found:`, session ? 'Yes' : 'No');
-
-  if (!session) {
-    console.error(`❌ No session found for trade ID: ${tradeId}`);
-    await ctx.reply('❌ Trade session not found. Please restart the trade.');
-    return;
-  }
-
-  // Send PM to buyer with wallet connection link
-  try {
-    await bot.telegram.sendMessage(buyerId,
-      `🔗 **Connect Your TON Wallet**\n\n` +
-      `**Trade Details:**\n` +
-      `• Amount: **${session.amount} USDT**\n` +
-      `• Trade ID: \`${tradeId}\`\n` +
-      `• Seller: ${session.sellerUsername || 'Unknown'}\n\n` +
-      `**Click the button below to connect your wallet:**`,
-      {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-          [Markup.button.webApp('🔗 Connect Wallet', `${process.env.DOMAIN}/connect?user=${buyerId}&trade=${session.tradeId}`)],
-          [Markup.button.callback('❌ Cancel Trade', 'cancel_trade')]
-        ])
-      }
-    );
-
-    // Update group message
-    await ctx.reply(
-      `📨 **Wallet Connection Link Sent**\n\n` +
-      `I've sent a private message to ${ctx.from?.first_name || ctx.from?.username} with the wallet connection link.\n\n` +
-      `**Please check your private messages to connect your wallet.**`,
-      { parse_mode: 'Markdown' }
-    );
-
-  } catch (error) {
-    console.error('Error sending PM to buyer:', error);
-    await ctx.reply(
-      `❌ **Could not send private message**\n\n` +
-      `Please make sure you have started a conversation with the bot in private messages.\n\n` +
-      `**Steps:**\n` +
-      `1. Go to @ayush_escrow_bot\n` +
-      `2. Send /start\n` +
-      `3. Come back and click the button again`,
-      { parse_mode: 'Markdown' }
-    );
   }
 });
 
