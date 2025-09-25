@@ -203,10 +203,10 @@ function startBuyerWalletPolling(userId: number, ctx: any, session: any) {
   }, 5 * 60 * 1000); // 5 minutes
 }
 
-// Deploy escrow contract
+// Show deploy contract button
 async function deployEscrowContract(session: any, ctx: any) {
   try {
-    console.log(`🚀 Deploying escrow contract for trade ${session.tradeId}`);
+    console.log(`🚀 Showing deploy contract button for trade ${session.tradeId}`);
     
     // Get seller wallet
     const sellerWallet = tonConnectService.getConnectedWallet(session.sellerId);
@@ -215,124 +215,26 @@ async function deployEscrowContract(session: any, ctx: any) {
       return;
     }
     
-    // For automatic deployment, we need the seller's mnemonic
-    // Since we can't get it from the connected wallet (for security), we'll use a different approach
-    // We'll ask the seller to provide their mnemonic for deployment, or use a pre-configured one
-    
-    // Option 1: Use mnemonic from session (if provided by seller)
-    // Option 2: Use environment variable for seller mnemonic (for demo/testing)
-    const sellerMnemonic = session.sellerMnemonic || process.env.SELLER_MNEMONIC;
-    
-    if (!sellerMnemonic) {
-      // If no mnemonic is configured, ask the seller to provide it
-      await ctx.reply(
-        `🔐 **Mnemonic Required for Deployment**\n\n` +
-        `To deploy the escrow contract automatically, please provide your wallet mnemonic.\n\n` +
-        `**Security Note:** This is for demo purposes. In production, use a secure key management system.\n\n` +
-        `**Send your mnemonic as a private message to the bot.**`,
-        { parse_mode: 'Markdown' }
-      );
-      
-      // Set session to wait for mnemonic
-      session.step = 'waiting_for_mnemonic';
-      return;
-    }
-    
-    // Deploy escrow contract using the mnemonic
-    const escrowAddress = await tonScripts.deployEscrow(
-      sellerMnemonic,
-      session.sellerId,
-      session.sellerUsername || 'Unknown',
-      session.buyerUsername || 'Unknown', 
-      session.amount.toString(),
-      250 // Default commission
+    // Show deploy button
+    await ctx.reply(
+      `🚀 **Ready to Deploy Escrow Contract**\n\n` +
+      `**Trade Details:**\n` +
+      `• Amount: **${session.amount} USDT**\n` +
+      `• Trade ID: \`${session.tradeId}\`\n` +
+      `• Buyer: ${session.buyerUsername || 'Unknown'}\n\n` +
+      `**Click the button below to deploy the escrow contract using your connected wallet:**`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard([
+          [Markup.button.callback('🚀 DEPLOY CONTRACT', `deploy_contract_${session.tradeId}`)],
+          [Markup.button.callback('❌ Cancel Trade', 'cancel_trade')]
+        ])
+      }
     );
     
-    if (escrowAddress) {
-      // Store escrow address
-      session.escrowAddress = escrowAddress;
-      session.step = 'seller_deposit';
-      
-      // Save to database
-      await database.saveTrade({
-        escrowAddress: escrowAddress,
-        sellerUserId: session.sellerId,
-        buyerUserId: session.buyerId,
-        sellerUsername: session.sellerUsername || 'Unknown',
-        buyerUsername: session.buyerUsername || 'Unknown',
-        amount: session.amount.toString(),
-        commissionBps: 250,
-        groupId: session.groupId,
-        status: 'pending',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
-      
-      // Notify in group
-      await ctx.reply(
-        `🎉 **Escrow Contract Deployed!**\n\n` +
-        `**Contract Address:** \`${escrowAddress}\`\n` +
-        `**Trade ID:** \`${session.tradeId}\`\n` +
-        `**Amount:** ${session.amount} USDT\n` +
-        `**Buyer:** \`${session.buyerAddress}\`\n\n` +
-        `💰 **Step 2: Seller Deposit**\n\n` +
-        `The seller will now deposit ${session.amount} USDT to the escrow contract. This will be done automatically from their wallet.`,
-        { parse_mode: 'Markdown' }
-      );
-      
-      // Automatically transfer USDT to escrow contract
-      console.log(`💰 Starting automatic USDT transfer to escrow...`);
-      
-      const transferSuccess = await tonScripts.transferUSDTToEscrow(
-        sellerMnemonic,
-        escrowAddress,
-        session.amount.toString()
-      );
-      
-      if (transferSuccess) {
-        // Update trade status to active
-        await database.updateTradeStatus(escrowAddress, 'active');
-        
-        // Notify in group
-        await ctx.reply(
-          `🎉 **USDT Deposited Successfully!**\n\n` +
-          `**Contract:** \`${escrowAddress}\`\n` +
-          `**Amount:** ${session.amount} USDT\n` +
-          `**Trade ID:** \`${session.tradeId}\`\n\n` +
-          `✅ **Escrow is now funded and ready!**\n\n` +
-          `**Next Steps:**\n` +
-          `• Seller shares bank details with buyer\n` +
-          `• Buyer makes bank transfer\n` +
-          `• Seller confirms payment\n` +
-          `• USDT is automatically released to buyer`,
-          { parse_mode: 'Markdown' }
-        );
-        
-        // Notify seller
-        await bot.telegram.sendMessage(session.sellerId,
-          `🎉 **USDT Deposited Successfully!**\n\n` +
-          `**Trade ID:** \`${session.tradeId}\`\n` +
-          `**Amount:** ${session.amount} USDT\n` +
-          `**Contract:** \`${escrowAddress}\`\n\n` +
-          `✅ **Escrow is now funded and ready!**\n\n` +
-          `**Next:** Share your bank details with the buyer in the group.`,
-          { parse_mode: 'Markdown' }
-        );
-        
-        session.step = 'trade_active';
-        
-      } else {
-        // Transfer failed, ask seller to deposit manually
-        await initiateSellerDeposit(session, ctx);
-      }
-      
-    } else {
-      await ctx.reply('❌ Failed to deploy escrow contract. Please try again.');
-    }
-    
   } catch (error) {
-    console.error('Error deploying escrow contract:', error);
-    await ctx.reply('❌ Error deploying escrow contract. Please try again.');
+    console.error('Error showing deploy button:', error);
+    await ctx.reply('❌ Error showing deploy button. Please try again.');
   }
 }
 
@@ -940,6 +842,7 @@ bot.action('start_sell_flow', async (ctx) => {
     // Set up trade amount step
     session.tradeId = tradeId;
     session.groupTitle = groupTitle;
+    session.sellerUsername = ctx.from?.username || ctx.from?.first_name || 'Unknown';
     session.step = 'sell_amount';
     
     // Get bot info with detailed debugging
@@ -1368,14 +1271,15 @@ bot.action(/^buyer_connect_(.+)$/, async (ctx) => {
   console.log(`📊 Session before update:`, { tradeId: session.tradeId, sellerId: session.sellerId, amount: session.amount });
 
   session.buyerId = buyerId;
-  session.step = 'buyer_wallet_request';
+  session.buyerUsername = ctx.from?.username || ctx.from?.first_name || 'Unknown';
+  session.sellerUsername = session.sellerUsername || 'Unknown'; // Ensure seller username is stored
 
   console.log(`📊 Session after update:`, { tradeId: session.tradeId, sellerId: session.sellerId, buyerId: session.buyerId, amount: session.amount });
 
-  // Proceed directly to escrow deployment (no wallet connection needed for buyer)
-  session.step = 'deploy_escrow';
+  // Proceed to deployment step (no wallet connection needed for buyer)
+  session.step = 'waiting_for_deployment';
   
-  // Deploy escrow contract immediately
+  // Ask seller to deploy contract
   await deployEscrowContract(session, ctx);
 
   // Update the group message
@@ -1406,6 +1310,149 @@ bot.action(/^buyer_connect_(.+)$/, async (ctx) => {
     }
   } else {
     console.error('Seller ID not found in session:', session);
+  }
+});
+
+// Handle deploy contract button
+bot.action(/^deploy_contract_(.+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  const tradeId = ctx.match[1];
+
+  // Find the session for this trade
+  const sessions = Array.from(userSessions.values());
+  const session = sessions.find(s => s.tradeId === tradeId);
+
+  if (!session) {
+    await ctx.reply('❌ Trade session not found. Please restart the trade.');
+    return;
+  }
+
+  // Check if this is the seller
+  if (ctx.from?.id !== session.sellerId) {
+    await ctx.reply('❌ Only the seller can deploy the contract.');
+    return;
+  }
+
+  // Get seller's connected wallet
+  const sellerWallet = tonConnectService.getConnectedWallet(session.sellerId);
+  if (!sellerWallet) {
+    await ctx.reply('❌ Seller wallet not connected. Please reconnect your wallet first.');
+    return;
+  }
+
+  // Update the message to show deployment is starting
+  await ctx.editMessageText(
+    `🚀 **Deploying Escrow Contract...**\n\n` +
+    `**Trade Details:**\n` +
+    `• Amount: **${session.amount} USDT**\n` +
+    `• Trade ID: \`${tradeId}\`\n` +
+    `• Buyer: ${session.buyerUsername || 'Unknown'}\n\n` +
+    `⏳ **Please wait while the contract is being deployed...**`,
+    { parse_mode: 'Markdown' }
+  );
+
+  try {
+    // Deploy escrow contract using the connected wallet
+    const escrowAddress = await tonScripts.deployEscrowWithWallet(
+      sellerWallet.address,
+      session.sellerId,
+      session.sellerUsername || 'Unknown',
+      session.buyerUsername || 'Unknown',
+      session.amount.toString(),
+      250 // Default commission
+    );
+
+    if (escrowAddress) {
+      // Store escrow address
+      session.escrowAddress = escrowAddress;
+      session.step = 'seller_deposit';
+
+      // Update the message to show success
+      await ctx.editMessageText(
+        `🎉 **Escrow Contract Deployed!**\n\n` +
+        `**Contract Address:** \`${escrowAddress}\`\n` +
+        `**Trade ID:** \`${tradeId}\`\n` +
+        `**Amount:** ${session.amount} USDT\n` +
+        `**Buyer:** \`${session.buyerAddress || 'TBD'}\`\n\n` +
+        `✅ **Contract deployed successfully!**\n\n` +
+        `**Next:** USDT will be automatically transferred to the escrow contract.`,
+        { parse_mode: 'Markdown' }
+      );
+
+      // Notify in group
+      await ctx.reply(
+        `🎉 **Escrow Contract Deployed!**\n\n` +
+        `**Contract:** \`${escrowAddress}\`\n` +
+        `**Amount:** ${session.amount} USDT\n` +
+        `**Trade ID:** \`${tradeId}\`\n\n` +
+        `💰 **Step 2: Seller Deposit**\n\n` +
+        `The seller will now deposit ${session.amount} USDT to the escrow contract. This will be done automatically from their wallet.`,
+        { parse_mode: 'Markdown' }
+      );
+
+      // Transfer USDT to escrow using connected wallet (secure approach)
+      console.log(`💰 Starting USDT transfer using connected wallet...`);
+      
+      const transferSuccess = await tonScripts.transferUSDTToEscrowWithWallet(
+        sellerWallet.address,
+        escrowAddress,
+        session.amount.toString()
+      );
+
+      if (transferSuccess) {
+        await ctx.reply(
+          `🎉 **USDT Deposited Successfully!**\n\n` +
+          `**Contract:** \`${escrowAddress}\`\n` +
+          `**Amount:** ${session.amount} USDT\n` +
+          `**Trade ID:** \`${tradeId}\`\n\n` +
+          `✅ **Escrow is now funded and ready!**\n\n` +
+          `**Next Steps:**\n` +
+          `• Seller shares bank details with buyer\n` +
+          `• Buyer makes bank transfer\n` +
+          `• Seller confirms payment\n` +
+          `• USDT is automatically released to buyer`,
+          { parse_mode: 'Markdown' }
+        );
+
+        // Update trade status
+        await database.updateTradeStatus(escrowAddress, 'active');
+        session.step = 'trade_active';
+
+        // Notify seller
+        await bot.telegram.sendMessage(session.sellerId,
+          `🎉 **USDT Deposited Successfully!**\n\n` +
+          `**Trade ID:** \`${tradeId}\`\n` +
+          `**Amount:** ${session.amount} USDT\n` +
+          `**Contract:** \`${escrowAddress}\`\n\n` +
+          `✅ **Escrow is now funded and ready!**\n\n` +
+          `**Next:** Share your bank details with the buyer in the group.`,
+          { parse_mode: 'Markdown' }
+        );
+      } else {
+        await ctx.reply(
+          `❌ **USDT Transfer Failed**\n\n` +
+          `**Contract:** \`${escrowAddress}\`\n` +
+          `**Trade ID:** \`${tradeId}\`\n\n` +
+          `Please try again or contact support.`,
+          { parse_mode: 'Markdown' }
+        );
+      }
+
+    } else {
+      await ctx.editMessageText(
+        `❌ **Contract Deployment Failed**\n\n` +
+        `Failed to deploy the escrow contract. Please try again or contact support.`,
+        { parse_mode: 'Markdown' }
+      );
+    }
+
+  } catch (error) {
+    console.error('Error deploying contract:', error);
+    await ctx.editMessageText(
+      `❌ **Deployment Error**\n\n` +
+      `An error occurred while deploying the contract. Please try again.`,
+      { parse_mode: 'Markdown' }
+    );
   }
 });
 
@@ -2240,29 +2287,6 @@ bot.on('text', async (ctx) => {
         ])
       }
     );
-  } else if (session.step === 'waiting_for_mnemonic') {
-    console.log(`🔐 Processing mnemonic for user ${userId}, text: "${text}"`);
-    
-    // Store the mnemonic temporarily (in production, this should be handled securely)
-    session.sellerMnemonic = text.trim();
-    
-    // Validate mnemonic format (basic check)
-    const mnemonicWords = text.trim().split(' ');
-    if (mnemonicWords.length !== 24) {
-      await ctx.reply(
-        `❌ **Invalid Mnemonic Format**\n\n` +
-        `A TON wallet mnemonic should have exactly 24 words.\n\n` +
-        `Please provide your 24-word mnemonic phrase:`,
-        { parse_mode: 'Markdown' }
-      );
-      return;
-    }
-    
-    console.log(`✅ Mnemonic received, proceeding with deployment for user ${userId}`);
-    
-    // Proceed with deployment using the provided mnemonic
-    await deployEscrowContract(session, ctx);
-    
   } else if (session.step === 'sell_commission') {
     let commissionBps = 250; // Default 2.5%
     if (text !== 'default') {
@@ -2282,114 +2306,8 @@ bot.on('text', async (ctx) => {
     session.commissionBps = commissionBps;
     session.step = null;
     
-    // Deploy escrow
-    await ctx.reply('🚀 Deploying escrow contract...');
-    
-    try {
-      const wallet = tonConnectService.getConnectedWallet(userId!);
-      if (!wallet) {
-        throw new Error('Wallet not connected');
-      }
-      
-      const amountUnits = escrowUtils.parseAmount(session.amount.toString());
-      
-      // For now, we'll use a mock mnemonic for deployment
-      // In production, this would use the connected wallet's signing capability
-      const mockMnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-      
-      const escrowAddress = await tonScripts.deployEscrow(
-        mockMnemonic, // This will be replaced with wallet signing in production
-        userId!,
-        ctx.from?.username || 'unknown',
-        session.buyerUsername,
-        amountUnits,
-        commissionBps
-      );
-
-      if (escrowAddress) {
-        const fees = escrowUtils.calculateFees(amountUnits, commissionBps);
-        
-        // Store trade info for group access
-        const tradeInfo = {
-          escrowAddress,
-          sellerUserId: userId!,
-          sellerUsername: ctx.from?.username || 'unknown',
-          buyerUsername: session.buyerUsername,
-          amount: session.amount.toString(),
-          commissionBps,
-          groupId: session.groupId,
-          groupTitle: session.groupTitle,
-          status: 'pending' as const,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        };
-        
-        // Store in database
-        await database.saveTrade(tradeInfo);
-        
-        // Send success message to DM
-        await ctx.reply(
-          `✅ **Escrow Deployed Successfully!**\n\n` +
-          `**Contract Address:**\n` +
-          `\`${escrowAddress}\`\n\n` +
-          `**Trade Summary:**\n` +
-          `• Seller: @${ctx.from?.username}\n` +
-          `• Wallet: \`${wallet.address}\`\n` +
-          `• Buyer: @${session.buyerUsername}\n` +
-          `• Amount: ${session.amount} USDT\n` +
-          `• Commission: ${commissionBps / 100}%\n\n` +
-          `**Fee Breakdown:**\n` +
-          `• Platform fee: ${escrowUtils.formatAmount(fees.totalFee)} USDT\n` +
-          `• To buyer: ${escrowUtils.formatAmount(fees.toBuyer)} USDT\n\n` +
-          `**Next Steps:**\n` +
-          `1. Deposit ${session.amount} USDT into the escrow\n` +
-          `2. Continue in the private group\n` +
-          `3. Wait for buyer's off-chain payment\n` +
-          `4. Confirm payment to release USDT\n\n` +
-          `**Go to your private group to continue the transaction!**`,
-          {
-            parse_mode: 'Markdown',
-            ...Markup.inlineKeyboard([
-              [Markup.button.callback('📊 Check Status', `status_${escrowAddress}`)],
-              [Markup.button.callback('💰 Deposit USDT', `deposit_${escrowAddress}`)]
-            ])
-          }
-        );
-        
-        // Send detailed info to group if it exists
-        if (session.groupId) {
-          await ctx.telegram.sendMessage(
-            session.groupId,
-            `🚀 **Escrow Contract Deployed!**\n\n` +
-            `**Contract Address:**\n` +
-            `\`${escrowAddress}\`\n\n` +
-            `**Trade Details:**\n` +
-            `• Amount: ${session.amount} USDT\n` +
-            `• Commission: ${commissionBps / 100}%\n` +
-            `• Platform fee: ${escrowUtils.formatAmount(fees.totalFee)} USDT\n` +
-            `• Buyer receives: ${escrowUtils.formatAmount(fees.toBuyer)} USDT\n\n` +
-            `**Next Steps:**\n` +
-            `1. **Seller:** Deposit ${session.amount} USDT to the contract\n` +
-            `2. **Buyer:** Make off-chain payment to seller\n` +
-            `3. **Seller:** Confirm payment received\n` +
-            `4. **Bot:** Release USDT to buyer\n\n` +
-            `**Status:** ⏳ Waiting for USDT deposit`,
-            {
-              parse_mode: 'Markdown',
-              ...Markup.inlineKeyboard([
-                [Markup.button.callback('📊 Check Status', `status_${escrowAddress}`)],
-                [Markup.button.callback('💰 Deposit USDT', `deposit_${escrowAddress}`)]
-              ])
-            }
-          );
-        }
-      } else {
-        await ctx.reply('❌ Failed to deploy escrow contract. Please try again.');
-      }
-    } catch (error) {
-      console.error('❌ Error deploying escrow:', error);
-      await ctx.reply('❌ Error deploying escrow contract. Please try again.');
-    }
+    // This step is no longer used - deployment is handled via button click
+    await ctx.reply('❌ Invalid step. Please restart the trade with /sell');
   }
   
   
