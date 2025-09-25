@@ -1763,11 +1763,11 @@ bot.action('admin_cancel_expired', async (ctx) => {
 // GROUP MESSAGE HANDLERS
 // =============================================================================
 
-// Handle messages in trade groups
-bot.on('message', async (ctx) => {
-  // Skip if not a group or supergroup
+// Handle messages in trade groups only
+bot.on('message', async (ctx, next) => {
+  // Only handle group/supergroup messages, let others pass through
   if (!ctx.chat || (ctx.chat.type !== 'group' && ctx.chat.type !== 'supergroup')) {
-    return;
+    return next(); // Pass to next handler (text handler)
   }
   
   const groupId = ctx.chat.id;
