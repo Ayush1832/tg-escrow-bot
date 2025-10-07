@@ -33,30 +33,39 @@ A centralized Telegram escrow bot for USDT transactions on BSC network.
    ```
 
 2. **Configure Environment (.env)**
-   Create a `.env` file with:
+   Create a `.env` file (never commit it) with placeholders like:
    ```env
-   BOT_TOKEN=8440109225:AAHX5MZcHD-KXOYVqR8hFKb6W-XQP20bZ-g
-   ADMIN_USERNAME=ayush_n_1832
-   ADMIN_USER_ID=800325894
-   MONGODB_URI=mongodb+srv://Ayush1832:GsxJWOfaPtMNu4yG@ayushh.qm47rbo.mongodb.net/escrow-bot
+   BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
+   ADMIN_USERNAME=YOUR_ADMIN_USERNAME
+   ADMIN_USER_ID=YOUR_ADMIN_TELEGRAM_ID
+   MONGODB_URI=YOUR_MONGODB_URI
    BSC_RPC_URL=https://bsc-dataseed.binance.org/
-   BSCSCAN_API_KEY=9AMUIR461QWPW38VCEWX9QEQ17IJWECXZD
+   BSCSCAN_API_KEY=YOUR_BSCSCAN_API_KEY
    USDT_CONTRACT_ADDRESS=0x55d398326f99059fF775485246999027B3197955
-   HOT_WALLET_PRIVATE_KEY=76a412788f4768210038daafbc80692a23002fab55fe6b07a2e271255428272b
+   HOT_WALLET_PRIVATE_KEY=YOUR_PRIVATE_KEY
    ESCROW_FEE_PERCENT=1.0
    ESCROW_FEE_BPS=100
    MIN_TRADE_AMOUNT=1
    MAX_TRADE_AMOUNT=10000
    DEPOSIT_ADDRESS_TTL_MINUTES=20
-   FEE_WALLET_1=0x2beD2911366C582Ab52F11f849F5C0E942Ba666E
-   FEE_WALLET_2=0x2beD2911366C582Ab52F11f849F5C0E942Ba666E
-   FEE_WALLET_3=0x2beD2911366C582Ab52F11f849F5C0E942Ba666E
+   FEE_WALLET_1=YOUR_FEE_WALLET_1
+   FEE_WALLET_2=YOUR_FEE_WALLET_2
+   FEE_WALLET_3=YOUR_FEE_WALLET_3
    ```
+   Warning: Do not paste real secrets into documentation or commit history.
 
 3. **Compile and Deploy Contract**
    ```bash
    npm run compile
+   # BSC mainnet/testnet
    npm run deploy     # uses BSC_RPC_URL and HOT_WALLET_PRIVATE_KEY
+   
+   # Sepolia testing (recommended when low on funds)
+   # 1) Deploy Mock USDT (or use any existing ERC20 with 6 decimals)
+   npm run deploy:mockusdt:sepolia
+   # 2) Set USDT_CONTRACT_ADDRESS in .env to the MockUSDT address
+   # 3) Deploy EscrowVault on Sepolia
+   npm run deploy:sepolia
    ```
    The deployed `EscrowVault` address will be saved in MongoDB (`contracts` collection).
 
@@ -96,18 +105,18 @@ A centralized Telegram escrow bot for USDT transactions on BSC network.
 
 Key settings in `config.js`:
 
-```javascript
-{
-  BOT_TOKEN: 'your_bot_token',
-  MONGODB_URI: 'mongodb_connection_string',
-  BSC_RPC_URL: 'https://bsc-dataseed.binance.org/',
-  BSCSCAN_API_KEY: 'your_bscscan_api_key',
-  HOT_WALLET_PRIVATE_KEY: 'your_private_key',
-  ESCROW_FEE_PERCENT: 1.0,
-  MIN_TRADE_AMOUNT: 1,
-  MAX_TRADE_AMOUNT: 10000
-}
-```
+  ```javascript
+  {
+    BOT_TOKEN: 'env',
+    MONGODB_URI: 'env',
+    BSC_RPC_URL: 'env or https://bsc-dataseed.binance.org/',
+    BSCSCAN_API_KEY: 'env',
+    HOT_WALLET_PRIVATE_KEY: 'env',
+    ESCROW_FEE_PERCENT: 1.0,
+    MIN_TRADE_AMOUNT: 1,
+    MAX_TRADE_AMOUNT: 10000
+  }
+  ```
 
 ## Production Deployment
 
