@@ -1,0 +1,41 @@
+{
+  "_format": "hh-sol-cache-2",
+  "files": {
+    "C:\\Users\\LENOVO\\Desktop\\tg-escrow-bot\\contracts\\SimpleEscrow.sol": {
+      "lastModificationDate": 1759787832427,
+      "contentHash": "1bb228eb7de58e523d2eec82081e51f3",
+      "sourceName": "contracts/SimpleEscrow.sol",
+      "solcConfig": {
+        "version": "0.8.19",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        "^0.8.19"
+      ],
+      "artifacts": [
+        "IERC20",
+        "SimpleEscrow"
+      ]
+    }
+  }
+}

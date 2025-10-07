@@ -1,0 +1,101 @@
+const mongoose = require('mongoose');
+
+const escrowSchema = new mongoose.Schema({
+  escrowId: {
+    type: String,
+    required: true,
+    unique: true
+  },
+  groupId: {
+    type: String,
+    required: true
+  },
+  status: {
+    type: String,
+    enum: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed', 'completed', 'refunded'],
+    default: 'draft'
+  },
+  token: {
+    type: String,
+    default: 'USDT'
+  },
+  chain: {
+    type: String,
+    default: 'BSC'
+  },
+  quantity: {
+    type: Number,
+    required: true
+  },
+  rate: {
+    type: Number,
+    required: true
+  },
+  conditions: String,
+  buyerId: {
+    type: Number,
+    required: false
+  },
+  sellerId: {
+    type: Number,
+    required: false
+  },
+  buyerAddress: String,
+  sellerAddress: String,
+  depositAddress: String,
+  depositAmount: {
+    type: Number,
+    default: 0
+  },
+  confirmedAmount: {
+    type: Number,
+    default: 0
+  },
+  escrowFee: {
+    type: Number,
+    default: 0
+  },
+  networkFee: {
+    type: Number,
+    default: 0
+  },
+  buyerSentFiat: {
+    type: Boolean,
+    default: false
+  },
+  sellerReceivedFiat: {
+    type: Boolean,
+    default: false
+  },
+  buyerConfirmedRelease: {
+    type: Boolean,
+    default: false
+  },
+  sellerConfirmedRelease: {
+    type: Boolean,
+    default: false
+  },
+  buyerConfirmedRefund: {
+    type: Boolean,
+    default: false
+  },
+  sellerConfirmedRefund: {
+    type: Boolean,
+    default: false
+  },
+  isDisputed: {
+    type: Boolean,
+    default: false
+  },
+  disputeReason: String,
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  updatedAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+module.exports = mongoose.model('Escrow', escrowSchema);
