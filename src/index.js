@@ -148,12 +148,12 @@ class EscrowBot {
   async start() {
     try {
       await connectDB();
-      // Initialize on-chain vault
+      // Initialize on-chain vault (optional for basic bot functionality)
       try {
         const addr = await BlockchainService.initialize();
-        console.log('EscrowVault at', addr);
+        console.log('✅ EscrowVault initialized at:', addr);
       } catch (e) {
-        console.warn('EscrowVault not initialized yet. Deploy with `npm run deploy`');
+        console.warn('⚠️ EscrowVault not found. Bot will work in limited mode. Deploy with `npm run deploy:sepolia`');
       }
       await this.bot.launch();
       console.log('🤖 Escrow Bot started successfully!');

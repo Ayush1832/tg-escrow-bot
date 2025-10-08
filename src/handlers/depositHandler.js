@@ -36,7 +36,7 @@ module.exports = async (ctx) => {
     const Contract = require('../models/Contract');
     const vault = await Contract.findOne({ name: 'EscrowVault' });
     if (!vault) {
-      return ctx.reply('❌ Escrow vault not deployed. Operator must run deployment.');
+      return ctx.reply('❌ Escrow vault not deployed. Please contact admin to deploy the contract first.');
     }
     const address = vault.address;
     const derivationPath = 'vault';

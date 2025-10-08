@@ -14,16 +14,27 @@ const ESCROW_VAULT_ABI = [
 
 class BlockchainService {
   constructor() {
-    this.provider = new ethers.JsonRpcProvider(config.BSC_RPC_URL);
+    // Use Sepolia RPC if available, otherwise BSC
+    const rpcUrl = config.SEPOLIA_RPC_URL || config.BSC_RPC_URL;
+    this.provider = new ethers.JsonRpcProvider(rpcUrl);
     this.wallet = new ethers.Wallet(config.HOT_WALLET_PRIVATE_KEY, this.provider);
     this.vault = null;
   }
 
   async initialize() {
-    const entry = await ContractModel.findOne({ name: 'EscrowVault' });
-    if (!entry) throw new Error('EscrowVault not deployed / not saved');
-    this.vault = new ethers.Contract(entry.address, ESCROW_VAULT_ABI, this.wallet);
-    return entry.address;
+    try {
+      const entry = await ContractModel.findOne({ name: 'EscrowVault' });
+      if (!entry) {
+        console.log('No EscrowVault found in database');
+        throw new Error('EscrowVault not deployed / not saved');
+      }
+      console.log('Found EscrowVault in DB:', entry.address, 'on', entry.network);
+      this.vault = new ethers.Contract(entry.address, ESCROW_VAULT_ABI, this.wallet);
+      return entry.address;
+    } catch (error) {
+      console.error('Error initializing BlockchainService:', error);
+      throw error;
+    }
   }
 
   async release(to, amountUSDT) {

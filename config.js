@@ -13,6 +13,9 @@ module.exports = {
   BSC_RPC_URL: process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org/',
   BSCSCAN_API_KEY: process.env.BSCSCAN_API_KEY,
   USDT_CONTRACT_ADDRESS: process.env.USDT_CONTRACT_ADDRESS || '0x55d398326f99059fF775485246999027B3197955',
+  
+  // Sepolia Configuration
+  SEPOLIA_RPC_URL: process.env.SEPOLIA_RPC_URL,
 
   // Wallet Configuration
   HOT_WALLET_PRIVATE_KEY: process.env.HOT_WALLET_PRIVATE_KEY,
