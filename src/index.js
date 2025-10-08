@@ -44,8 +44,20 @@ class EscrowBot {
   }
 
   setupHandlers() {
+    // Add debugging for all messages
+    this.bot.use((ctx, next) => {
+      console.log('📨 Received message:', ctx.message?.text || 'non-text message', 'from:', ctx.from?.username);
+      return next();
+    });
+    
     // Start command
     this.bot.start(startHandler);
+    
+    // Test command
+    this.bot.command('test', (ctx) => {
+      console.log('🧪 Test command received');
+      ctx.reply('✅ Bot is working!');
+    });
     
     // Escrow commands
     this.bot.command('escrow', escrowHandler);
