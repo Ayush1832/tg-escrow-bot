@@ -4,6 +4,7 @@ const Escrow = require('../models/Escrow');
 const BlockchainService = require('../services/BlockchainService');
 const Event = require('../models/Event');
 const config = require('../../config');
+const escrowHandler = require('./escrowHandler');
 
 module.exports = async (ctx) => {
   try {
@@ -12,7 +13,34 @@ module.exports = async (ctx) => {
     const chatId = ctx.chat.id;
 
     // Handle different callback types
-    if (callbackData.startsWith('confirm_')) {
+    if (callbackData === 'start_escrow') {
+      await ctx.answerCbQuery('Starting a new escrow...');
+      // Trigger escrow creation flow
+      return escrowHandler(ctx);
+    } else if (callbackData === 'show_menu') {
+      await ctx.answerCbQuery('Showing menu...');
+      const menuText = `
+🤖 *Easy Escrow Bot Menu*
+
+📋 *Available Commands:*
+/start - Start the bot
+/escrow - Create new escrow
+/dd - Set deal details
+/seller [address] - Set seller address
+/buyer [address] - Set buyer address
+/token - Select token and network
+/deposit - Get deposit address
+/release [amount] - Release funds
+/refund [amount] - Refund to seller
+/dispute - Call administrator
+
+💡 *Tips:*
+- Use /dd to set deal details first
+- Make sure both parties confirm their roles
+- Always verify addresses before depositing
+      `;
+      return ctx.reply(menuText, { parse_mode: 'Markdown' });
+    } else if (callbackData.startsWith('confirm_')) {
       const [, action, role, amount] = callbackData.split('_');
       
       // Find active escrow
