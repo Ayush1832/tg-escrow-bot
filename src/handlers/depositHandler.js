@@ -45,15 +45,26 @@ module.exports = async (ctx) => {
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + config.DEPOSIT_ADDRESS_TTL_MINUTES);
 
-    // Save deposit address
-    const depositAddress = new DepositAddress({
-      escrowId: escrow.escrowId,
-      address,
-      derivationPath,
-      expiresAt,
-      status: 'active'
-    });
-    await depositAddress.save();
+    // Save or update deposit address (vault address can be reused)
+    // First, try to remove any existing unique index on address
+    try {
+      await DepositAddress.collection.dropIndex('address_1');
+    } catch (e) {
+      // Index might not exist, ignore error
+    }
+    
+    await DepositAddress.updateOne(
+      { escrowId: escrow.escrowId },
+      {
+        escrowId: escrow.escrowId,
+        address,
+        derivationPath,
+        expiresAt,
+        status: 'active',
+        observedAmount: 0
+      },
+      { upsert: true }
+    );
 
     // Update escrow
     escrow.depositAddress = address;
@@ -80,7 +91,7 @@ ${address} [USDT] [BSC]
 
 Seller [@${ctx.from.username}] Will Pay on the Escrow Address, And Click On Check Payment.
 
-Amount Received: ${escrow.quantity.toFixed(5)} [$${escrow.quantity.toFixed(2)}]
+Amount to be Received: [$${escrow.quantity.toFixed(2)}]
 
 ⏰ Trade Start Time: ${new Date().toLocaleString('en-GB', { 
       day: '2-digit', 
@@ -102,7 +113,12 @@ Amount Received: ${escrow.quantity.toFixed(5)} [$${escrow.quantity.toFixed(2)}]
 Remember, once commands are used payment will be released, there is no revert!
     `;
 
-    await ctx.reply(depositText, { parse_mode: 'Markdown' });
+    await ctx.reply(depositText, { 
+      parse_mode: 'Markdown',
+      reply_markup: Markup.inlineKeyboard([
+        [Markup.button.callback('✅ I have deposited to escrow address', 'check_deposit')]
+      ]).reply_markup
+    });
 
     // Log event
     await new Event({

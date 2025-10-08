@@ -7,8 +7,7 @@ const depositAddressSchema = new mongoose.Schema({
   },
   address: {
     type: String,
-    required: true,
-    unique: true
+    required: true
   },
   derivationPath: {
     type: String,

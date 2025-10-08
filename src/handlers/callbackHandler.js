@@ -5,6 +5,8 @@ const BlockchainService = require('../services/BlockchainService');
 const Event = require('../models/Event');
 const config = require('../../config');
 const escrowHandler = require('./escrowHandler');
+const DepositAddress = require('../models/DepositAddress');
+const BSCService = require('../services/BSCService');
 
 module.exports = async (ctx) => {
   try {
@@ -40,6 +42,44 @@ module.exports = async (ctx) => {
 - Always verify addresses before depositing
       `;
       return ctx.reply(menuText, { parse_mode: 'Markdown' });
+    } else if (callbackData === 'check_deposit') {
+      await ctx.answerCbQuery('Checking for your deposit...');
+      const chatId = ctx.chat.id;
+      const escrow = await Escrow.findOne({
+        groupId: chatId.toString(),
+        status: { $in: ['awaiting_deposit', 'deposited'] }
+      });
+      if (!escrow || !escrow.depositAddress) {
+        return ctx.reply('❌ No active deposit address found.');
+      }
+      const activeAddr = await DepositAddress.findOne({ escrowId: escrow.escrowId, address: escrow.depositAddress, status: { $in: ['active', 'used'] } });
+      if (!activeAddr) return ctx.reply('❌ Deposit address expired or missing.');
+
+      // Fetch recent USDT txns for the vault address
+      const txs = await BSCService.getUSDTTransactions(activeAddr.address);
+      const sellerAddr = (escrow.sellerAddress || '').toLowerCase();
+      const vaultAddr = activeAddr.address.toLowerCase();
+      const totalAmount = (txs || []).reduce((sum, tx) => {
+        const from = (tx.from || '').toLowerCase();
+        const to = (tx.to || '').toLowerCase();
+        if (to === vaultAddr && (!sellerAddr || from === sellerAddr)) {
+          return sum + Number(tx.valueDecimal || 0);
+        }
+        return sum;
+      }, 0);
+
+      if (totalAmount > (activeAddr.observedAmount || 0)) {
+        activeAddr.observedAmount = totalAmount;
+        activeAddr.status = 'used';
+        await activeAddr.save();
+        escrow.depositAmount = totalAmount;
+        escrow.confirmedAmount = totalAmount;
+        escrow.status = 'deposited';
+        await escrow.save();
+        await ctx.reply(`✅ Deposit confirmed: ${totalAmount.toFixed(6)} USDT`);
+      } else {
+        await ctx.reply('❌ No new deposit found yet. Please try again in a moment.');
+      }
     } else if (callbackData.startsWith('confirm_')) {
       const [, action, role, amount] = callbackData.split('_');
       

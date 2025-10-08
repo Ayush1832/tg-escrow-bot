@@ -25,11 +25,11 @@ const escrowSchema = new mongoose.Schema({
   },
   quantity: {
     type: Number,
-    required: true
+    required: false
   },
   rate: {
     type: Number,
-    required: true
+    required: false
   },
   conditions: String,
   buyerId: {

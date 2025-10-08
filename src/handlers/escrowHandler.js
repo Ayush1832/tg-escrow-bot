@@ -7,9 +7,24 @@ module.exports = async (ctx) => {
     const userId = ctx.from.id;
     const chatId = ctx.chat.id;
     
-    // Check if user is in a group
+    // If used in private chat, guide user to create or use a group
     if (chatId > 0) {
-      return ctx.reply('❌ This command can only be used in a group chat. Please create a group and add the bot as admin.');
+      const dmText = `
+Escrow Group Created
+
+Creator: @${ctx.from.username || 'user'}
+
+Join this escrow group and share the link with the buyer and seller.
+
+⚠️ Note: For security, create a new Telegram group, add this bot, and set it as admin. Then run /escrow inside that group to initialize the escrow context.
+
+Manual steps (if auto-creation isn't available):
+1) Create a Telegram group
+2) Add this bot and promote to admin
+3) Both buyer and seller join
+4) Run /escrow in the group
+      `;
+      return ctx.reply(dmText);
     }
 
     // Check if there's already an active escrow in this group

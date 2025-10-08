@@ -6,7 +6,9 @@ module.exports = async (ctx) => {
   try {
     const chatId = ctx.chat.id;
     const userId = ctx.from.id;
-    const command = ctx.message.text.split(' ')[0].substring(1); // /seller or /buyer
+    // Normalize command: handle /seller and /seller@botname
+    const rawCmd = ctx.message.text.split(' ')[0].substring(1);
+    const command = rawCmd.split('@')[0]; // base command without @bot
     const address = ctx.message.text.split(' ').slice(1).join(' ');
     
     // Check if user is in a group
@@ -37,13 +39,26 @@ module.exports = async (ctx) => {
     const isSeller = command === 'seller';
 
     if (isBuyer) {
-      if (escrow.buyerId !== userId) {
-        return ctx.reply('❌ Only the buyer can set the buyer address.');
+      // Prevent same user from being both buyer and seller
+      if (escrow.sellerId && escrow.sellerId === userId) {
+        return ctx.reply('❌ You are already set as the seller. The buyer must be a different user.');
+      }
+      // Assign buyer role if unassigned; otherwise enforce the assigned user
+      if (!escrow.buyerId) {
+        escrow.buyerId = userId;
+      } else if (escrow.buyerId !== userId) {
+        return ctx.reply('❌ Buyer role is already taken by another user.');
       }
       escrow.buyerAddress = address;
     } else if (isSeller) {
-      if (escrow.sellerId !== userId) {
-        return ctx.reply('❌ Only the seller can set the seller address.');
+      // Prevent same user from being both seller and buyer
+      if (escrow.buyerId && escrow.buyerId === userId) {
+        return ctx.reply('❌ You are already set as the buyer. The seller must be a different user.');
+      }
+      if (!escrow.sellerId) {
+        escrow.sellerId = userId;
+      } else if (escrow.sellerId !== userId) {
+        return ctx.reply('❌ Seller role is already taken by another user.');
       }
       escrow.sellerAddress = address;
     }
