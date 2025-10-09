@@ -50,31 +50,14 @@ class EscrowBot {
       return next();
     });
     
-    // Start command
-    this.bot.start(startHandler);
-    
-    // Test command
-    this.bot.command('test', (ctx) => {
-      console.log('🧪 Test command received');
-      ctx.reply('✅ Bot is working!');
-    });
-    
-    // Escrow commands
-    this.bot.command('escrow', escrowHandler);
-    this.bot.command('dd', dealDetailsHandler);
-    this.bot.command('seller', roleHandler);
-    this.bot.command('buyer', roleHandler);
-    this.bot.command('token', tokenHandler);
-    this.bot.command('deposit', depositHandler);
-    this.bot.command('release', releaseHandler);
-    this.bot.command('refund', releaseHandler);
-    this.bot.command('dispute', disputeHandler);
-    
-    // Capture deal details after /dd
-    this.bot.on('message', async (ctx, next) => {
+    // Capture deal details after /dd - MUST be before command handlers
+    this.bot.use(async (ctx, next) => {
       try {
         const chatId = ctx.chat.id;
         if (chatId > 0 || !ctx.message || !ctx.message.text) return next();
+        
+        // Skip if it's a command
+        if (ctx.message.text.startsWith('/')) return next();
         
         console.log('Checking for deal details message:', ctx.message.text);
         
@@ -107,11 +90,32 @@ class EscrowBot {
         
         console.log('Deal details saved:', { quantity: escrow.quantity, rate: escrow.rate });
         await ctx.reply('✅ Deal details saved. Now set /seller and /buyer addresses.');
+        return; // Don't continue to next handlers
       } catch (e) {
         console.error('deal details parse error', e);
       }
       return next();
     });
+    
+    // Start command
+    this.bot.start(startHandler);
+    
+    // Test command
+    this.bot.command('test', (ctx) => {
+      console.log('🧪 Test command received');
+      ctx.reply('✅ Bot is working!');
+    });
+    
+    // Escrow commands
+    this.bot.command('escrow', escrowHandler);
+    this.bot.command('dd', dealDetailsHandler);
+    this.bot.command('seller', roleHandler);
+    this.bot.command('buyer', roleHandler);
+    this.bot.command('token', tokenHandler);
+    this.bot.command('deposit', depositHandler);
+    this.bot.command('release', releaseHandler);
+    this.bot.command('refund', releaseHandler);
+    this.bot.command('dispute', disputeHandler);
 
     // Callback query handler
     this.bot.on('callback_query', callbackHandler);
