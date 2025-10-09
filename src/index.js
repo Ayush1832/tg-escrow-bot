@@ -58,27 +58,20 @@ class EscrowBot {
         
         // Skip if it's a command
         if (ctx.message.text.startsWith('/')) return next();
-        
-        console.log('Checking for deal details message:', ctx.message.text);
-        
+                
         const escrow = await Escrow.findOne({ groupId: chatId.toString(), status: 'awaiting_details' });
         if (!escrow) {
           console.log('No escrow in awaiting_details status');
           return next();
         }
-        
-        console.log('Found escrow in awaiting_details:', escrow.escrowId);
-        
+                
         const text = ctx.message.text;
         // Parse deal details from user message
         const qtyMatch = text.match(/Quantity\s*[-:]*\s*(\d+(?:\.\d+)?)/i);
         const rateMatch = text.match(/Rate\s*[-:]*\s*(\d+(?:\.\d+)?)/i);
         const condMatch = text.match(/Conditions?\s*\(?.*\)?\s*[-:]*\s*([\s\S]+)/i);
         
-        console.log('Parsing deal details:', { text, qtyMatch, rateMatch, condMatch });
-        
         if (!qtyMatch || !rateMatch) {
-          console.log('Missing quantity or rate in message');
           return ctx.reply('❌ Please provide at least Quantity and Rate in the format:\nQuantity - 10\nRate - 90');
         }
         
@@ -88,7 +81,6 @@ class EscrowBot {
         escrow.status = 'draft';
         await escrow.save();
         
-        console.log('Deal details saved:', { quantity: escrow.quantity, rate: escrow.rate });
         await ctx.reply('✅ Deal details saved. Now set /seller and /buyer addresses.');
         return; // Don't continue to next handlers
       } catch (e) {

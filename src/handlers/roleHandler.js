@@ -46,6 +46,7 @@ module.exports = async (ctx) => {
       // Assign buyer role if unassigned; otherwise enforce the assigned user
       if (!escrow.buyerId) {
         escrow.buyerId = userId;
+        escrow.buyerUsername = ctx.from.username;
       } else if (escrow.buyerId !== userId) {
         return ctx.reply('❌ Buyer role is already taken by another user.');
       }
@@ -57,6 +58,7 @@ module.exports = async (ctx) => {
       }
       if (!escrow.sellerId) {
         escrow.sellerId = userId;
+        escrow.sellerUsername = ctx.from.username;
       } else if (escrow.sellerId !== userId) {
         return ctx.reply('❌ Seller role is already taken by another user.');
       }

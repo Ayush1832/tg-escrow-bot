@@ -55,31 +55,119 @@ module.exports = async (ctx) => {
       const activeAddr = await DepositAddress.findOne({ escrowId: escrow.escrowId, address: escrow.depositAddress, status: { $in: ['active', 'used'] } });
       if (!activeAddr) return ctx.reply('❌ Deposit address expired or missing.');
 
-      // Fetch recent USDT txns for the vault address
-      const txs = await BSCService.getUSDTTransactions(activeAddr.address);
+      // On-chain first: query RPC logs, then fallback to explorer
+      let txs = await BSCService.getUSDTTransfersViaRPC(activeAddr.address, activeAddr.lastCheckedBlock || 0);
+      if (!txs || txs.length === 0) {
+        txs = await BSCService.getUSDTTransactions(activeAddr.address);
+      }
       const sellerAddr = (escrow.sellerAddress || '').toLowerCase();
       const vaultAddr = activeAddr.address.toLowerCase();
-      const totalAmount = (txs || []).reduce((sum, tx) => {
+      // Only count new deposits since the last check
+      const newDeposits = (txs || []).filter(tx => {
         const from = (tx.from || '').toLowerCase();
         const to = (tx.to || '').toLowerCase();
-        if (to === vaultAddr && (!sellerAddr || from === sellerAddr)) {
-          return sum + Number(tx.valueDecimal || 0);
-        }
-        return sum;
-      }, 0);
+        return to === vaultAddr && (!sellerAddr || from === sellerAddr);
+      });
+      
+      const newAmount = newDeposits.reduce((sum, tx) => sum + Number(tx.valueDecimal || 0), 0);
+      const totalAmount = (activeAddr.observedAmount || 0) + newAmount;
 
-      if (totalAmount > (activeAddr.observedAmount || 0)) {
+      if (newAmount > 0) {
         activeAddr.observedAmount = totalAmount;
+        // Track last checked block from RPC
+        try {
+          const latest = await BSCService.getLatestBlockNumber();
+          if (latest) activeAddr.lastCheckedBlock = latest;
+        } catch {}
         activeAddr.status = 'used';
         await activeAddr.save();
         escrow.depositAmount = totalAmount;
         escrow.confirmedAmount = totalAmount;
         escrow.status = 'deposited';
         await escrow.save();
-        await ctx.reply(`✅ Deposit confirmed: ${totalAmount.toFixed(6)} USDT`);
+        await ctx.reply(`✅ Deposit confirmed: ${newAmount.toFixed(6)} USDT (Total: ${totalAmount.toFixed(6)} USDT)`);
+
+        // Begin fiat transfer handshake
+        // Ask buyer to confirm they've sent the fiat payment
+        if (escrow.buyerId) {
+          await ctx.reply(
+            `💸 Buyer ${escrow.buyerUsername ? '@' + escrow.buyerUsername : '[' + escrow.buyerId + ']'}: Please send the agreed fiat amount to the seller via your agreed method and confirm below.`,
+            {
+              reply_markup: Markup.inlineKeyboard([
+                [Markup.button.callback('✅ I have sent the money', 'fiat_sent_buyer')]
+              ]).reply_markup
+            }
+          );
+        }
       } else {
         await ctx.reply('❌ No new deposit found yet. Please try again in a moment.');
       }
+    } else if (callbackData === 'fiat_sent_buyer') {
+      // Only buyer can click
+      const escrow = await Escrow.findOne({
+        groupId: chatId.toString(),
+        status: { $in: ['deposited', 'in_fiat_transfer'] }
+      });
+      if (!escrow) return ctx.answerCbQuery('❌ No active escrow found.');
+      if (escrow.buyerId !== userId) return ctx.answerCbQuery('❌ Only the buyer can confirm this.');
+
+      escrow.buyerSentFiat = true;
+      escrow.status = 'in_fiat_transfer';
+      await escrow.save();
+
+      await ctx.answerCbQuery('✅ Noted.');
+      // Ask seller to confirm receipt
+      await ctx.reply(
+        `🏦 Seller ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}: Did you receive the fiat payment?`,
+        {
+          reply_markup: Markup.inlineKeyboard([
+            [
+              Markup.button.callback('✅ Yes, I received', 'fiat_received_seller_yes'),
+              Markup.button.callback('❌ No, not received', 'fiat_received_seller_no')
+            ]
+          ]).reply_markup
+        }
+      );
+
+    } else if (callbackData === 'fiat_received_seller_yes' || callbackData === 'fiat_received_seller_no') {
+      // Only seller can click
+      const escrow = await Escrow.findOne({
+        groupId: chatId.toString(),
+        status: { $in: ['in_fiat_transfer', 'deposited'] }
+      });
+      if (!escrow) return ctx.answerCbQuery('❌ No active escrow found.');
+      if (escrow.sellerId !== userId) return ctx.answerCbQuery('❌ Only the seller can confirm this.');
+
+      const isYes = callbackData.endsWith('_yes');
+      if (!isYes) {
+        escrow.sellerReceivedFiat = false;
+        await escrow.save();
+        await ctx.answerCbQuery('❌ Marked as not received');
+        return ctx.reply('❗ Seller reported fiat not received. Please resolve or use /dispute.');
+      }
+
+      escrow.sellerReceivedFiat = true;
+      await escrow.save();
+      await ctx.answerCbQuery('✅ Confirmed received');
+
+      // Auto-initiate release to buyer for full confirmed amount
+      const amount = Number(escrow.confirmedAmount || 0);
+      if (!escrow.buyerAddress || amount <= 0) {
+        return ctx.reply('⚠️ Cannot proceed with release: missing buyer address or zero amount.');
+      }
+      try {
+        await ctx.reply('🚀 Release of payment is in progress...');
+        await BlockchainService.release(escrow.buyerAddress, amount);
+        escrow.status = 'completed';
+        await escrow.save();
+        await ctx.reply(
+          `${(amount - 0).toFixed(5)} USDT has been released to the Buyer's address! 🚀\nApproved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}`
+        );
+      } catch (error) {
+        console.error('Auto-release error:', error);
+        await ctx.reply('❌ Error releasing funds. Please try /release or contact support.');
+      }
+
     } else if (callbackData.startsWith('confirm_')) {
       const [, action, role, amount] = callbackData.split('_');
       

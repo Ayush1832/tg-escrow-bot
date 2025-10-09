@@ -77,14 +77,19 @@ Note: The default fee is ${config.ESCROW_FEE_PERCENT}%, which is applied when fu
 
     await ctx.reply(feeText);
 
+    const sellerTag = escrow.sellerUsername ? `@${escrow.sellerUsername}` : (escrow.sellerId ? `[${escrow.sellerId}]` : 'N/A');
+    const buyerTag = escrow.buyerUsername ? `@${escrow.buyerUsername}` : (escrow.buyerId ? `[${escrow.buyerId}]` : 'N/A');
+
     const depositText = `
 📍 *TRANSACTION INFORMATION [${escrow.escrowId.slice(-8)}]*
 
 ⚡️ *SELLER*
-@${ctx.from.username} | [${userId}]
+${sellerTag} | [${escrow.sellerId || 'N/A'}]
+${escrow.sellerAddress ? `${escrow.sellerAddress} [USDT] [BSC]` : ''}
 
 ⚡️ *BUYER*
-@${ctx.from.username} | [${userId}]
+${buyerTag} | [${escrow.buyerId || 'N/A'}]
+${escrow.buyerAddress ? `${escrow.buyerAddress} [USDT] [BSC]` : ''}
 
 🟢 *ESCROW ADDRESS*
 ${address} [USDT] [BSC]

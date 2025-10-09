@@ -36,8 +36,16 @@ const escrowSchema = new mongoose.Schema({
     type: Number,
     required: false
   },
+  buyerUsername: {
+    type: String,
+    required: false
+  },
   sellerId: {
     type: Number,
+    required: false
+  },
+  sellerUsername: {
+    type: String,
     required: false
   },
   buyerAddress: String,

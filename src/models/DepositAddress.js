@@ -26,6 +26,10 @@ const depositAddressSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  lastCheckedBlock: {
+    type: Number,
+    default: 0
+  },
   createdAt: {
     type: Date,
     default: Date.now

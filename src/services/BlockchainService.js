@@ -17,7 +17,13 @@ class BlockchainService {
     // Use Sepolia RPC if available, otherwise BSC
     const rpcUrl = config.SEPOLIA_RPC_URL || config.BSC_RPC_URL;
     this.provider = new ethers.JsonRpcProvider(rpcUrl);
-    this.wallet = new ethers.Wallet(config.HOT_WALLET_PRIVATE_KEY, this.provider);
+    
+    // Ensure private key has 0x prefix
+    const privateKey = config.HOT_WALLET_PRIVATE_KEY.startsWith('0x') 
+      ? config.HOT_WALLET_PRIVATE_KEY 
+      : '0x' + config.HOT_WALLET_PRIVATE_KEY;
+    
+    this.wallet = new ethers.Wallet(privateKey, this.provider);
     this.vault = null;
   }
 

@@ -32,11 +32,14 @@ module.exports = async (ctx) => {
     escrow.status = 'awaiting_deposit';
     await escrow.save();
 
+    const buyerTag = escrow.buyerUsername ? `@${escrow.buyerUsername}` : `[${escrow.buyerId}]`;
+    const sellerTag = escrow.sellerUsername ? `@${escrow.sellerUsername}` : `[${escrow.sellerId}]`;
+
     const declarationText = `
 📍 *ESCROW DECLARATION*
 
-⚡️ Buyer @${ctx.from.username} | Userid: [${userId}]
-⚡️ Seller @${ctx.from.username} | Userid: [${userId}]
+⚡️ Buyer ${buyerTag} | Userid: [${escrow.buyerId}]
+⚡️ Seller ${sellerTag} | Userid: [${escrow.sellerId}]
 
 ✅ USDT CRYPTO
 ✅ BSC NETWORK
@@ -49,11 +52,11 @@ module.exports = async (ctx) => {
 📍 *TRANSACTION INFORMATION [${escrow.escrowId.slice(-8)}]*
 
 ⚡️ *SELLER*
-@${ctx.from.username} | [${userId}]
+${sellerTag} | [${escrow.sellerId}]
 ${escrow.sellerAddress} [USDT] [BSC]
 
 ⚡️ *BUYER*
-@${ctx.from.username} | [${userId}]
+${buyerTag} | [${escrow.buyerId}]
 ${escrow.buyerAddress} [USDT] [BSC]
 
 ⏰ Trade Start Time: ${new Date().toLocaleString('en-GB', { 
