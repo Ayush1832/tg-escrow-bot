@@ -2,6 +2,20 @@ const { Markup } = require('telegraf');
 const Escrow = require('../models/Escrow');
 const Event = require('../models/Event');
 
+// Define supported tokens and their networks
+const SUPPORTED_TOKENS = {
+  USDC: ['BSC[BEP20]', 'SOL'],
+  BUSD: ['BSC[BEP20]'],
+  ETH: ['ETH'],
+  BTC: ['BTC', 'BSC[BEP20]'],
+  TRX: ['TRON[TRC20]'],
+  SOL: ['SOL'],
+  LTC: ['LTC'],
+  BNB: ['BSC[BEP20]'],
+  DOGE: ['DOGE', 'BSC[BEP20]'],
+  USDT: ['BSC[BEP20]', 'SOL', 'TRON[TRC20]', 'SEPOLIA']
+};
+
 module.exports = async (ctx) => {
   try {
     const chatId = ctx.chat.id;
@@ -26,61 +40,33 @@ module.exports = async (ctx) => {
       return ctx.reply('❌ Please set both buyer and seller addresses first using /buyer and /seller commands.');
     }
 
-    // For now, we only support USDT on BSC
-    escrow.token = 'USDT';
-    escrow.chain = 'BSC';
-    escrow.status = 'awaiting_deposit';
-    await escrow.save();
+    // Show token selection keyboard
+    const tokenButtons = [];
+    const tokens = Object.keys(SUPPORTED_TOKENS);
+    
+    // Create 3x3 grid for tokens (except USDT which goes on bottom row)
+    const gridTokens = tokens.filter(t => t !== 'USDT');
+    for (let i = 0; i < gridTokens.length; i += 3) {
+      const row = gridTokens.slice(i, i + 3);
+      tokenButtons.push(row.map(token => Markup.button.callback(token, `select_token_${token}`)));
+    }
+    
+    // Add USDT on separate row at bottom
+    tokenButtons.push([Markup.button.callback('USDT', 'select_token_USDT')]);
 
-    const buyerTag = escrow.buyerUsername ? `@${escrow.buyerUsername}` : `[${escrow.buyerId}]`;
-    const sellerTag = escrow.sellerUsername ? `@${escrow.sellerUsername}` : `[${escrow.sellerId}]`;
-
-    const declarationText = `
-📍 *ESCROW DECLARATION*
-
-⚡️ Buyer ${buyerTag} | Userid: [${escrow.buyerId}]
-⚡️ Seller ${sellerTag} | Userid: [${escrow.sellerId}]
-
-✅ USDT CRYPTO
-✅ BSC NETWORK
+    const tokenSelectionText = `
+choose token from the list below
     `;
 
-    await ctx.reply(declarationText, { parse_mode: 'Markdown' });
-
-    // Get transaction information
-    const transactionText = `
-📍 *TRANSACTION INFORMATION [${escrow.escrowId.slice(-8)}]*
-
-⚡️ *SELLER*
-${sellerTag} | [${escrow.sellerId}]
-${escrow.sellerAddress} [USDT] [BSC]
-
-⚡️ *BUYER*
-${buyerTag} | [${escrow.buyerId}]
-${escrow.buyerAddress} [USDT] [BSC]
-
-⏰ Trade Start Time: ${new Date().toLocaleString('en-GB', { 
-      day: '2-digit', 
-      month: '2-digit', 
-      year: '2-digit', 
-      hour: '2-digit', 
-      minute: '2-digit', 
-      second: '2-digit' 
-    })}
-
-⚠️ *IMPORTANT:* Make sure to finalise and agree each-others terms before depositing.
-
-🗒 Please use /deposit command to generate a deposit address for your trade.
-    `;
-
-    await ctx.reply(transactionText, { parse_mode: 'Markdown' });
+    await ctx.reply(tokenSelectionText, {
+      reply_markup: Markup.inlineKeyboard(tokenButtons).reply_markup
+    });
 
     // Log event
     await new Event({
       escrowId: escrow.escrowId,
       actorId: userId,
-      action: 'token_network_selected',
-      payload: { token: 'USDT', chain: 'BSC' }
+      action: 'token_selection_started'
     }).save();
 
   } catch (error) {

@@ -10,7 +10,6 @@ const Event = require('./models/Event');
 
 // Import services
 const WalletService = require('./services/WalletService');
-const BSCService = require('./services/BSCService');
 const BlockchainService = require('./services/BlockchainService');
 
 // Import handlers
@@ -150,14 +149,23 @@ class EscrowBot {
     try {
       let user = await User.findOne({ telegramId: telegramUser.id });
       if (!user) {
-        user = new User({
-          telegramId: telegramUser.id,
-          username: telegramUser.username,
-          firstName: telegramUser.first_name,
-          lastName: telegramUser.last_name,
-          isAdmin: telegramUser.username === config.ADMIN_USERNAME
-        });
-        await user.save();
+        try {
+          user = new User({
+            telegramId: telegramUser.id,
+            username: telegramUser.username,
+            firstName: telegramUser.first_name,
+            lastName: telegramUser.last_name,
+            isAdmin: telegramUser.username === config.ADMIN_USERNAME
+          });
+          await user.save();
+        } catch (duplicateError) {
+          // Handle duplicate key error - user might have been created by another instance
+          if (duplicateError.code === 11000) {
+            user = await User.findOne({ telegramId: telegramUser.id });
+          } else {
+            throw duplicateError;
+          }
+        }
       } else {
         // Update last active
         user.lastActive = new Date();

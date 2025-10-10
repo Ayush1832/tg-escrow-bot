@@ -9,13 +9,31 @@ module.exports = {
   // MongoDB Configuration
   MONGODB_URI: process.env.MONGODB_URI,
 
-  // BSC Configuration
+  // Network Configuration
   BSC_RPC_URL: process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org/',
-  BSCSCAN_API_KEY: process.env.BSCSCAN_API_KEY,
-  USDT_CONTRACT_ADDRESS: process.env.USDT_CONTRACT_ADDRESS || '0x55d398326f99059fF775485246999027B3197955',
+  ETHERSCAN_API_KEY: process.env.ETHERSCAN_API_KEY,
+  // Token Contract Addresses
+  USDT_SEPOLIA: process.env.USDT_SEPOLIA,
+  USDT_BSC: process.env.USDT_BSC,
+  USDT_SOL: process.env.USDT_SOL,
+  USDT_TRON: process.env.USDT_TRON,
+  USDC_BSC: process.env.USDC_BSC,
+  USDC_SOL: process.env.USDC_SOL,
+  BUSD_BSC: process.env.BUSD_BSC,
+  ETH_ETH: process.env.ETH_ETH,
+  BTC_BTC: process.env.BTC_BTC,
+  BTC_BSC: process.env.BTC_BSC,
+  TRX_TRON: process.env.TRX_TRON,
+  SOL_SOL: process.env.SOL_SOL,
+  LTC_LTC: process.env.LTC_LTC,
+  BNB_BSC: process.env.BNB_BSC,
+  DOGE_DOGE: process.env.DOGE_DOGE,
+  DOGE_BSC: process.env.DOGE_BSC,
   
-  // Sepolia Configuration
+  // Network RPC URLs
   SEPOLIA_RPC_URL: process.env.SEPOLIA_RPC_URL,
+  ETH_RPC_URL: process.env.ETH_RPC_URL,
+  LTC_RPC_URL: process.env.LTC_RPC_URL,
 
   // Wallet Configuration
   HOT_WALLET_PRIVATE_KEY: process.env.HOT_WALLET_PRIVATE_KEY,

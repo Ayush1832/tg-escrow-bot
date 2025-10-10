@@ -6,20 +6,29 @@ const config = require('../../config');
 class WalletService {
   constructor() {
     this.hdNode = null;
-    this.hotWallet = null;
+    this.hotWallets = {};
     this.derivationIndex = 0;
     this.init();
   }
 
   init() {
-    // Initialize hot wallet from private key
-    this.hotWallet = new ethers.Wallet(config.HOT_WALLET_PRIVATE_KEY);
+    // Ensure private key has 0x prefix
+    const privateKey = config.HOT_WALLET_PRIVATE_KEY.startsWith('0x') 
+      ? config.HOT_WALLET_PRIVATE_KEY 
+      : '0x' + config.HOT_WALLET_PRIVATE_KEY;
+    
+    // Initialize hot wallet for each network
+    this.hotWallets = {
+      BSC: new ethers.Wallet(privateKey),
+      SEPOLIA: new ethers.Wallet(privateKey),
+      ETH: new ethers.Wallet(privateKey),
+      LTC: new ethers.Wallet(privateKey)
+    };
     
     // Generate HD wallet from hot wallet private key
-    // For simplicity, we'll use the private key directly as seed
-    const privateKeyHex = this.hotWallet.privateKey.startsWith('0x') 
-      ? this.hotWallet.privateKey.slice(2) 
-      : this.hotWallet.privateKey;
+    const privateKeyHex = privateKey.startsWith('0x') 
+      ? privateKey.slice(2) 
+      : privateKey;
     const seed = Buffer.from(privateKeyHex, 'hex');
     const bip32 = BIP32Factory(require('tiny-secp256k1'));
     this.hdNode = bip32.fromSeed(seed);
@@ -50,7 +59,7 @@ class WalletService {
       ];
 
       const usdtContract = new ethers.Contract(
-        config.USDT_CONTRACT_ADDRESS,
+        config.USDT_SEPOLIA,
         usdtAbi,
         wallet
       );
@@ -81,7 +90,7 @@ class WalletService {
       ];
 
       const usdtContract = new ethers.Contract(
-        config.USDT_CONTRACT_ADDRESS,
+        config.USDT_SEPOLIA,
         usdtAbi,
         provider
       );

@@ -6,7 +6,6 @@ const Event = require('../models/Event');
 const config = require('../../config');
 const escrowHandler = require('./escrowHandler');
 const DepositAddress = require('../models/DepositAddress');
-const BSCService = require('../services/BSCService');
 
 module.exports = async (ctx) => {
   try {
@@ -56,9 +55,9 @@ module.exports = async (ctx) => {
       if (!activeAddr) return ctx.reply('❌ Deposit address expired or missing.');
 
       // On-chain first: query RPC logs, then fallback to explorer
-      let txs = await BSCService.getUSDTTransfersViaRPC(activeAddr.address, activeAddr.lastCheckedBlock || 0);
+      let txs = await BlockchainService.getTokenTransfersViaRPC(escrow.token, escrow.chain, activeAddr.address, activeAddr.lastCheckedBlock || 0);
       if (!txs || txs.length === 0) {
-        txs = await BSCService.getUSDTTransactions(activeAddr.address);
+        txs = await BlockchainService.getTokenTransactions(escrow.token, escrow.chain, activeAddr.address);
       }
       const sellerAddr = (escrow.sellerAddress || '').toLowerCase();
       const vaultAddr = activeAddr.address.toLowerCase();
@@ -76,7 +75,7 @@ module.exports = async (ctx) => {
         activeAddr.observedAmount = totalAmount;
         // Track last checked block from RPC
         try {
-          const latest = await BSCService.getLatestBlockNumber();
+          const latest = await BlockchainService.getLatestBlockNumber(escrow.chain);
           if (latest) activeAddr.lastCheckedBlock = latest;
         } catch {}
         activeAddr.status = 'used';
@@ -85,7 +84,7 @@ module.exports = async (ctx) => {
         escrow.confirmedAmount = totalAmount;
         escrow.status = 'deposited';
         await escrow.save();
-        await ctx.reply(`✅ Deposit confirmed: ${newAmount.toFixed(6)} USDT (Total: ${totalAmount.toFixed(6)} USDT)`);
+        await ctx.reply(`✅ Deposit confirmed: ${newAmount.toFixed(6)} ${escrow.token} (Total: ${totalAmount.toFixed(6)} ${escrow.token})`);
 
         // Begin fiat transfer handshake
         // Ask buyer to confirm they've sent the fiat payment
@@ -94,7 +93,7 @@ module.exports = async (ctx) => {
             `💸 Buyer ${escrow.buyerUsername ? '@' + escrow.buyerUsername : '[' + escrow.buyerId + ']'}: Please send the agreed fiat amount to the seller via your agreed method and confirm below.`,
             {
               reply_markup: Markup.inlineKeyboard([
-                [Markup.button.callback('✅ I have sent the money', 'fiat_sent_buyer')]
+                [Markup.button.callback('✅ I have sent the money', `fiat_sent_buyer_${escrow.escrowId}`)]
               ]).reply_markup
             }
           );
@@ -102,10 +101,11 @@ module.exports = async (ctx) => {
       } else {
         await ctx.reply('❌ No new deposit found yet. Please try again in a moment.');
       }
-    } else if (callbackData === 'fiat_sent_buyer') {
+    } else if (callbackData.startsWith('fiat_sent_buyer_')) {
+      const escrowId = callbackData.split('_')[3];
       // Only buyer can click
       const escrow = await Escrow.findOne({
-        groupId: chatId.toString(),
+        escrowId: escrowId,
         status: { $in: ['deposited', 'in_fiat_transfer'] }
       });
       if (!escrow) return ctx.answerCbQuery('❌ No active escrow found.');
@@ -122,23 +122,24 @@ module.exports = async (ctx) => {
         {
           reply_markup: Markup.inlineKeyboard([
             [
-              Markup.button.callback('✅ Yes, I received', 'fiat_received_seller_yes'),
-              Markup.button.callback('❌ No, not received', 'fiat_received_seller_no')
+              Markup.button.callback('✅ Yes, I received', `fiat_received_seller_yes_${escrow.escrowId}`),
+              Markup.button.callback('❌ No, not received', `fiat_received_seller_no_${escrow.escrowId}`)
             ]
           ]).reply_markup
         }
       );
 
-    } else if (callbackData === 'fiat_received_seller_yes' || callbackData === 'fiat_received_seller_no') {
+    } else if (callbackData.startsWith('fiat_received_seller_yes_') || callbackData.startsWith('fiat_received_seller_no_')) {
+      const escrowId = callbackData.split('_')[4];
       // Only seller can click
       const escrow = await Escrow.findOne({
-        groupId: chatId.toString(),
+        escrowId: escrowId,
         status: { $in: ['in_fiat_transfer', 'deposited'] }
       });
       if (!escrow) return ctx.answerCbQuery('❌ No active escrow found.');
       if (escrow.sellerId !== userId) return ctx.answerCbQuery('❌ Only the seller can confirm this.');
 
-      const isYes = callbackData.endsWith('_yes');
+      const isYes = callbackData.includes('_yes_');
       if (!isYes) {
         escrow.sellerReceivedFiat = false;
         await escrow.save();
@@ -157,11 +158,11 @@ module.exports = async (ctx) => {
       }
       try {
         await ctx.reply('🚀 Release of payment is in progress...');
-        await BlockchainService.release(escrow.buyerAddress, amount);
+        await BlockchainService.release(escrow.buyerAddress, amount, escrow.token, escrow.chain);
         escrow.status = 'completed';
         await escrow.save();
         await ctx.reply(
-          `${(amount - 0).toFixed(5)} USDT has been released to the Buyer's address! 🚀\nApproved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}`
+          `${(amount - 0).toFixed(5)} ${escrow.token} has been released to the Buyer's address! 🚀\nApproved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}`
         );
       } catch (error) {
         console.error('Auto-release error:', error);
@@ -230,7 +231,7 @@ module.exports = async (ctx) => {
           await escrow.save();
 
           const successText = `
-${netAmount.toFixed(5)} USDT [$${netAmount.toFixed(2)}] 💸 + NETWORK FEE has been ${action === 'release' ? 'released' : 'refunded'} to the ${action === 'release' ? 'Buyer' : 'Seller'}'s address! 🚀
+${netAmount.toFixed(5)} ${escrow.token} [$${netAmount.toFixed(2)}] 💸 + NETWORK FEE has been ${action === 'release' ? 'released' : 'refunded'} to the ${action === 'release' ? 'Buyer' : 'Seller'}'s address! 🚀
 
 Approved By: @${ctx.from.username} | [${userId}]
 Thank you for using @Easy_Escrow_Bot 🙌
@@ -252,10 +253,157 @@ Thank you for using @Easy_Escrow_Bot 🙌
     } else if (callbackData.startsWith('reject_')) {
       await ctx.answerCbQuery('❌ Transaction rejected');
       await ctx.reply('❌ Transaction has been rejected by one of the parties.');
+    } else if (callbackData.startsWith('select_token_')) {
+      const token = callbackData.split('_')[2];
+      await ctx.answerCbQuery(`Selected ${token}`);
+      
+      // Show network selection for this token
+      const SUPPORTED_TOKENS = {
+        USDC: ['BSC[BEP20]', 'SOL'],
+        BUSD: ['BSC[BEP20]'],
+        ETH: ['ETH'],
+        BTC: ['BTC', 'BSC[BEP20]'],
+        TRX: ['TRON[TRC20]'],
+        SOL: ['SOL'],
+        LTC: ['LTC'],
+        BNB: ['BSC[BEP20]'],
+        DOGE: ['DOGE', 'BSC[BEP20]'],
+        USDT: ['BSC[BEP20]', 'SOL', 'TRON[TRC20]', 'SEPOLIA']
+      };
+      
+      const networks = SUPPORTED_TOKENS[token];
+      if (!networks) {
+        return ctx.reply('❌ Token not supported.');
+      }
+      
+      const networkButtons = [];
+      for (let i = 0; i < networks.length; i += 2) {
+        const row = networks.slice(i, i + 2);
+        networkButtons.push(row.map(network => Markup.button.callback(network, `select_network_${token}_${network.replace(/[\[\]]/g, '').replace('BEP20', 'BSC').replace('TRC20', 'TRON')}`)));
+      }
+      
+      // Add back button
+      networkButtons.push([Markup.button.callback('Back ⬅️', 'back_to_tokens')]);
+      
+      const networkSelectionText = `
+📌 *ESCROW-CRYPTO DECLARATION*
+
+✅ *CRYPTO*
+${token}
+
+choose network from the list below for ${token} 00:00
+      `;
+      
+      await ctx.reply(networkSelectionText, {
+        parse_mode: 'Markdown',
+        reply_markup: Markup.inlineKeyboard(networkButtons).reply_markup
+      });
+      
+    } else if (callbackData.startsWith('select_network_')) {
+      const parts = callbackData.split('_');
+      const token = parts[2];
+      const network = parts.slice(3).join('_'); // Handle networks with underscores
+      
+      await ctx.answerCbQuery(`Selected ${token} on ${network}`);
+      
+      // Find escrow and update with selected token/network
+      const escrow = await Escrow.findOne({
+        groupId: ctx.chat.id.toString(),
+        status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit'] }
+      });
+      
+      if (!escrow) {
+        return ctx.reply('❌ No active escrow found.');
+      }
+      
+      // Check if escrow contract exists for this token-network pair
+      const Contract = require('../models/Contract');
+      const contract = await Contract.findOne({
+        name: 'EscrowVault',
+        token: token,
+        network: network.toUpperCase()
+      });
+      
+      if (!contract) {
+        return ctx.reply(`❌ Escrow contract not deployed for ${token} on ${network}. Please contact admin to deploy the contract first.`);
+      }
+      
+      // Update escrow with selected token and network
+      escrow.token = token;
+      escrow.chain = network;
+      escrow.status = 'awaiting_deposit';
+      await escrow.save();
+      
+      const buyerTag = escrow.buyerUsername ? `@${escrow.buyerUsername}` : `[${escrow.buyerId}]`;
+      const sellerTag = escrow.sellerUsername ? `@${escrow.sellerUsername}` : `[${escrow.sellerId}]`;
+      
+      const declarationText = `
+📍 *ESCROW DECLARATION*
+
+⚡️ Buyer ${buyerTag} | Userid: [${escrow.buyerId}]
+⚡️ Seller ${sellerTag} | Userid: [${escrow.sellerId}]
+
+✅ ${token} CRYPTO
+✅ ${network} NETWORK
+      `;
+      
+      await ctx.reply(declarationText, { parse_mode: 'Markdown' });
+      
+      // Get transaction information
+      const transactionText = `
+📍 *TRANSACTION INFORMATION [${escrow.escrowId.slice(-8)}]*
+
+⚡️ *SELLER*
+${sellerTag} | [${escrow.sellerId}]
+${escrow.sellerAddress} [${token}] [${network}]
+
+⚡️ *BUYER*
+${buyerTag} | [${escrow.buyerId}]
+${escrow.buyerAddress} [${token}] [${network}]
+
+⏰ Trade Start Time: ${new Date().toLocaleString('en-GB', { 
+        day: '2-digit', 
+        month: '2-digit', 
+        year: '2-digit', 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        second: '2-digit' 
+      })}
+
+⚠️ *IMPORTANT:* Make sure to finalise and agree each-others terms before depositing.
+
+🗒 Please use /deposit command to generate a deposit address for your trade.
+      `;
+      
+      await ctx.reply(transactionText, { parse_mode: 'Markdown' });
+      
+      // Log event
+      await new Event({
+        escrowId: escrow.escrowId,
+        actorId: ctx.from.id,
+        action: 'token_network_selected',
+        payload: { token, network }
+      }).save();
+      
+    } else if (callbackData === 'back_to_tokens') {
+      await ctx.answerCbQuery('Back to tokens');
+      // Re-trigger token selection
+      const tokenHandler = require('./tokenHandler');
+      return tokenHandler(ctx);
     }
 
   } catch (error) {
     console.error('Error in callback handler:', error);
-    await ctx.answerCbQuery('❌ An error occurred');
+    try {
+      await ctx.answerCbQuery('❌ An error occurred');
+    } catch (answerError) {
+      // Handle expired callback queries gracefully
+      if (answerError.description?.includes('query is too old') || 
+          answerError.description?.includes('query ID is invalid')) {
+        console.log('Callback query expired, ignoring...');
+      } else {
+        console.error('Error answering callback query:', answerError);
+      }
+    }
   }
 };

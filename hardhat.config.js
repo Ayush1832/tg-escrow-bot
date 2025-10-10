@@ -25,6 +25,14 @@ module.exports = {
     sepolia: {
       url: SEPOLIA_RPC_URL || 'https://sepolia.infura.io/v3/YOUR_KEY',
       accounts: HOT_WALLET_PRIVATE_KEY ? [HOT_WALLET_PRIVATE_KEY] : []
+    },
+    ethereum: {
+      url: process.env.ETH_RPC_URL || 'https://eth.llamarpc.com',
+      accounts: HOT_WALLET_PRIVATE_KEY ? [HOT_WALLET_PRIVATE_KEY] : []
+    },
+    litecoin: {
+      url: process.env.LTC_RPC_URL || 'https://ltc.llamarpc.com',
+      accounts: HOT_WALLET_PRIVATE_KEY ? [HOT_WALLET_PRIVATE_KEY] : []
     }
   }
 };

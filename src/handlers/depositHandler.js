@@ -32,11 +32,15 @@ module.exports = async (ctx) => {
     await ctx.reply('Requesting a deposit address for you, please wait...');
 
     // Generate deposit address
-    // Use on-chain vault address as deposit address
+    // Use on-chain vault address as deposit address for the selected token-network pair
     const Contract = require('../models/Contract');
-    const vault = await Contract.findOne({ name: 'EscrowVault' });
+    const vault = await Contract.findOne({ 
+      name: 'EscrowVault',
+      token: escrow.token,
+      network: escrow.chain.toUpperCase()
+    });
     if (!vault) {
-      return ctx.reply('❌ Escrow vault not deployed. Please contact admin to deploy the contract first.');
+      return ctx.reply(`❌ Escrow vault not deployed for ${escrow.token} on ${escrow.chain}. Please contact admin to deploy the contract first.`);
     }
     const address = vault.address;
     const derivationPath = 'vault';
@@ -85,16 +89,16 @@ Note: The default fee is ${config.ESCROW_FEE_PERCENT}%, which is applied when fu
 
 ⚡️ *SELLER*
 ${sellerTag} | [${escrow.sellerId || 'N/A'}]
-${escrow.sellerAddress ? `${escrow.sellerAddress} [USDT] [BSC]` : ''}
+${escrow.sellerAddress ? `${escrow.sellerAddress} [${escrow.token}] [${escrow.chain}]` : ''}
 
 ⚡️ *BUYER*
 ${buyerTag} | [${escrow.buyerId || 'N/A'}]
-${escrow.buyerAddress ? `${escrow.buyerAddress} [USDT] [BSC]` : ''}
+${escrow.buyerAddress ? `${escrow.buyerAddress} [${escrow.token}] [${escrow.chain}]` : ''}
 
 🟢 *ESCROW ADDRESS*
-${address} [USDT] [BSC]
+${address} [${escrow.token}] [${escrow.chain}]
 
-Seller [@${ctx.from.username}] Will Pay on the Escrow Address, And Click On Check Payment.
+Seller ${sellerTag} Will Pay on the Escrow Address, And Click On Check Payment.
 
 Amount to be Received: [$${escrow.quantity.toFixed(2)}]
 

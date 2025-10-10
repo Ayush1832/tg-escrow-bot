@@ -8,7 +8,7 @@ const ContractModel = require(path.join('..', 'src', 'models', 'Contract'));
 async function main() {
   const {
     MONGODB_URI,
-    USDT_SEPOLIA,
+    BTC_BSC,
     FEE_WALLET_1,
     FEE_WALLET_2,
     FEE_WALLET_3,
@@ -16,7 +16,7 @@ async function main() {
   } = process.env;
 
   if (!MONGODB_URI) throw new Error('MONGODB_URI missing');
-  if (!USDT_SEPOLIA) throw new Error('USDT_SEPOLIA missing');
+  if (!BTC_BSC) throw new Error('BTC_BSC missing');
   if (!FEE_WALLET_1) throw new Error('FEE_WALLET_1 missing');
 
   await mongoose.connect(MONGODB_URI);
@@ -28,7 +28,7 @@ async function main() {
 
   const EscrowVault = await hre.ethers.getContractFactory('EscrowVault');
   const contract = await EscrowVault.deploy(
-    USDT_SEPOLIA,
+    BTC_BSC,
     w1,
     w2,
     w3,
@@ -36,7 +36,7 @@ async function main() {
   );
   await contract.waitForDeployment();
   const address = await contract.getAddress();
-  console.log('EscrowVault deployed at:', address);
+  console.log('BTC-BSC EscrowVault deployed at:', address);
 
   // Drop old unique index if it exists
   try {
@@ -46,11 +46,11 @@ async function main() {
   }
 
   await ContractModel.updateOne(
-    { name: 'EscrowVault', token: 'USDT', network: hre.network.name.toUpperCase() },
+    { name: 'EscrowVault', token: 'BTC', network: 'BSC' },
     { 
       name: 'EscrowVault', 
-      token: 'USDT',
-      network: hre.network.name.toUpperCase(),
+      token: 'BTC',
+      network: 'BSC',
       address, 
       deployedAt: new Date() 
     },
@@ -62,7 +62,6 @@ async function main() {
 
 main().catch((e) => {
   console.error(e);
+  process.error(e);
   process.exit(1);
 });
-
-
