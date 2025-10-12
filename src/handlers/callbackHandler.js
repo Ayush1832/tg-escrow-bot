@@ -142,9 +142,21 @@ module.exports = async (ctx) => {
       const isYes = callbackData.includes('_yes_');
       if (!isYes) {
         escrow.sellerReceivedFiat = false;
+        escrow.isDisputed = true;
+        escrow.status = 'disputed';
+        escrow.disputeReason = 'Seller reported fiat not received';
+        escrow.disputeRaisedAt = new Date();
+        escrow.disputeRaisedBy = userId;
+        escrow.disputeResolution = 'pending';
         await escrow.save();
+        
         await ctx.answerCbQuery('❌ Marked as not received');
-        return ctx.reply('❗ Seller reported fiat not received. Please resolve or use /dispute.');
+        
+        // Send admin notification
+        const disputeHandler = require('./disputeHandler');
+        await disputeHandler.sendAdminDisputeNotification(ctx, escrow);
+        
+        return ctx.reply('❗ Seller reported fiat not received. Dispute raised. Admin will join within 24 hours.');
       }
 
       escrow.sellerReceivedFiat = true;
@@ -161,6 +173,22 @@ module.exports = async (ctx) => {
         await BlockchainService.release(escrow.buyerAddress, amount, escrow.token, escrow.chain);
         escrow.status = 'completed';
         await escrow.save();
+
+        // Mark trade as completed for activity monitoring
+        try {
+          const ActivityMonitoringService = require('../services/ActivityMonitoringService');
+          await ActivityMonitoringService.markTradeCompleted(escrow.escrowId);
+        } catch (activityError) {
+          console.error('Error marking trade completed:', activityError);
+        }
+
+        // Release group back to pool
+        try {
+          const GroupPoolService = require('../services/GroupPoolService');
+          await GroupPoolService.releaseGroup(escrow.escrowId);
+        } catch (groupError) {
+          console.error('Error releasing group back to pool:', groupError);
+        }
         await ctx.reply(
           `${(amount - 0).toFixed(5)} ${escrow.token} has been released to the Buyer's address! 🚀\nApproved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}`
         );
@@ -229,6 +257,24 @@ module.exports = async (ctx) => {
           // Update escrow status
           escrow.status = action === 'release' ? 'completed' : 'refunded';
           await escrow.save();
+
+          // Mark trade as completed for activity monitoring (only for releases)
+          if (action === 'release') {
+            try {
+              const ActivityMonitoringService = require('../services/ActivityMonitoringService');
+              await ActivityMonitoringService.markTradeCompleted(escrow.escrowId);
+            } catch (activityError) {
+              console.error('Error marking trade completed:', activityError);
+            }
+          }
+
+          // Release group back to pool
+          try {
+            const GroupPoolService = require('../services/GroupPoolService');
+            await GroupPoolService.releaseGroup(escrow.escrowId);
+          } catch (groupError) {
+            console.error('Error releasing group back to pool:', groupError);
+          }
 
           const successText = `
 ${netAmount.toFixed(5)} ${escrow.token} [$${netAmount.toFixed(2)}] 💸 + NETWORK FEE has been ${action === 'release' ? 'released' : 'refunded'} to the ${action === 'release' ? 'Buyer' : 'Seller'}'s address! 🚀

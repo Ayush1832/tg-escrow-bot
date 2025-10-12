@@ -30,6 +30,9 @@ module.exports = async (ctx) => {
     escrow.isDisputed = true;
     escrow.status = 'disputed';
     escrow.disputeReason = 'User requested dispute';
+    escrow.disputeRaisedAt = new Date();
+    escrow.disputeRaisedBy = userId;
+    escrow.disputeResolution = 'pending';
     await escrow.save();
 
     const disputeText = `
@@ -54,11 +57,70 @@ Please provide details about the issue and wait for admin intervention.
       payload: { reason: 'User requested dispute' }
     }).save();
 
-    // TODO: Send notification to admin
-    // This would typically send a message to the admin's private chat
+    // Send notification to admin
+    await sendAdminDisputeNotification(ctx, escrow);
 
   } catch (error) {
     console.error('Error in dispute handler:', error);
     ctx.reply('❌ An error occurred while raising dispute. Please try again.');
   }
 };
+
+async function sendAdminDisputeNotification(ctx, escrow) {
+  try {
+    if (!config.ADMIN_USER_ID) {
+      console.log('⚠️ ADMIN_USER_ID not configured. Skipping admin notification.');
+      return;
+    }
+
+    // Create invite link for the group
+    let inviteLink;
+    try {
+      const chatInviteLink = await ctx.bot.telegram.createChatInviteLink(escrow.groupId, {
+        member_limit: 1,
+        expire_date: Math.floor(Date.now() / 1000) + (24 * 60 * 60) // 24 hours
+      });
+      inviteLink = chatInviteLink.invite_link;
+    } catch (linkError) {
+      console.error('Error creating invite link:', linkError);
+      inviteLink = `Group ID: ${escrow.groupId}`;
+    }
+
+    const adminMessage = `
+🚨 *NEW DISPUTE ALERT* 🚨
+
+📋 *Escrow Details:*
+• Escrow ID: \`${escrow.escrowId}\`
+• Token: ${escrow.token} on ${escrow.chain}
+• Amount: ${escrow.confirmedAmount || escrow.depositAmount} ${escrow.token}
+• Status: ${escrow.status}
+
+👥 *Parties:*
+• Buyer: @${escrow.buyerUsername || 'N/A'} (${escrow.buyerId})
+• Seller: @${escrow.sellerUsername || 'N/A'} (${escrow.sellerId})
+
+⚖️ *Dispute Info:*
+• Raised by: @${ctx.from.username || 'Unknown'}
+• Reason: ${escrow.disputeReason}
+• Time: ${new Date().toLocaleString()}
+
+🔗 *Join Group:* [Click here](${inviteLink})
+
+⚡ *Quick Actions:*
+• \`/admin_resolve_release ${escrow.escrowId}\` - Release to buyer
+• \`/admin_resolve_refund ${escrow.escrowId}\` - Refund to seller
+• \`/admin_disputes\` - View all disputes
+    `;
+
+    await ctx.bot.telegram.sendMessage(config.ADMIN_USER_ID, adminMessage, {
+      parse_mode: 'Markdown',
+      disable_web_page_preview: true
+    });
+
+    console.log(`✅ Admin notification sent for dispute: ${escrow.escrowId}`);
+  } catch (error) {
+    console.error('Error sending admin notification:', error);
+  }
+}
+
+module.exports.sendAdminDisputeNotification = sendAdminDisputeNotification;

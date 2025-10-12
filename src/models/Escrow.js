@@ -96,6 +96,15 @@ const escrowSchema = new mongoose.Schema({
     default: false
   },
   disputeReason: String,
+  disputeRaisedAt: Date,
+  disputeRaisedBy: Number, // User ID who raised the dispute
+  disputeResolvedBy: String, // Admin username who resolved
+  disputeResolvedAt: Date,
+  disputeResolution: {
+    type: String,
+    enum: ['release', 'refund', 'pending']
+  },
+  disputeResolutionReason: String,
   createdAt: {
     type: Date,
     default: Date.now

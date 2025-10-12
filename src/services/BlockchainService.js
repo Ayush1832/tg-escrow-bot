@@ -259,6 +259,96 @@ class BlockchainService {
       return 0;
     }
   }
+
+  /**
+   * Release funds from escrow vault to buyer
+   */
+  async releaseFunds(token, network, buyerAddress, amount) {
+    try {
+      const contractAddress = await this.getEscrowContractAddress(token, network);
+      if (!contractAddress) {
+        throw new Error(`No escrow contract found for ${token} on ${network}`);
+      }
+
+      const wallet = this.wallets[network.toUpperCase()];
+      if (!wallet) {
+        throw new Error(`Wallet not configured for network: ${network}`);
+      }
+
+      const vaultContract = new ethers.Contract(contractAddress, ESCROW_VAULT_ABI, wallet);
+      const amountWei = ethers.parseUnits(amount.toString(), 6); // USDT has 6 decimals
+
+      console.log(`Releasing ${amount} ${token} to ${buyerAddress} on ${network}`);
+      
+      const tx = await vaultContract.release(buyerAddress, amountWei);
+      const receipt = await tx.wait();
+
+      console.log(`✅ Release transaction successful: ${receipt.transactionHash}`);
+      return {
+        success: true,
+        transactionHash: receipt.transactionHash,
+        blockNumber: receipt.blockNumber
+      };
+
+    } catch (error) {
+      console.error('Error releasing funds:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Refund funds from escrow vault to seller
+   */
+  async refundFunds(token, network, sellerAddress, amount) {
+    try {
+      const contractAddress = await this.getEscrowContractAddress(token, network);
+      if (!contractAddress) {
+        throw new Error(`No escrow contract found for ${token} on ${network}`);
+      }
+
+      const wallet = this.wallets[network.toUpperCase()];
+      if (!wallet) {
+        throw new Error(`Wallet not configured for network: ${network}`);
+      }
+
+      const vaultContract = new ethers.Contract(contractAddress, ESCROW_VAULT_ABI, wallet);
+      const amountWei = ethers.parseUnits(amount.toString(), 6); // USDT has 6 decimals
+
+      console.log(`Refunding ${amount} ${token} to ${sellerAddress} on ${network}`);
+      
+      const tx = await vaultContract.refund(sellerAddress, amountWei);
+      const receipt = await tx.wait();
+
+      console.log(`✅ Refund transaction successful: ${receipt.transactionHash}`);
+      return {
+        success: true,
+        transactionHash: receipt.transactionHash,
+        blockNumber: receipt.blockNumber
+      };
+
+    } catch (error) {
+      console.error('Error refunding funds:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get escrow contract address for token/network pair
+   */
+  async getEscrowContractAddress(token, network) {
+    try {
+      const contract = await ContractModel.findOne({
+        name: 'EscrowVault',
+        token: token.toUpperCase(),
+        network: network.toUpperCase()
+      });
+
+      return contract ? contract.address : null;
+    } catch (error) {
+      console.error('Error getting escrow contract address:', error);
+      return null;
+    }
+  }
 }
 
 module.exports = new BlockchainService();

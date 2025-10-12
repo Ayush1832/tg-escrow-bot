@@ -1,0 +1,311 @@
+const GroupPool = require('../models/GroupPool');
+
+class GroupPoolService {
+  /**
+   * Assign an available group to an escrow
+   */
+  async assignGroup(escrowId) {
+    try {
+      // Find an available group
+      const availableGroup = await GroupPool.findOne({ 
+        status: 'available' 
+      });
+
+      if (!availableGroup) {
+        throw new Error('No available groups in pool. Please add more groups.');
+      }
+
+      // Update group status
+      availableGroup.status = 'assigned';
+      availableGroup.assignedEscrowId = escrowId;
+      availableGroup.assignedAt = new Date();
+      await availableGroup.save();
+
+      console.log(`✅ Assigned group ${availableGroup.groupId} to escrow ${escrowId}`);
+      return availableGroup;
+
+    } catch (error) {
+      console.error('Error assigning group:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Generate invite link for assigned group
+   */
+  async generateInviteLink(groupId, telegram) {
+    try {
+      console.log('🔗 Generating invite link for group:', groupId);
+      console.log('🔗 Telegram API available:', !!telegram);
+      
+      if (!telegram) {
+        throw new Error('Telegram API instance is required for generating invite links');
+      }
+
+      // Find the group in pool
+      const group = await GroupPool.findOne({ groupId });
+      console.log('🔗 Found group in pool:', !!group);
+      if (!group) {
+        throw new Error('Group not found in pool');
+      }
+
+      // Generate invite link with member limit of 2 (buyer + seller)
+      console.log('🔗 Creating invite link with telegram API...');
+      let inviteLinkData;
+      try {
+        inviteLinkData = await telegram.createChatInviteLink(groupId, {
+          member_limit: 2,
+          expire_date: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60) // 7 days
+        });
+        console.log('🔗 Invite link created:', inviteLinkData.invite_link);
+      } catch (chatError) {
+        console.error('🔗 Failed to create invite link:', chatError.message);
+        if (chatError.message.includes('chat not found')) {
+          // Group doesn't exist or bot is not a member - mark group as archived
+          group.status = 'archived';
+          await group.save();
+          throw new Error(`Group ${groupId} not found or bot is not a member. Group has been archived.`);
+        }
+        throw chatError;
+      }
+
+      // Update group with invite link
+      group.inviteLink = inviteLinkData.invite_link;
+      group.inviteLinkExpiry = new Date(Date.now() + (7 * 24 * 60 * 60 * 1000));
+      await group.save();
+
+      console.log(`✅ Generated invite link for group ${groupId}`);
+      return inviteLinkData.invite_link;
+
+    } catch (error) {
+      console.error('Error generating invite link:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Release group back to pool after escrow completion
+   */
+  async releaseGroup(escrowId) {
+    try {
+      const group = await GroupPool.findOne({ 
+        assignedEscrowId: escrowId 
+      });
+
+      if (!group) {
+        console.log(`No assigned group found for escrow ${escrowId}`);
+        return;
+      }
+
+      // Mark group as completed
+      group.status = 'completed';
+      group.completedAt = new Date();
+      group.inviteLink = null; // Clear invite link
+      group.inviteLinkExpiry = null;
+      await group.save();
+
+      console.log(`✅ Released group ${group.groupId} back to pool`);
+      return group;
+
+    } catch (error) {
+      console.error('Error releasing group:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Archive a group (for maintenance)
+   */
+  async archiveGroup(groupId) {
+    try {
+      const group = await GroupPool.findOne({ groupId });
+      if (!group) {
+        throw new Error('Group not found');
+      }
+
+      group.status = 'archived';
+      await group.save();
+
+      console.log(`✅ Archived group ${groupId}`);
+      return group;
+
+    } catch (error) {
+      console.error('Error archiving group:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Add a new group to the pool
+   */
+  async addGroup(groupId, groupTitle = null) {
+    try {
+      // Check if group already exists
+      const existingGroup = await GroupPool.findOne({ groupId });
+      if (existingGroup) {
+        throw new Error('Group already exists in pool');
+      }
+
+      const group = new GroupPool({
+        groupId,
+        groupTitle,
+        status: 'available'
+      });
+
+      await group.save();
+      console.log(`✅ Added group ${groupId} to pool`);
+      return group;
+
+    } catch (error) {
+      console.error('Error adding group:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get pool statistics
+   */
+  async getPoolStats() {
+    try {
+      const stats = await GroupPool.aggregate([
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 }
+          }
+        }
+      ]);
+
+      const result = {
+        total: 0,
+        available: 0,
+        assigned: 0,
+        completed: 0,
+        archived: 0
+      };
+
+      stats.forEach(stat => {
+        result[stat._id] = stat.count;
+        result.total += stat.count;
+      });
+
+      return result;
+
+    } catch (error) {
+      console.error('Error getting pool stats:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * List groups by status
+   */
+  async getGroupsByStatus(status) {
+    try {
+      const groups = await GroupPool.find({ status }).sort({ createdAt: -1 });
+      return groups;
+    } catch (error) {
+      console.error('Error getting groups by status:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Reset completed groups back to available (for pool maintenance)
+   */
+  async resetCompletedGroups() {
+    try {
+      const result = await GroupPool.updateMany(
+        { status: 'completed' },
+        { 
+          status: 'available',
+          assignedEscrowId: null,
+          assignedAt: null,
+          completedAt: null,
+          inviteLink: null,
+          inviteLinkExpiry: null
+        }
+      );
+
+      console.log(`✅ Reset ${result.modifiedCount} completed groups to available`);
+      return result.modifiedCount;
+
+    } catch (error) {
+      console.error('Error resetting completed groups:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Reset assigned groups back to available (manual admin override)
+   */
+  async resetAssignedGroups() {
+    try {
+      const result = await GroupPool.updateMany(
+        { status: 'assigned' },
+        { 
+          status: 'available',
+          assignedEscrowId: null,
+          assignedAt: null,
+          inviteLink: null,
+          inviteLinkExpiry: null
+        }
+      );
+
+      console.log(`✅ Reset ${result.modifiedCount} assigned groups to available`);
+      return result.modifiedCount;
+
+    } catch (error) {
+      console.error('Error resetting assigned groups:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clean up invalid groups (groups that don't exist or bot is not a member)
+   */
+  async cleanupInvalidGroups(telegram) {
+    try {
+      if (!telegram) {
+        throw new Error('Telegram API instance is required for cleanup');
+      }
+
+      const groups = await GroupPool.find({ 
+        status: { $in: ['available', 'assigned'] } 
+      });
+
+      let cleanedCount = 0;
+      for (const group of groups) {
+        try {
+          // Try to get chat info to verify group exists and bot is a member
+          await telegram.getChat(group.groupId);
+        } catch (error) {
+          if (error.message.includes('chat not found') || 
+              error.message.includes('bot was kicked') ||
+              error.message.includes('bot is not a member')) {
+            
+            // Mark group as archived
+            group.status = 'archived';
+            group.assignedEscrowId = null;
+            group.assignedAt = null;
+            group.inviteLink = null;
+            group.inviteLinkExpiry = null;
+            await group.save();
+            
+            cleanedCount++;
+            console.log(`🧹 Cleaned up invalid group: ${group.groupId}`);
+          }
+        }
+      }
+
+      console.log(`✅ Cleaned up ${cleanedCount} invalid groups`);
+      return cleanedCount;
+
+    } catch (error) {
+      console.error('Error cleaning up invalid groups:', error);
+      throw error;
+    }
+  }
+}
+
+module.exports = new GroupPoolService();

@@ -11,6 +11,7 @@ const Event = require('./models/Event');
 // Import services
 const WalletService = require('./services/WalletService');
 const BlockchainService = require('./services/BlockchainService');
+const ActivityMonitoringService = require('./services/ActivityMonitoringService');
 
 // Import handlers
 const startHandler = require('./handlers/startHandler');
@@ -46,6 +47,33 @@ class EscrowBot {
     // Add debugging for all messages
     this.bot.use((ctx, next) => {
       console.log('📨 Received message:', ctx.message?.text || 'non-text message', 'from:', ctx.from?.username);
+      return next();
+    });
+    
+    // Activity tracking middleware - track user activity in groups
+    this.bot.use(async (ctx, next) => {
+      try {
+        const chatId = ctx.chat.id;
+        const userId = ctx.from?.id;
+        
+        // Only track activity in groups (negative chat ID)
+        if (chatId > 0 || !userId || !ctx.message) return next();
+        
+        // Find active escrow in this group
+        const escrow = await Escrow.findOne({
+          groupId: chatId.toString(),
+          status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'] }
+        });
+        
+        if (escrow) {
+          // Track activity for this user
+          await ActivityMonitoringService.trackActivity(chatId.toString(), escrow.escrowId, userId, this.bot);
+        }
+        
+      } catch (error) {
+        console.error('Error in activity tracking middleware:', error);
+      }
+      
       return next();
     });
     
@@ -107,6 +135,34 @@ class EscrowBot {
     this.bot.command('release', releaseHandler);
     this.bot.command('refund', releaseHandler);
     this.bot.command('dispute', disputeHandler);
+
+    // Admin commands
+    const { 
+      adminDashboard,
+      adminResolveRelease, 
+      adminResolveRefund, 
+      adminStats,
+      adminGroupPool,
+      adminPoolAdd,
+      adminPoolList,
+      adminPoolReset,
+      adminPoolResetAssigned,
+      adminPoolCleanup,
+      adminPoolArchive,
+      adminActivityStats
+    } = require('./handlers/adminHandler');
+    this.bot.command('admin_disputes', adminDashboard);
+    this.bot.command('admin_resolve_release', adminResolveRelease);
+    this.bot.command('admin_resolve_refund', adminResolveRefund);
+    this.bot.command('admin_stats', adminStats);
+    this.bot.command('admin_pool', adminGroupPool);
+    this.bot.command('admin_pool_add', adminPoolAdd);
+    this.bot.command('admin_pool_list', adminPoolList);
+    this.bot.command('admin_pool_reset', adminPoolReset);
+    this.bot.command('admin_pool_reset_assigned', adminPoolResetAssigned);
+    this.bot.command('admin_pool_cleanup', adminPoolCleanup);
+    this.bot.command('admin_pool_archive', adminPoolArchive);
+    this.bot.command('admin_activity_stats', adminActivityStats);
 
     // Callback query handler
     this.bot.on('callback_query', callbackHandler);
@@ -192,6 +248,10 @@ class EscrowBot {
       
       // Start deposit monitoring
       this.startDepositMonitoring();
+      
+      // Start activity monitoring
+      ActivityMonitoringService.setBotInstance(this.bot);
+      ActivityMonitoringService.startMonitoring();
       
       // Graceful shutdown
       process.once('SIGINT', () => this.bot.stop('SIGINT'));
