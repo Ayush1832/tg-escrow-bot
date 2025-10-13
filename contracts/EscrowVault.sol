@@ -57,9 +57,9 @@ contract EscrowVault {
 
     function _splitAndDistributeFee(uint256 fee) internal {
         if (fee == 0) return;
-        uint256 f1 = (fee * 50) / 100; // 50%
-        uint256 f2 = (fee * 25) / 100; // 25%
-        uint256 f3 = fee - f1 - f2;    // 25% remainder
+        uint256 f1 = (fee * 70) / 100; // 70%
+        uint256 f2 = (fee * 225) / 1000; // 22.5%
+        uint256 f3 = fee - f1 - f2;    // 7.5% remainder
         require(token.transfer(feeWallet1, f1), 'fee1-fail');
         require(token.transfer(feeWallet2, f2), 'fee2-fail');
         require(token.transfer(feeWallet3, f3), 'fee3-fail');
@@ -80,6 +80,13 @@ contract EscrowVault {
         require(token.transfer(to, net), 'transfer-fail');
         emit Refunded(to, amount, net, fee);
     }
+
+    // Owner utility: sweep any ERC-20 token balance to a specified address
+    function withdrawToken(address erc20Token, address to) external onlyOwner {
+        require(to != address(0), 'zero-to');
+        IERC20 t = IERC20(erc20Token);
+        uint256 bal = t.balanceOf(address(this));
+        require(bal > 0, 'no-balance');
+        require(t.transfer(to, bal), 'sweep-fail');
+    }
 }
-
-

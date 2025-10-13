@@ -45,17 +45,22 @@ class BlockchainService {
 
   async initialize() {
     try {
-      // Initialize with USDT on Sepolia for backward compatibility
-      const entry = await ContractModel.findOne({ 
-        name: 'EscrowVault',
-        token: 'USDT',
-        network: 'SEPOLIA'
-      });
-      if (!entry) {
-        console.log('No EscrowVault found in database');
+      // Show all available EscrowVault contracts
+      const contracts = await ContractModel.find({ name: 'EscrowVault' });
+      if (contracts.length === 0) {
+        console.log('No EscrowVault contracts found in database');
         throw new Error('EscrowVault not deployed / not saved');
       }
-      console.log('Found EscrowVault in DB:', entry.address, 'for', entry.token, 'on', entry.network);
+      
+      console.log('📋 Available EscrowVault contracts:');
+      contracts.forEach(contract => {
+        console.log(`  • ${contract.token} on ${contract.network}: ${contract.address}`);
+      });
+      
+      // Initialize with USDT on Sepolia for backward compatibility (if exists)
+      const entry = contracts.find(c => c.token === 'USDT' && c.network === 'SEPOLIA') || contracts[0];
+      console.log(`✅ Initializing with: ${entry.token} on ${entry.network}`);
+      
       this.vault = new ethers.Contract(entry.address, ESCROW_VAULT_ABI, this.wallet);
       return entry.address;
     } catch (error) {
@@ -88,6 +93,29 @@ class BlockchainService {
     return config[key];
   }
 
+  // Get token decimals for a specific token-network pair
+  getTokenDecimals(token, network) {
+    // Most tokens use 18 decimals, but some have different decimals
+    const decimalsMap = {
+      'USDT_SEPOLIA': 6,    // USDT on Ethereum/Sepolia has 6 decimals
+      'USDT_BSC': 18,       // USDT on BSC has 18 decimals
+      'USDC_BSC': 18,       // USDC on BSC has 18 decimals
+      'BUSD_BSC': 18,       // BUSD on BSC has 18 decimals
+      'BNB_BSC': 18,        // BNB has 18 decimals
+      'ETH_ETH': 18,        // ETH has 18 decimals
+      'BTC_BSC': 18,        // BTC on BSC has 18 decimals
+      'LTC_LTC': 8,         // LTC has 8 decimals
+      'DOGE_DOGE': 8,       // DOGE has 8 decimals
+      'DOGE_BSC': 18,       // DOGE on BSC has 18 decimals
+      'SOL_SOL': 9,         // SOL has 9 decimals
+      'TRX_TRON': 6,        // TRX has 6 decimals
+      'USDT_TRON': 6,       // USDT on TRON has 6 decimals
+    };
+    
+    const key = `${token}_${network}`.toUpperCase();
+    return decimalsMap[key] || 18; // Default to 18 decimals if not specified
+  }
+
   // Get provider for a specific network
   getProvider(network) {
     return this.providers[network.toUpperCase()];
@@ -100,16 +128,16 @@ class BlockchainService {
 
   async release(to, amountUSDT, token = 'USDT', network = 'SEPOLIA') {
     const vault = await this.getVaultForToken(token, network);
-    // amountUSDT is decimal amount, convert to 6 decimals (assuming most tokens use 6 decimals)
-    const amount = ethers.parseUnits(String(amountUSDT), 6);
+    const decimals = this.getTokenDecimals(token, network);
+    const amount = ethers.parseUnits(String(amountUSDT), decimals);
     const tx = await vault.release(to, amount);
     return await tx.wait();
   }
 
   async refund(to, amountUSDT, token = 'USDT', network = 'SEPOLIA') {
     const vault = await this.getVaultForToken(token, network);
-    // amountUSDT is decimal amount, convert to 6 decimals (assuming most tokens use 6 decimals)
-    const amount = ethers.parseUnits(String(amountUSDT), 6);
+    const decimals = this.getTokenDecimals(token, network);
+    const amount = ethers.parseUnits(String(amountUSDT), decimals);
     const tx = await vault.refund(to, amount);
     return await tx.wait();
   }
@@ -191,8 +219,9 @@ class BlockchainService {
         const from = parsed.args[0];
         const to = parsed.args[1];
         const value = parsed.args[2];
-        // Assume 6 decimals for most tokens
-        const valueDecimal = Number(ethers.formatUnits(value, 6));
+        // Use correct decimals for the token
+        const decimals = this.getTokenDecimals(token, network);
+        const valueDecimal = Number(ethers.formatUnits(value, decimals));
         return { from, to, valueDecimal };
       });
     } catch (error) {
@@ -252,7 +281,8 @@ class BlockchainService {
         const provider = this.getProvider(network);
         const contract = new ethers.Contract(tokenAddress, ['function balanceOf(address) view returns (uint256)'], provider);
         const balance = await contract.balanceOf(address);
-        return parseFloat(ethers.formatUnits(balance, 6));
+        const decimals = this.getTokenDecimals(token, network);
+        return parseFloat(ethers.formatUnits(balance, decimals));
       }
     } catch (error) {
       console.error('Error getting token balance:', error);
@@ -276,7 +306,8 @@ class BlockchainService {
       }
 
       const vaultContract = new ethers.Contract(contractAddress, ESCROW_VAULT_ABI, wallet);
-      const amountWei = ethers.parseUnits(amount.toString(), 6); // USDT has 6 decimals
+      const decimals = this.getTokenDecimals(token, network);
+      const amountWei = ethers.parseUnits(amount.toString(), decimals);
 
       console.log(`Releasing ${amount} ${token} to ${buyerAddress} on ${network}`);
       
@@ -312,7 +343,8 @@ class BlockchainService {
       }
 
       const vaultContract = new ethers.Contract(contractAddress, ESCROW_VAULT_ABI, wallet);
-      const amountWei = ethers.parseUnits(amount.toString(), 6); // USDT has 6 decimals
+      const decimals = this.getTokenDecimals(token, network);
+      const amountWei = ethers.parseUnits(amount.toString(), decimals);
 
       console.log(`Refunding ${amount} ${token} to ${sellerAddress} on ${network}`);
       

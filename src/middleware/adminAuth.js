@@ -10,19 +10,20 @@ function requireAdmin() {
       const userId = ctx.from?.id;
       const username = ctx.from?.username;
 
-      // Check if user ID matches admin user ID
-      if (config.ADMIN_USER_ID && userId === parseInt(config.ADMIN_USER_ID)) {
+      // Check if user ID matches any admin user ID
+      const adminIds = config.getAllAdminIds();
+      if (adminIds.some(adminId => userId === parseInt(adminId))) {
         return next();
       }
 
-      // Check if username matches admin username
-      if (config.ADMIN_USERNAME && username === config.ADMIN_USERNAME) {
+      // Check if username matches any admin username
+      const adminUsernames = config.getAllAdminUsernames();
+      if (adminUsernames.includes(username)) {
         return next();
       }
 
       // If neither matches, deny access
       await ctx.reply('❌ Access denied. Admin privileges required.');
-      console.log(`🚫 Unauthorized admin access attempt by user ${userId} (@${username})`);
       
     } catch (error) {
       console.error('Error in admin auth middleware:', error);
@@ -38,10 +39,19 @@ function isAdmin(ctx) {
   const userId = ctx.from?.id;
   const username = ctx.from?.username;
 
-  return (
-    (config.ADMIN_USER_ID && userId === parseInt(config.ADMIN_USER_ID)) ||
-    (config.ADMIN_USERNAME && username === config.ADMIN_USERNAME)
-  );
+  // Check if user ID matches any admin user ID
+  const adminIds = config.getAllAdminIds();
+  if (adminIds.some(adminId => userId === parseInt(adminId))) {
+    return true;
+  }
+
+  // Check if username matches any admin username
+  const adminUsernames = config.getAllAdminUsernames();
+  if (adminUsernames.includes(username)) {
+    return true;
+  }
+
+  return false;
 }
 
 module.exports = {

@@ -11,7 +11,7 @@ const Event = require('./models/Event');
 // Import services
 const WalletService = require('./services/WalletService');
 const BlockchainService = require('./services/BlockchainService');
-const ActivityMonitoringService = require('./services/ActivityMonitoringService');
+// Activity monitoring removed
 
 // Import handlers
 const startHandler = require('./handlers/startHandler');
@@ -44,38 +44,8 @@ class EscrowBot {
   }
 
   setupHandlers() {
-    // Add debugging for all messages
-    this.bot.use((ctx, next) => {
-      console.log('📨 Received message:', ctx.message?.text || 'non-text message', 'from:', ctx.from?.username);
-      return next();
-    });
     
-    // Activity tracking middleware - track user activity in groups
-    this.bot.use(async (ctx, next) => {
-      try {
-        const chatId = ctx.chat.id;
-        const userId = ctx.from?.id;
-        
-        // Only track activity in groups (negative chat ID)
-        if (chatId > 0 || !userId || !ctx.message) return next();
-        
-        // Find active escrow in this group
-        const escrow = await Escrow.findOne({
-          groupId: chatId.toString(),
-          status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'] }
-        });
-        
-        if (escrow) {
-          // Track activity for this user
-          await ActivityMonitoringService.trackActivity(chatId.toString(), escrow.escrowId, userId, this.bot);
-        }
-        
-      } catch (error) {
-        console.error('Error in activity tracking middleware:', error);
-      }
-      
-      return next();
-    });
+    // (Inactivity tracking disabled)
     
     // Capture deal details after /dd - MUST be before command handlers
     this.bot.use(async (ctx, next) => {
@@ -88,7 +58,6 @@ class EscrowBot {
                 
         const escrow = await Escrow.findOne({ groupId: chatId.toString(), status: 'awaiting_details' });
         if (!escrow) {
-          console.log('No escrow in awaiting_details status');
           return next();
         }
                 
@@ -121,7 +90,6 @@ class EscrowBot {
     
     // Test command
     this.bot.command('test', (ctx) => {
-      console.log('🧪 Test command received');
       ctx.reply('✅ Bot is working!');
     });
     
@@ -146,11 +114,11 @@ class EscrowBot {
       adminPoolAdd,
       adminPoolList,
       adminPoolReset,
-      adminPoolResetAssigned,
-      adminPoolCleanup,
-      adminPoolArchive,
-      adminActivityStats
-    } = require('./handlers/adminHandler');
+    adminPoolResetAssigned,
+    adminPoolCleanup,
+    adminPoolArchive,
+    adminPoolDeleteAll
+  } = require('./handlers/adminHandler');
     this.bot.command('admin_disputes', adminDashboard);
     this.bot.command('admin_resolve_release', adminResolveRelease);
     this.bot.command('admin_resolve_refund', adminResolveRefund);
@@ -162,7 +130,8 @@ class EscrowBot {
     this.bot.command('admin_pool_reset_assigned', adminPoolResetAssigned);
     this.bot.command('admin_pool_cleanup', adminPoolCleanup);
     this.bot.command('admin_pool_archive', adminPoolArchive);
-    this.bot.command('admin_activity_stats', adminActivityStats);
+    this.bot.command('admin_pool_delete_all', adminPoolDeleteAll);
+    // Inactivity manual commands removed
 
     // Callback query handler
     this.bot.on('callback_query', callbackHandler);
@@ -211,7 +180,7 @@ class EscrowBot {
             username: telegramUser.username,
             firstName: telegramUser.first_name,
             lastName: telegramUser.last_name,
-            isAdmin: telegramUser.username === config.ADMIN_USERNAME
+            isAdmin: config.getAllAdminUsernames().includes(telegramUser.username)
           });
           await user.save();
         } catch (duplicateError) {
@@ -239,7 +208,6 @@ class EscrowBot {
       // Initialize on-chain vault (optional for basic bot functionality)
       try {
         const addr = await BlockchainService.initialize();
-        console.log('✅ EscrowVault initialized at:', addr);
       } catch (e) {
         console.warn('⚠️ EscrowVault not found. Bot will work in limited mode. Deploy with `npm run deploy:sepolia`');
       }
@@ -249,9 +217,7 @@ class EscrowBot {
       // Start deposit monitoring
       this.startDepositMonitoring();
       
-      // Start activity monitoring
-      ActivityMonitoringService.setBotInstance(this.bot);
-      ActivityMonitoringService.startMonitoring();
+      // Inactivity monitoring disabled
       
       // Graceful shutdown
       process.once('SIGINT', () => this.bot.stop('SIGINT'));

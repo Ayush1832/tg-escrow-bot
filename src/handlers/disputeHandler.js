@@ -42,7 +42,7 @@ Escrow ID: ${escrow.escrowId}
 Raised by: @${ctx.from.username}
 Time: ${new Date().toLocaleString()}
 
-An administrator (@${config.ADMIN_USERNAME}) will join this group within 24 hours to resolve the dispute.
+An administrator will join this group within 24 hours to resolve the dispute.
 
 Please provide details about the issue and wait for admin intervention.
     `;
@@ -68,8 +68,9 @@ Please provide details about the issue and wait for admin intervention.
 
 async function sendAdminDisputeNotification(ctx, escrow) {
   try {
-    if (!config.ADMIN_USER_ID) {
-      console.log('⚠️ ADMIN_USER_ID not configured. Skipping admin notification.');
+    const adminIds = config.getAllAdminIds();
+    
+    if (adminIds.length === 0) {
       return;
     }
 
@@ -112,12 +113,17 @@ async function sendAdminDisputeNotification(ctx, escrow) {
 • \`/admin_disputes\` - View all disputes
     `;
 
-    await ctx.bot.telegram.sendMessage(config.ADMIN_USER_ID, adminMessage, {
-      parse_mode: 'Markdown',
-      disable_web_page_preview: true
-    });
-
-    console.log(`✅ Admin notification sent for dispute: ${escrow.escrowId}`);
+    // Send notification to all admins
+    for (const adminId of adminIds) {
+      try {
+        await ctx.bot.telegram.sendMessage(adminId, adminMessage, {
+          parse_mode: 'Markdown',
+          disable_web_page_preview: true
+        });
+      } catch (error) {
+        console.error(`Error sending dispute notification to admin ${adminId}:`, error);
+      }
+    }
   } catch (error) {
     console.error('Error sending admin notification:', error);
   }

@@ -16,11 +16,9 @@ module.exports = async (ctx) => {
         
         // Assign a group from the managed pool
         const assignedGroup = await GroupPoolService.assignGroup(escrowId);
-        console.log('✅ Assigned group:', assignedGroup);
         
         // Generate invite link for the assigned group
         const inviteLink = await GroupPoolService.generateInviteLink(assignedGroup.groupId, ctx.telegram);
-        console.log('✅ Generated invite link:', inviteLink);
         
         // Create new escrow with assigned group
         const newEscrow = new Escrow({
@@ -30,38 +28,40 @@ module.exports = async (ctx) => {
         });
         await newEscrow.save();
 
+        // Activity tracking removed
+
         // Send DM to user with group invite
-        const dmText = `🤖 *Escrow Group Assigned*
+        const dmText = `🤖 <b>Escrow Group Assigned</b>
 
-📋 Escrow ID: \`${escrowId}\`
+📋 Escrow ID: <code>${escrowId}</code>
 👥 Group: Assigned from managed pool
-🔗 Invite Link: [Join Escrow Group](${inviteLink})
+🔗 Invite Link: <a href="${inviteLink}">Join Escrow Group</a>
 
-⚠️ *Important Notes:*
-• This invite link is limited to 2 members (buyer + seller)
-• Link expires in 7 days
-• Share this link with your trading partner
-• Both parties must join before starting the escrow
+⚠️ <b>Important Notes:</b>
+- This invite link is limited to 2 members (buyer + seller)
+- Link expires in 7 days
+- Share this link with your trading partner
+- Both parties must join before starting the escrow
 
 ✅ Once both parties join, use /dd command in the group to set deal details.`;
 
         await ctx.reply(dmText, { 
-          parse_mode: 'Markdown',
+          parse_mode: 'HTML',
           disable_web_page_preview: true
         });
 
         // Send welcome message to the assigned group
-        const groupText = `📍 *Hey there traders! Welcome to our escrow service.*
+        const groupText = `📍 <b>Hey there traders! Welcome to our escrow service.</b>
 
-📋 Escrow ID: \`${escrowId}\`
+📋 Escrow ID: <code>${escrowId}</code>
 
-⚠️ *IMPORTANT* - Make sure coin and network is same of Buyer and Seller else you may loose your coin.
-⚠️ *IMPORTANT* - Make sure the /buyer address and /seller address are of same chain else you may loose your coin.
+⚠️ <b>IMPORTANT</b> - Make sure coin and network is same of Buyer and Seller else you may loose your coin.
+⚠️ <b>IMPORTANT</b> - Make sure the /buyer address and /seller address are of same chain else you may loose your coin.
 
 ✅ Please start with /dd command and if you have any doubts please use /start command.`;
 
         await ctx.telegram.sendMessage(assignedGroup.groupId, groupText, { 
-          parse_mode: 'Markdown' 
+          parse_mode: 'HTML' 
         });
 
         // Log event
@@ -77,27 +77,54 @@ module.exports = async (ctx) => {
           }
         }).save();
 
-        console.log(`✅ Escrow ${escrowId} created with managed group ${assignedGroup.groupId}`);
-
       } catch (poolError) {
-        console.error('Error with managed group pool:', poolError);
-        
-        // Fallback to manual instructions if pool is empty
-        const botUsername = ctx.botInfo?.username || 'your_bot_username';
-        const fallbackText = `❌ *No Available Groups*
+        // Check if it's a "no available groups" error
+        if (poolError.message && (poolError.message.includes('No available groups') || poolError.message.includes('All groups are currently occupied'))) {
+          // User-friendly message for no available groups
+          const botUsername = ctx.botInfo?.username || 'your_bot_username';
+          const fallbackText = `🚫 <b>All Groups Currently Occupied</b>
 
-Currently no groups available in the managed pool.
+All managed groups are currently being used for active escrows.
 
-📋 *Manual Setup Required:*
+📋 <b>Manual Setup Instructions:</b>
 1) Create a new Telegram group
 2) Add this bot (@${botUsername}) to the group
-3) Set the bot as admin
+3) Set the bot as admin with all permissions
 4) Both buyer and seller join the group
-5) Run /escrow command in the group
+5) Run /escrow command in the group to start
 
-⚠️ *Alternative:* Contact admin to add more groups to the pool.`;
-        
-        await ctx.reply(fallbackText, { parse_mode: 'Markdown' });
+✅ <b>Once Setup Complete:</b>
+- Use /dd command to set deal details
+- Use /seller and /buyer commands to set addresses
+- Use /deposit to generate deposit address
+
+⚠️ <b>Note:</b> Manual groups work exactly the same as managed groups.`;
+          
+          await ctx.reply(fallbackText, { parse_mode: 'HTML' });
+        } else {
+          // Log other errors but don't show them to user
+          console.error('Error with managed group pool:', poolError.message);
+          
+          // Generic fallback message
+          const botUsername = ctx.botInfo?.username || 'your_bot_username';
+          const fallbackText = `🚫 <b>Group Assignment Temporarily Unavailable</b>
+
+Please create a group manually for now:
+
+📋 <b>Manual Setup Instructions:</b>
+1) Create a new Telegram group
+2) Add this bot (@${botUsername}) to the group
+3) Set the bot as admin with all permissions
+4) Both buyer and seller join the group
+5) Run /escrow command in the group to start
+
+✅ <b>Once Setup Complete:</b>
+- Use /dd command to set deal details
+- Use /seller and /buyer commands to set addresses
+- Use /deposit to generate deposit address`;
+          
+          await ctx.reply(fallbackText, { parse_mode: 'HTML' });
+        }
       }
       
       return;
@@ -123,18 +150,18 @@ Currently no groups available in the managed pool.
 
     await newEscrow.save();
 
-    const groupText = `
-📍 *Hey there traders! Welcome to our escrow service.*
+    // Activity tracking removed
 
-📋 Escrow ID: \`${escrowId}\`
+    const groupText = `📍 <b>Hey there traders! Welcome to our escrow service.</b>
 
-⚠️ *IMPORTANT* - Make sure coin and network is same of Buyer and Seller else you may loose your coin.
-⚠️ *IMPORTANT* - Make sure the /buyer address and /seller address are of same chain else you may loose your coin.
+📋 Escrow ID: <code>${escrowId}</code>
 
-✅ Please start with /dd command and if you have any doubts please use /start command.
-    `;
+⚠️ <b>IMPORTANT</b> - Make sure coin and network is same of Buyer and Seller else you may loose your coin.
+⚠️ <b>IMPORTANT</b> - Make sure the /buyer address and /seller address are of same chain else you may loose your coin.
 
-    await ctx.reply(groupText, { parse_mode: 'Markdown' });
+✅ Please start with /dd command and if you have any doubts please use /start command.`;
+
+    await ctx.reply(groupText, { parse_mode: 'HTML' });
 
     // Log event
     const Event = require('../models/Event');

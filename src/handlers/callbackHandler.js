@@ -84,6 +84,9 @@ module.exports = async (ctx) => {
         escrow.confirmedAmount = totalAmount;
         escrow.status = 'deposited';
         await escrow.save();
+        
+        // Activity tracking removed
+        
         await ctx.reply(`✅ Deposit confirmed: ${newAmount.toFixed(6)} ${escrow.token} (Total: ${totalAmount.toFixed(6)} ${escrow.token})`);
 
         // Begin fiat transfer handshake
@@ -114,6 +117,8 @@ module.exports = async (ctx) => {
       escrow.buyerSentFiat = true;
       escrow.status = 'in_fiat_transfer';
       await escrow.save();
+      
+      // Activity tracking removed
 
       await ctx.answerCbQuery('✅ Noted.');
       // Ask seller to confirm receipt
@@ -150,6 +155,8 @@ module.exports = async (ctx) => {
         escrow.disputeResolution = 'pending';
         await escrow.save();
         
+        // Activity tracking removed
+        
         await ctx.answerCbQuery('❌ Marked as not received');
         
         // Send admin notification
@@ -174,13 +181,7 @@ module.exports = async (ctx) => {
         escrow.status = 'completed';
         await escrow.save();
 
-        // Mark trade as completed for activity monitoring
-        try {
-          const ActivityMonitoringService = require('../services/ActivityMonitoringService');
-          await ActivityMonitoringService.markTradeCompleted(escrow.escrowId);
-        } catch (activityError) {
-          console.error('Error marking trade completed:', activityError);
-        }
+      // Activity tracking removed
 
         // Release group back to pool
         try {
@@ -258,15 +259,7 @@ module.exports = async (ctx) => {
           escrow.status = action === 'release' ? 'completed' : 'refunded';
           await escrow.save();
 
-          // Mark trade as completed for activity monitoring (only for releases)
-          if (action === 'release') {
-            try {
-              const ActivityMonitoringService = require('../services/ActivityMonitoringService');
-              await ActivityMonitoringService.markTradeCompleted(escrow.escrowId);
-            } catch (activityError) {
-              console.error('Error marking trade completed:', activityError);
-            }
-          }
+          // Activity tracking removed
 
           // Release group back to pool
           try {
@@ -325,7 +318,7 @@ Thank you for using @Easy_Escrow_Bot 🙌
       const networkButtons = [];
       for (let i = 0; i < networks.length; i += 2) {
         const row = networks.slice(i, i + 2);
-        networkButtons.push(row.map(network => Markup.button.callback(network, `select_network_${token}_${network.replace(/[\[\]]/g, '').replace('BEP20', 'BSC').replace('TRC20', 'TRON')}`)));
+        networkButtons.push(row.map(network => Markup.button.callback(network, `select_network_${token}_${network.replace(/[\[\]]/g, '').replace('BEP20', '').replace('TRC20', 'TRON')}`)));
       }
       
       // Add back button

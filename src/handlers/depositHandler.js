@@ -113,6 +113,11 @@ Amount to be Received: [$${escrow.quantity.toFixed(2)}]
 ⏰ Address Reset In: ${config.DEPOSIT_ADDRESS_TTL_MINUTES}.00 Min
 
 📄 Note: Address will reset after the given time, so make sure to deposit in the bot before the address expires.
+⚠️ *CRITICAL TOKEN/NETWORK WARNING*
+• Send ONLY *${escrow.token}* on *${escrow.chain}* to this address.
+• ❌ Do NOT send any other token (e.g., USDC/BNB/ETH) or from another network.
+• Wrong token deposits will NOT be credited to this trade.
+• If a wrong token is sent, contact admin. Funds may require a manual sweep.
 ⚠️ *IMPORTANT:* Make sure to finalise and agree each-others terms before depositing.
 
 *Useful commands:*

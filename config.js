@@ -5,6 +5,8 @@ module.exports = {
   BOT_TOKEN: process.env.BOT_TOKEN,
   ADMIN_USERNAME: process.env.ADMIN_USERNAME,
   ADMIN_USER_ID: process.env.ADMIN_USER_ID,
+  ADMIN_USERNAME2: process.env.ADMIN_USERNAME2,
+  ADMIN_USER_ID2: process.env.ADMIN_USER_ID2,
 
   // MongoDB Configuration
   MONGODB_URI: process.env.MONGODB_URI,
@@ -45,11 +47,27 @@ module.exports = {
   MAX_TRADE_AMOUNT: Number(process.env.MAX_TRADE_AMOUNT || 10000),
   DEPOSIT_ADDRESS_TTL_MINUTES: Number(process.env.DEPOSIT_ADDRESS_TTL_MINUTES || 20),
 
-  // Fee wallets
-  FEE_WALLET_1: process.env.FEE_WALLET_1,
-  FEE_WALLET_2: process.env.FEE_WALLET_2,
-  FEE_WALLET_3: process.env.FEE_WALLET_3,
+  // Fee wallets (Distribution: 70% - 22.5% - 7.5%)
+  FEE_WALLET_1: process.env.FEE_WALLET_1, // 70% of total fees
+  FEE_WALLET_2: process.env.FEE_WALLET_2, // 22.5% of total fees
+  FEE_WALLET_3: process.env.FEE_WALLET_3, // 7.5% of total fees
 
   // Security
-  NODE_ENV: process.env.NODE_ENV || 'development'
+  NODE_ENV: process.env.NODE_ENV || 'development',
+
+  // Helper function to get all admin IDs
+  getAllAdminIds() {
+    const adminIds = [];
+    if (this.ADMIN_USER_ID) adminIds.push(this.ADMIN_USER_ID);
+    if (this.ADMIN_USER_ID2) adminIds.push(this.ADMIN_USER_ID2);
+    return adminIds;
+  },
+
+  // Helper function to get all admin usernames
+  getAllAdminUsernames() {
+    const adminUsernames = [];
+    if (this.ADMIN_USERNAME) adminUsernames.push(this.ADMIN_USERNAME);
+    if (this.ADMIN_USERNAME2) adminUsernames.push(this.ADMIN_USERNAME2);
+    return adminUsernames;
+  }
 };

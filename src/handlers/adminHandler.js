@@ -43,6 +43,7 @@ async function adminDashboard(ctx) {
     message += `\n⚡ *Quick Commands:*\n`;
     message += `• \`/admin_resolve_release <escrowId>\` - Release to buyer\n`;
     message += `• \`/admin_resolve_refund <escrowId>\` - Refund to seller\n`;
+    // Inactivity commands removed
 
     await ctx.reply(message, { parse_mode: 'Markdown' });
 
@@ -486,48 +487,69 @@ async function adminPoolArchive(ctx) {
   }
 }
 
+// Activity monitoring stats removed
+
+// Manual inactivity check removed
+
+// Activity tracking debug removed
+
 /**
- * Admin activity stats - view activity monitoring statistics
+ * Manually send inactivity warnings to currently-inactive groups
  */
-async function adminActivityStats(ctx) {
+async function adminWarnInactive(ctx) {
   try {
     if (!isAdmin(ctx)) {
       return ctx.reply('❌ Access denied. Admin privileges required.');
     }
 
     const ActivityMonitoringService = require('../services/ActivityMonitoringService');
-    const stats = await ActivityMonitoringService.getActivityStats();
+    const thresholds = ActivityMonitoringService.getThresholds();
+    const cutoff = new Date(Date.now() - thresholds.inactivityMs);
 
-    if (!stats) {
-      return ctx.reply('❌ Error loading activity statistics.');
+    // Inactivity tracking removed
+    const candidates = [];
+
+    let attempted = 0;
+    let success = 0;
+    for (const tracking of candidates) {
+      attempted++;
+      const ok = await ActivityMonitoringService.sendInactivityWarning(tracking);
+      if (ok) success++;
     }
 
-    const message = `
-📊 *ACTIVITY MONITORING STATISTICS*
-
-🕐 *Current Activity:*
-• Active Trades: ${stats.active}
-• Inactive Trades: ${stats.inactive}
-• Completed Trades: ${stats.completed}
-• Cancelled Trades: ${stats.cancelled}
-• Total Tracked: ${stats.total}
-
-⚙️ *Monitoring Settings:*
-• Inactivity Threshold: 2 hours
-• Cleanup Check: Every 10 minutes
-• Auto-cleanup: Enabled
-
-🔄 *Cleanup Actions:*
-• Inactive trades → Cancelled + Users removed
-• Completed trades → Cleaned + Users removed
-• Groups returned to pool automatically
-    `;
-
-    await ctx.reply(message, { parse_mode: 'Markdown' });
-
+    await ctx.reply(`⚠️ Attempted: ${attempted}, Successfully warned: ${success}.`);
   } catch (error) {
-    console.error('Error in admin activity stats:', error);
-    ctx.reply('❌ Error loading activity statistics.');
+    console.error('Error in adminWarnInactive:', error);
+    await ctx.reply('❌ Error sending warnings.');
+  }
+}
+
+/**
+ * Manually remove users from groups pending removal (warning sent + delay passed)
+ */
+async function adminRemoveInactive(ctx) {
+  try {
+    if (!isAdmin(ctx)) {
+      return ctx.reply('❌ Access denied. Admin privileges required.');
+    }
+
+    const ActivityMonitoringService = require('../services/ActivityMonitoringService');
+    const thresholds = ActivityMonitoringService.getThresholds();
+    const cutoff = new Date(Date.now() - thresholds.warningDelayMs);
+
+    // Inactivity tracking removed
+    const candidates = [];
+
+    let removed = 0;
+    for (const tracking of candidates) {
+      await ActivityMonitoringService.handleInactiveGroup(tracking);
+      removed++;
+    }
+
+    await ctx.reply(`🚪 Removed users from ${removed} groups pending removal.`);
+  } catch (error) {
+    console.error('Error in adminRemoveInactive:', error);
+    await ctx.reply('❌ Error removing users.');
   }
 }
 
@@ -542,6 +564,25 @@ module.exports = {
   adminPoolReset,
   adminPoolResetAssigned,
   adminPoolCleanup,
-  adminPoolArchive,
-  adminActivityStats
+  adminPoolArchive
 };
+
+/**
+ * Delete ALL groups from pool (dangerous)
+ */
+async function adminPoolDeleteAll(ctx) {
+  try {
+    if (!isAdmin(ctx)) {
+      return ctx.reply('❌ Access denied. Admin privileges required.');
+    }
+
+    const GroupPool = require('../models/GroupPool');
+    const res = await GroupPool.deleteMany({});
+    await ctx.reply(`🗑️ Deleted ${res.deletedCount || 0} groups from pool.`);
+  } catch (error) {
+    console.error('Error deleting all groups:', error);
+    await ctx.reply('❌ Error deleting groups.');
+  }
+}
+
+module.exports.adminPoolDeleteAll = adminPoolDeleteAll;
