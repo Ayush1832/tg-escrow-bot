@@ -175,12 +175,13 @@ class EscrowBot {
       let user = await User.findOne({ telegramId: telegramUser.id });
       if (!user) {
         try {
+          const fallbackUsername = telegramUser.username || (telegramUser.first_name ? `${telegramUser.first_name}` : `user_${telegramUser.id}`);
           user = new User({
             telegramId: telegramUser.id,
-            username: telegramUser.username,
+            username: fallbackUsername,
             firstName: telegramUser.first_name,
             lastName: telegramUser.last_name,
-            isAdmin: config.getAllAdminUsernames().includes(telegramUser.username)
+            isAdmin: config.getAllAdminUsernames().includes(telegramUser.username || fallbackUsername)
           });
           await user.save();
         } catch (duplicateError) {
