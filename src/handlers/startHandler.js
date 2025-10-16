@@ -1,5 +1,5 @@
 const { Markup } = require('telegraf');
-// config not needed since we always use local image
+const config = require('../../config');
 const fs = require('fs');
 const path = require('path');
 
@@ -12,7 +12,7 @@ Welcome to @Easy_Escrow_Bot. This bot provides a reliable escrow service for you
 Avoid scams, your funds are safeguarded throughout your deals. If you run into any issues, simply type /dispute and an arbitrator will join the group chat within 24 hours.
 
 🎟 *ESCROW FEE:*
-1.0% Flat
+${config.ESCROW_FEE_PERCENT}% Flat
 
 🌐 (UPDATES) - (VOUCHES) ☑️
 
