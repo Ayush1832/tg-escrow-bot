@@ -297,10 +297,6 @@ async function adminStats(ctx) {
  */
 async function adminGroupPool(ctx) {
   try {
-    if (!isAdmin(ctx)) {
-      return ctx.reply('❌ Access denied. Admin privileges required.');
-    }
-
     const stats = await GroupPoolService.getPoolStats();
     
     const message = `
@@ -336,10 +332,6 @@ async function adminGroupPool(ctx) {
  */
 async function adminPoolAdd(ctx) {
   try {
-    if (!isAdmin(ctx)) {
-      return ctx.reply('❌ Access denied. Admin privileges required.');
-    }
-
     const groupId = ctx.message.text.split(' ')[1];
     if (!groupId) {
       return ctx.reply('❌ Please provide group ID.\nUsage: `/admin_pool_add <groupId>`', {
@@ -361,10 +353,6 @@ async function adminPoolAdd(ctx) {
  */
 async function adminPoolList(ctx) {
   try {
-    if (!isAdmin(ctx)) {
-      return ctx.reply('❌ Access denied. Admin privileges required.');
-    }
-
     const availableGroups = await GroupPoolService.getGroupsByStatus('available');
     const assignedGroups = await GroupPoolService.getGroupsByStatus('assigned');
     const completedGroups = await GroupPoolService.getGroupsByStatus('completed');
