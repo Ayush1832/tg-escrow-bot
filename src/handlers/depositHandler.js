@@ -84,6 +84,10 @@ Note: The default fee is ${config.ESCROW_FEE_PERCENT}%, which is applied when fu
     const sellerTag = escrow.sellerUsername ? `@${escrow.sellerUsername}` : (escrow.sellerId ? `[${escrow.sellerId}]` : 'N/A');
     const buyerTag = escrow.buyerUsername ? `@${escrow.buyerUsername}` : (escrow.buyerId ? `[${escrow.buyerId}]` : 'N/A');
 
+    const amountDisplay = typeof escrow.quantity === 'number' && isFinite(escrow.quantity)
+      ? escrow.quantity.toFixed(2)
+      : 'N/A';
+
     const depositText = `
 📍 *TRANSACTION INFORMATION [${escrow.escrowId.slice(-8)}]*
 
@@ -100,7 +104,7 @@ ${address} [${escrow.token}] [${escrow.chain}]
 
 Seller ${sellerTag} Will Pay on the Escrow Address, And Click On Check Payment.
 
-Amount to be Received: [$${escrow.quantity.toFixed(2)}]
+Amount to be Received: [$${amountDisplay}]
 
 ⏰ Trade Start Time: ${new Date().toLocaleString('en-GB', { 
       day: '2-digit', 

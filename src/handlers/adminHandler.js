@@ -553,7 +553,8 @@ module.exports = {
   adminPoolReset,
   adminPoolResetAssigned,
   adminPoolCleanup,
-  adminPoolArchive
+  adminPoolArchive,
+  adminPoolDelete
 };
 
 /**
@@ -612,3 +613,31 @@ async function adminCleanupAbandoned(ctx) {
 }
 
 module.exports.adminCleanupAbandoned = adminCleanupAbandoned;
+
+/**
+ * Delete a specific group from the pool by groupId
+ */
+async function adminPoolDelete(ctx) {
+  try {
+    if (!isAdmin(ctx)) {
+      return ctx.reply('❌ Access denied. Admin privileges required.');
+    }
+
+    const groupId = ctx.message.text.split(' ')[1];
+    if (!groupId) {
+      return ctx.reply('❌ Please provide group ID.\nUsage: `/admin_pool_delete <groupId>`', {
+        parse_mode: 'Markdown'
+      });
+    }
+
+    const GroupPool = require('../models/GroupPool');
+    const res = await GroupPool.deleteOne({ groupId });
+    if (res.deletedCount === 0) {
+      return ctx.reply(`ℹ️ No group found for id ${groupId}.`);
+    }
+    await ctx.reply(`🗑️ Deleted group ${groupId} from pool.`);
+  } catch (error) {
+    console.error('Error deleting group from pool:', error);
+    await ctx.reply('❌ Error deleting group from pool.');
+  }
+}

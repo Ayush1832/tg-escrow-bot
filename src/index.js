@@ -117,7 +117,8 @@ class EscrowBot {
     adminPoolResetAssigned,
     adminPoolCleanup,
     adminPoolArchive,
-    adminPoolDeleteAll
+    adminPoolDeleteAll,
+    adminPoolDelete
   } = require('./handlers/adminHandler');
     this.bot.command('admin_disputes', adminDashboard);
     this.bot.command('admin_resolve_release', adminResolveRelease);
@@ -131,6 +132,7 @@ class EscrowBot {
     this.bot.command('admin_pool_cleanup', adminPoolCleanup);
     this.bot.command('admin_pool_archive', adminPoolArchive);
     this.bot.command('admin_pool_delete_all', adminPoolDeleteAll);
+    this.bot.command('admin_pool_delete', adminPoolDelete);
     // Inactivity manual commands removed
 
     // Callback query handler
