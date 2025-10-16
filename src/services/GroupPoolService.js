@@ -15,13 +15,33 @@ class GroupPoolService {
         throw new Error('No available groups in pool. All groups are currently occupied.');
       }
 
-      // Update group status
-      availableGroup.status = 'assigned';
-      availableGroup.assignedEscrowId = escrowId;
-      availableGroup.assignedAt = new Date();
-      await availableGroup.save();
+      // Double-check group is still available (prevent race conditions)
+      const recheckGroup = await GroupPool.findOne({ 
+        _id: availableGroup._id,
+        status: 'available' 
+      });
 
-      return availableGroup;
+      if (!recheckGroup) {
+        throw new Error('Group was assigned to another escrow. Please try again.');
+      }
+
+      // Update group status atomically
+      const updateResult = await GroupPool.updateOne(
+        { _id: availableGroup._id, status: 'available' },
+        { 
+          status: 'assigned',
+          assignedEscrowId: escrowId,
+          assignedAt: new Date()
+        }
+      );
+
+      if (updateResult.modifiedCount === 0) {
+        throw new Error('Group assignment failed. Please try again.');
+      }
+
+      // Return updated group
+      const updatedGroup = await GroupPool.findById(availableGroup._id);
+      return updatedGroup;
 
     } catch (error) {
       // Only log errors that are not "no available groups" 
@@ -53,7 +73,7 @@ class GroupPoolService {
       try {
         inviteLinkData = await telegram.createChatInviteLink(chatId, {
           member_limit: 2,
-          expire_date: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60) // 7 days
+          expire_date: Math.floor(Date.now() / 1000) + (6 * 60 * 60) // 6 hours
         });
       } catch (chatError) {
         // Handle migration: group upgraded to supergroup → use migrate_to_chat_id
@@ -68,7 +88,7 @@ class GroupPoolService {
           try {
             inviteLinkData = await telegram.createChatInviteLink(migrateId, {
               member_limit: 2,
-              expire_date: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60)
+              expire_date: Math.floor(Date.now() / 1000) + (6 * 60 * 60)
             });
           } catch (retryErr) {
             console.error('Error generating invite link after migration retry:', retryErr);
@@ -85,7 +105,7 @@ class GroupPoolService {
 
       // Update group with invite link
       group.inviteLink = inviteLinkData.invite_link;
-      group.inviteLinkExpiry = new Date(Date.now() + (7 * 24 * 60 * 60 * 1000));
+      group.inviteLinkExpiry = new Date(Date.now() + (6 * 60 * 60 * 1000));
       await group.save();
 
       return inviteLinkData.invite_link;
@@ -106,7 +126,7 @@ class GroupPoolService {
       });
 
       if (!group) {
-        return;
+        return null;
       }
 
       // Mark group as completed
@@ -114,12 +134,39 @@ class GroupPoolService {
       group.completedAt = new Date();
       group.inviteLink = null; // Clear invite link
       group.inviteLinkExpiry = null;
+      group.assignedEscrowId = null; // Clear assignment
+      group.assignedAt = null;
       await group.save();
 
       return group;
 
     } catch (error) {
       console.error('Error releasing group:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Reset completed groups back to available (for pool maintenance)
+   */
+  async resetCompletedGroups() {
+    try {
+      const result = await GroupPool.updateMany(
+        { status: 'completed' },
+        { 
+          status: 'available',
+          assignedEscrowId: null,
+          assignedAt: null,
+          completedAt: null,
+          inviteLink: null,
+          inviteLinkExpiry: null
+        }
+      );
+
+      return result.modifiedCount;
+
+    } catch (error) {
+      console.error('Error resetting completed groups:', error);
       throw error;
     }
   }

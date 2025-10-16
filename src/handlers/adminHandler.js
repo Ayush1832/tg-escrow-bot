@@ -320,6 +320,7 @@ async function adminGroupPool(ctx) {
 • \`/admin_pool_reset_assigned\` - Reset assigned groups to available
 • \`/admin_pool_cleanup\` - Clean up invalid groups
 • \`/admin_pool_archive <groupId>\` - Archive group
+• \`/admin_pool_delete_all\` - Delete all groups from pool
     `;
 
     await ctx.reply(message, { parse_mode: 'Markdown' });
@@ -586,3 +587,40 @@ async function adminPoolDeleteAll(ctx) {
 }
 
 module.exports.adminPoolDeleteAll = adminPoolDeleteAll;
+
+/**
+ * Clean up abandoned escrows (draft status for more than 24 hours)
+ */
+async function adminCleanupAbandoned(ctx) {
+  try {
+    if (!isAdmin(ctx)) {
+      return ctx.reply('❌ Access denied. Admin privileges required.');
+    }
+
+    const abandonedEscrows = await Escrow.find({
+      status: 'draft',
+      assignedFromPool: true,
+      createdAt: { $lt: new Date(Date.now() - (24 * 60 * 60 * 1000)) }
+    });
+
+    let cleanedCount = 0;
+    for (const abandoned of abandonedEscrows) {
+      try {
+        await GroupPoolService.releaseGroup(abandoned.escrowId);
+        abandoned.status = 'completed';
+        await abandoned.save();
+        cleanedCount++;
+      } catch (cleanupError) {
+        console.error('Error cleaning up abandoned escrow:', cleanupError);
+      }
+    }
+
+    await ctx.reply(`🧹 Cleaned up ${cleanedCount} abandoned escrows.`);
+
+  } catch (error) {
+    console.error('Error in admin cleanup:', error);
+    ctx.reply('❌ Error during cleanup.');
+  }
+}
+
+module.exports.adminCleanupAbandoned = adminCleanupAbandoned;

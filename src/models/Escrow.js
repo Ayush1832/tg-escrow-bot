@@ -6,9 +6,21 @@ const escrowSchema = new mongoose.Schema({
     required: true,
     unique: true
   },
+  creatorId: {
+    type: Number,
+    required: false
+  },
+  creatorUsername: {
+    type: String,
+    required: false
+  },
   groupId: {
     type: String,
     required: true
+  },
+  assignedFromPool: {
+    type: Boolean,
+    default: false
   },
   status: {
     type: String,
@@ -51,6 +63,7 @@ const escrowSchema = new mongoose.Schema({
   buyerAddress: String,
   sellerAddress: String,
   depositAddress: String,
+  inviteLink: String,
   depositAmount: {
     type: Number,
     default: 0

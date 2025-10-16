@@ -217,6 +217,9 @@ class EscrowBot {
       // Start deposit monitoring
       this.startDepositMonitoring();
       
+      // Automatic 24h per-user lock cleanup for stale drafts (single-use groups preserved)
+      this.startDraftLockCleanup();
+      
       // Inactivity monitoring disabled
       
       // Graceful shutdown
@@ -287,6 +290,36 @@ class EscrowBot {
     } catch (error) {
       console.error('Error checking deposits:', error);
     }
+  }
+
+  startDraftLockCleanup() {
+    // Every 30 minutes, mark stale managed-pool drafts (>24h) as completed to free user lock
+    setInterval(async () => {
+      try {
+        const Escrow = require('./models/Escrow');
+        const cutoff = new Date(Date.now() - (24 * 60 * 60 * 1000));
+        const staleDrafts = await Escrow.find({
+          assignedFromPool: true,
+          status: 'draft',
+          createdAt: { $lt: cutoff }
+        });
+
+        for (const draft of staleDrafts) {
+          try {
+            draft.status = 'completed';
+            await draft.save();
+          } catch (e) {
+            console.error('Error marking stale draft completed:', e);
+          }
+        }
+
+        if (staleDrafts.length) {
+          console.log(`🧹 Draft lock cleanup: freed ${staleDrafts.length} users (single-use groups preserved).`);
+        }
+      } catch (e) {
+        console.error('Draft lock cleanup error:', e);
+      }
+    }, 30 * 60 * 1000);
   }
 }
 

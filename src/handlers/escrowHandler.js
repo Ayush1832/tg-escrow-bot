@@ -11,11 +11,124 @@ module.exports = async (ctx) => {
     // If used in private chat, assign a managed group
     if (chatId > 0) {
       try {
+        // Simple in-memory anti-double-click lock (5 seconds)
+        if (!global.__escrowClickLocks) global.__escrowClickLocks = new Map();
+        const lastClickAt = global.__escrowClickLocks.get(userId) || 0;
+        if (Date.now() - lastClickAt < 5000) {
+          return ctx.reply('⏳ Please wait a few seconds before trying again.');
+        }
+        global.__escrowClickLocks.set(userId, Date.now());
+
+        // Check if user already has an active managed-pool escrow; if so, reuse invite link
+        const existingUserEscrow = await Escrow.findOne({
+          creatorId: userId,
+          assignedFromPool: true,
+          status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
+        });
+
+        if (existingUserEscrow) {
+          let inviteLink = existingUserEscrow.inviteLink;
+          let needsRegeneration = false;
+          
+          // Check if invite link exists and is not expired
+          if (!inviteLink) {
+            needsRegeneration = true;
+          } else {
+            // Check if invite link is expired (1 day = 24 hours)
+            const oneDayAgo = new Date(Date.now() - (24 * 60 * 60 * 1000));
+            if (existingUserEscrow.updatedAt && existingUserEscrow.updatedAt < oneDayAgo) {
+              needsRegeneration = true;
+            }
+          }
+          
+          if (needsRegeneration) {
+            try {
+              // Regenerate invite link if missing or expired
+              inviteLink = await GroupPoolService.generateInviteLink(existingUserEscrow.groupId, ctx.telegram);
+              existingUserEscrow.inviteLink = inviteLink;
+              existingUserEscrow.updatedAt = new Date();
+              await existingUserEscrow.save();
+            } catch (linkError) {
+              console.error('Error regenerating invite link:', linkError);
+              // If group is invalid, mark escrow as abandoned and allow new assignment
+              if (linkError.message.includes('chat not found') || linkError.message.includes('not a member')) {
+                existingUserEscrow.status = 'completed'; // Mark as completed to free up the user
+                await existingUserEscrow.save();
+                
+                // Try to release the group back to pool
+                try {
+                  await GroupPoolService.releaseGroup(existingUserEscrow.escrowId);
+                } catch (releaseError) {
+                  console.error('Error releasing invalid group:', releaseError);
+                }
+                
+                // Continue to create new escrow
+              } else {
+                throw linkError;
+              }
+            }
+          }
+
+          // If we still have a valid escrow, show the existing one
+          if (existingUserEscrow.status !== 'completed') {
+            const dmReuseText = `🤖 <b>Existing Escrow Group Found</b>
+
+📋 Escrow ID: <code>${existingUserEscrow.escrowId}</code>
+👥 Group: Assigned from managed pool
+🔗 Invite Link: <a href="${inviteLink}">Join Escrow Group</a>
+
+⚠️ <b>Note:</b> You currently have an active escrow. Please finish it before starting a new one.`;
+
+            await ctx.reply(dmReuseText, {
+              parse_mode: 'HTML',
+              disable_web_page_preview: true
+            });
+            return; // Do not assign another group
+          }
+        }
+
+        // Clean up abandoned escrows (draft status for more than 24 hours)
+        try {
+          const abandonedEscrows = await Escrow.find({
+            status: 'draft',
+            assignedFromPool: true,
+            createdAt: { $lt: new Date(Date.now() - (24 * 60 * 60 * 1000)) }
+          });
+          
+          for (const abandoned of abandonedEscrows) {
+            try {
+              await GroupPoolService.releaseGroup(abandoned.escrowId);
+              abandoned.status = 'completed';
+              await abandoned.save();
+            } catch (cleanupError) {
+              console.error('Error cleaning up abandoned escrow:', cleanupError);
+            }
+          }
+        } catch (cleanupError) {
+          console.error('Error during cleanup:', cleanupError);
+        }
+
         // Generate unique escrow ID
         const escrowId = `ESC${Date.now()}`;
         
-        // Assign a group from the managed pool
-        const assignedGroup = await GroupPoolService.assignGroup(escrowId);
+        // Assign a group from the managed pool with retry logic
+        let assignedGroup;
+        let retryCount = 0;
+        const maxRetries = 3;
+        
+        while (retryCount < maxRetries) {
+          try {
+            assignedGroup = await GroupPoolService.assignGroup(escrowId);
+            break;
+          } catch (assignError) {
+            retryCount++;
+            if (retryCount >= maxRetries) {
+              throw assignError;
+            }
+            // Wait 1 second before retry
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          }
+        }
         
         // Generate invite link for the assigned group
         const inviteLink = await GroupPoolService.generateInviteLink(assignedGroup.groupId, ctx.telegram);
@@ -23,8 +136,12 @@ module.exports = async (ctx) => {
         // Create new escrow with assigned group
         const newEscrow = new Escrow({
           escrowId,
+          creatorId: userId,
+          creatorUsername: ctx.from.username,
           groupId: assignedGroup.groupId,
-          status: 'draft'
+          assignedFromPool: true,
+          status: 'draft',
+          inviteLink
         });
         await newEscrow.save();
 
@@ -39,7 +156,7 @@ module.exports = async (ctx) => {
 
 ⚠️ <b>Important Notes:</b>
 - This invite link is limited to 2 members (buyer + seller)
-- Link expires in 7 days
+- Link expires in 1 day
 - Share this link with your trading partner
 - Both parties must join before starting the escrow
 
