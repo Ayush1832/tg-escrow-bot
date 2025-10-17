@@ -77,7 +77,7 @@ async function sendAdminDisputeNotification(ctx, escrow) {
     // Create invite link for the group
     let inviteLink;
     try {
-      const chatInviteLink = await ctx.bot.telegram.createChatInviteLink(escrow.groupId, {
+      const chatInviteLink = await ctx.telegram.createChatInviteLink(escrow.groupId, {
         member_limit: 1,
         expire_date: Math.floor(Date.now() / 1000) + (24 * 60 * 60) // 24 hours
       });
@@ -116,7 +116,7 @@ async function sendAdminDisputeNotification(ctx, escrow) {
     // Send notification to all admins
     for (const adminId of adminIds) {
       try {
-        await ctx.bot.telegram.sendMessage(adminId, adminMessage, {
+        await ctx.telegram.sendMessage(adminId, adminMessage, {
           parse_mode: 'Markdown',
           disable_web_page_preview: true
         });

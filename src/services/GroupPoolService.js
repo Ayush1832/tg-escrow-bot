@@ -200,7 +200,8 @@ class GroupPoolService {
       // Check if group already exists
       const existingGroup = await GroupPool.findOne({ groupId });
       if (existingGroup) {
-        throw new Error('Group already exists in pool');
+        // Idempotent: if it's already in pool, treat as success
+        return existingGroup;
       }
 
       const group = new GroupPool({

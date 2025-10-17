@@ -57,11 +57,12 @@ class BlockchainService {
         console.log(`  • ${contract.token} on ${contract.network}: ${contract.address}`);
       });
       
-      // Initialize with USDT on Sepolia for backward compatibility (if exists)
-      const entry = contracts.find(c => c.token === 'USDT' && c.network === 'SEPOLIA') || contracts[0];
+      // Initialize with the first available contract; actions use per-network wallets anyway
+      const entry = contracts[0];
       console.log(`✅ Initializing with: ${entry.token} on ${entry.network}`);
       
-      this.vault = new ethers.Contract(entry.address, ESCROW_VAULT_ABI, this.wallet);
+      const wallet = this.wallets[entry.network.toUpperCase()];
+      this.vault = new ethers.Contract(entry.address, ESCROW_VAULT_ABI, wallet);
       return entry.address;
     } catch (error) {
       console.error('Error initializing BlockchainService:', error);

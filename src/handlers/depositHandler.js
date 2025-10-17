@@ -133,9 +133,16 @@ Remember, once commands are used payment will be released, there is no revert!
 
     await ctx.reply(depositText, { 
       parse_mode: 'Markdown',
-      reply_markup: Markup.inlineKeyboard([
-        [Markup.button.callback('✅ I have deposited to escrow address', 'check_deposit')]
-      ]).reply_markup
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '✅ I have deposited to escrow address', callback_data: 'check_deposit' }
+          ],
+          [
+            { text: '📋 Copy Address', copy_text: { text: address } }
+          ]
+        ]
+      }
     });
 
     // Log event
