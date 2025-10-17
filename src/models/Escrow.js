@@ -43,7 +43,6 @@ const escrowSchema = new mongoose.Schema({
     type: Number,
     required: false
   },
-  conditions: String,
   buyerId: {
     type: Number,
     required: false

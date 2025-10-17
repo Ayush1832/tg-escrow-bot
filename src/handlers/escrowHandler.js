@@ -81,7 +81,14 @@ module.exports = async (ctx) => {
 
             await ctx.reply(dmReuseText, {
               parse_mode: 'HTML',
-              disable_web_page_preview: true
+              disable_web_page_preview: true,
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    { text: '📋 Copy Invite Link', copy_text: { text: inviteLink } }
+                  ]
+                ]
+              }
             });
             return; // Do not assign another group
           }
@@ -164,7 +171,14 @@ module.exports = async (ctx) => {
 
         await ctx.reply(dmText, { 
           parse_mode: 'HTML',
-          disable_web_page_preview: true
+          disable_web_page_preview: true,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '📋 Copy Invite Link', copy_text: { text: inviteLink } }
+              ]
+            ]
+          }
         });
 
         // Send welcome message to the assigned group

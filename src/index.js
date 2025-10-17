@@ -65,7 +65,6 @@ class EscrowBot {
         // Parse deal details from user message
         const qtyMatch = text.match(/Quantity\s*[-:]*\s*(\d+(?:\.\d+)?)/i);
         const rateMatch = text.match(/Rate\s*[-:]*\s*(\d+(?:\.\d+)?)/i);
-        const condMatch = text.match(/Conditions?\s*\(?.*\)?\s*[-:]*\s*([\s\S]+)/i);
         
         if (!qtyMatch || !rateMatch) {
           return ctx.reply('❌ Please provide at least Quantity and Rate in the format:\nQuantity - 10\nRate - 90');
@@ -73,7 +72,6 @@ class EscrowBot {
         
         escrow.quantity = Number(qtyMatch[1]);
         escrow.rate = Number(rateMatch[1]);
-        if (condMatch) escrow.conditions = condMatch[1].trim();
         escrow.status = 'draft';
         await escrow.save();
         
@@ -137,6 +135,74 @@ class EscrowBot {
 
     // Callback query handler
     this.bot.on('callback_query', callbackHandler);
+    
+    // Handle new members joining the group
+    this.bot.on('new_chat_members', async (ctx) => {
+      try {
+        const chatId = ctx.chat.id;
+        const newMembers = ctx.message.new_chat_members;
+        
+        // Find active escrow in this group
+        const escrow = await Escrow.findOne({
+          groupId: chatId.toString(),
+          status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
+        });
+        
+        if (!escrow) {
+          return; // No active escrow, no need to send message
+        }
+        
+        // Send welcome message for each new member
+        for (const member of newMembers) {
+          if (member.is_bot) continue; // Skip bots
+          
+          const welcomeText = `
+🎉 *Welcome to the Escrow Group!*
+
+📋 *Escrow ID:* ${escrow.escrowId}
+💰 *Token:* ${escrow.token} on ${escrow.chain}
+
+👥 *Current Status:*
+${escrow.status === 'draft' ? '📝 Setting up deal details' : 
+  escrow.status === 'awaiting_details' ? '📝 Awaiting deal details' :
+  escrow.status === 'awaiting_deposit' ? '⏳ Awaiting deposit' :
+  escrow.status === 'deposited' ? '✅ Deposit confirmed' :
+  escrow.status === 'in_fiat_transfer' ? '💸 Fiat transfer in progress' :
+  escrow.status === 'ready_to_release' ? '🚀 Ready to release' :
+  escrow.status === 'disputed' ? '⚠️ Under dispute' : '❓ Unknown'}
+
+📋 *Next Steps:*
+${escrow.status === 'draft' || escrow.status === 'awaiting_details' ? 
+  '1. Use /dd to set deal details (Quantity - Rate)\n2. Set your role with /seller or /buyer [address]\n3. Select token with /token' :
+  escrow.status === 'awaiting_deposit' ?
+  '1. Use /deposit to generate deposit address\n2. Send the agreed amount to the address' :
+  escrow.status === 'deposited' ?
+  '1. Complete fiat payment handshake\n2. Confirm receipt when ready' :
+  escrow.status === 'in_fiat_transfer' ?
+  '1. Complete fiat payment confirmation\n2. Funds will be released automatically' :
+  escrow.status === 'ready_to_release' ?
+  '1. Both parties confirm release/refund\n2. Transaction will execute' :
+  escrow.status === 'disputed' ?
+  '1. Admin will join within 24 hours\n2. Provide dispute details' : 'Contact admin'}
+
+💡 *Useful Commands:*
+• /menu - Show all commands
+• /dd - Set deal details
+• /seller [address] - Set seller address  
+• /buyer [address] - Set buyer address
+• /token - Select token and network
+• /deposit - Get deposit address
+• /dispute - Call administrator
+
+⚠️ *Important:* Make sure to agree on all terms before proceeding!
+          `;
+          
+          await ctx.reply(welcomeText, { parse_mode: 'Markdown' });
+        }
+      } catch (error) {
+        console.error('Error handling new chat members:', error);
+      }
+    });
     
     // Menu command
     this.bot.command('menu', (ctx) => {

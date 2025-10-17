@@ -29,14 +29,22 @@ module.exports = async (ctx) => {
 Hello there,
 Kindly tell deal details i.e.
 
-*Quantity* -
-*Rate* -
-*Conditions (if any)* -
-
 Remember without it disputes wouldn't be resolved. Once filled proceed with Specifications of the seller or buyer with /seller or /buyer [CRYPTO ADDRESS]
     `;
 
-    await ctx.reply(dealText, { parse_mode: 'Markdown' });
+    const templateText = `Quantity -
+Rate -`;
+
+    await ctx.reply(dealText, { 
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: 'Quantity -\nRate -', copy_text: { text: templateText } }
+          ]
+        ]
+      }
+    });
 
     // Set status to awaiting details and capture mode
     escrow.status = 'awaiting_details';
