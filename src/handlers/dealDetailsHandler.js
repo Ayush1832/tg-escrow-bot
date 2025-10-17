@@ -28,6 +28,8 @@ module.exports = async (ctx) => {
     const dealText = `
 Hello there,
 Kindly tell deal details i.e.
+Quantity -
+Rate -
 
 Remember without it disputes wouldn't be resolved. Once filled proceed with Specifications of the seller or buyer with /seller or /buyer [CRYPTO ADDRESS]
     `;

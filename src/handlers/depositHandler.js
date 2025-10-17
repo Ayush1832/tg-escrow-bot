@@ -100,7 +100,7 @@ ${buyerTag} | [${escrow.buyerId || 'N/A'}]
 ${escrow.buyerAddress ? `${escrow.buyerAddress} [${escrow.token}] [${escrow.chain}]` : ''}
 
 🟢 *ESCROW ADDRESS*
-${address} [${escrow.token}] [${escrow.chain}]
+[Click to copy: ${address}] [${escrow.token}] [${escrow.chain}]
 
 Seller ${sellerTag} Will Pay on the Escrow Address, And Click On Check Payment.
 
@@ -124,10 +124,6 @@ Amount to be Received: [$${amountDisplay}]
 • If a wrong token is sent, contact admin. Funds may require a manual sweep.
 ⚠️ *IMPORTANT:* Make sure to finalise and agree each-others terms before depositing.
 
-*Useful commands:*
-🗒 /release = Always pays the buyer.
-🗒 /refund = Always pays the seller.
-
 Remember, once commands are used payment will be released, there is no revert!
     `;
 
@@ -139,7 +135,7 @@ Remember, once commands are used payment will be released, there is no revert!
             { text: '✅ I have deposited to escrow address', callback_data: 'check_deposit' }
           ],
           [
-            { text: '📋 Copy Address', copy_text: { text: address } }
+            { text: `📋 ${address}`, copy_text: { text: address } }
           ]
         ]
       }

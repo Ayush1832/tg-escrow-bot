@@ -75,7 +75,7 @@ class EscrowBot {
         escrow.status = 'draft';
         await escrow.save();
         
-        await ctx.reply('✅ Deal details saved. Now set /seller and /buyer addresses.');
+        await ctx.reply('✅ Deal details saved. Now set /seller and /buyer addresses.\n\n📋 Examples:\n• /seller 0x1234567890abcdef1234567890abcdef12345678\n• /buyer 0xabcdef1234567890abcdef1234567890abcdef12');
         return; // Don't continue to next handlers
       } catch (e) {
         console.error('deal details parse error', e);
@@ -160,7 +160,6 @@ class EscrowBot {
 🎉 *Welcome to the Escrow Group!*
 
 📋 *Escrow ID:* ${escrow.escrowId}
-💰 *Token:* ${escrow.token} on ${escrow.chain}
 
 👥 *Current Status:*
 ${escrow.status === 'draft' ? '📝 Setting up deal details' : 
@@ -192,7 +191,6 @@ ${escrow.status === 'draft' || escrow.status === 'awaiting_details' ?
 • /buyer [address] - Set buyer address
 • /token - Select token and network
 • /deposit - Get deposit address
-• /dispute - Call administrator
 
 ⚠️ *Important:* Make sure to agree on all terms before proceeding!
           `;
@@ -217,9 +215,6 @@ ${escrow.status === 'draft' || escrow.status === 'awaiting_details' ?
 /buyer [address] - Set buyer address
 /token - Select token and network
 /deposit - Get deposit address
-/release [amount] - Release funds
-/refund [amount] - Refund to seller
-/dispute - Call administrator
 
 💡 *Tips:*
 - Use /dd to set deal details first

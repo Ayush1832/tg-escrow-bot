@@ -199,32 +199,78 @@ class BlockchainService {
       const toAddrLc = toAddress.toLowerCase();
       const iface = new ethers.Interface(ERC20_ABI);
 
-      // Default: scan last ~10,000 blocks if fromBlock not provided
+      // Get latest block and calculate start block
       const latest = await provider.getBlockNumber();
-      const start = Math.max(0, (fromBlock || (latest - 10000)));
+      const start = fromBlock || Math.max(0, latest - 2000); // Reduced to 2000 blocks max
+      
+      // If range is too large, scan in chunks of 500 blocks
+      const maxRange = 500;
+      const totalRange = latest - start;
+      
+      if (totalRange <= maxRange) {
+        // Small range, scan directly
+        const filter = {
+          address: tokenAddress,
+          fromBlock: start,
+          toBlock: latest,
+          topics: [
+            iface.getEvent('Transfer').topicHash,
+            null,
+            ethers.zeroPadValue(toAddrLc, 32)
+          ]
+        };
 
-      const filter = {
-        address: tokenAddress,
-        fromBlock: start,
-        toBlock: latest,
-        topics: [
-          iface.getEvent('Transfer').topicHash,
-          null,
-          ethers.zeroPadValue(toAddrLc, 32)
-        ]
-      };
+        const logs = await provider.getLogs(filter);
+        return logs.map((log) => {
+          const parsed = iface.parseLog({ topics: log.topics, data: log.data });
+          const from = parsed.args[0];
+          const to = parsed.args[1];
+          const value = parsed.args[2];
+          const decimals = this.getTokenDecimals(token, network);
+          const valueDecimal = Number(ethers.formatUnits(value, decimals));
+          return { from, to, valueDecimal };
+        });
+      } else {
+        // Large range, scan in chunks
+        const allLogs = [];
+        let currentStart = start;
+        
+        while (currentStart < latest) {
+          const currentEnd = Math.min(currentStart + maxRange, latest);
+          
+          try {
+            const filter = {
+              address: tokenAddress,
+              fromBlock: currentStart,
+              toBlock: currentEnd,
+              topics: [
+                iface.getEvent('Transfer').topicHash,
+                null,
+                ethers.zeroPadValue(toAddrLc, 32)
+              ]
+            };
 
-      const logs = await provider.getLogs(filter);
-      return logs.map((log) => {
-        const parsed = iface.parseLog({ topics: log.topics, data: log.data });
-        const from = parsed.args[0];
-        const to = parsed.args[1];
-        const value = parsed.args[2];
-        // Use correct decimals for the token
-        const decimals = this.getTokenDecimals(token, network);
-        const valueDecimal = Number(ethers.formatUnits(value, decimals));
-        return { from, to, valueDecimal };
-      });
+            const logs = await provider.getLogs(filter);
+            allLogs.push(...logs);
+            
+            currentStart = currentEnd + 1;
+          } catch (chunkError) {
+            console.error(`Error scanning blocks ${currentStart}-${currentEnd}:`, chunkError);
+            // Continue with next chunk
+            currentStart = currentEnd + 1;
+          }
+        }
+        
+        return allLogs.map((log) => {
+          const parsed = iface.parseLog({ topics: log.topics, data: log.data });
+          const from = parsed.args[0];
+          const to = parsed.args[1];
+          const value = parsed.args[2];
+          const decimals = this.getTokenDecimals(token, network);
+          const valueDecimal = Number(ethers.formatUnits(value, decimals));
+          return { from, to, valueDecimal };
+        });
+      }
     } catch (error) {
       console.error('RPC fallback error fetching token transfers:', error);
       return [];

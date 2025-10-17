@@ -31,9 +31,6 @@ module.exports = async (ctx) => {
 /buyer [address] - Set buyer address
 /token - Select token and network
 /deposit - Get deposit address
-/release [amount] - Release funds
-/refund [amount] - Refund to seller
-/dispute - Call administrator
 
 💡 *Tips:*
 - Use /dd to set deal details first
