@@ -72,8 +72,7 @@ class GroupPoolService {
       const chatId = String(groupId);
       try {
         inviteLinkData = await telegram.createChatInviteLink(chatId, {
-          member_limit: 2,
-          expire_date: Math.floor(Date.now() / 1000) + (6 * 60 * 60) // 6 hours
+          member_limit: 2
         });
       } catch (chatError) {
         // Handle migration: group upgraded to supergroup → use migrate_to_chat_id
@@ -87,8 +86,7 @@ class GroupPoolService {
           await group.save();
           try {
             inviteLinkData = await telegram.createChatInviteLink(migrateId, {
-              member_limit: 2,
-              expire_date: Math.floor(Date.now() / 1000) + (6 * 60 * 60)
+              member_limit: 2
             });
           } catch (retryErr) {
             console.error('Error generating invite link after migration retry:', retryErr);
@@ -105,7 +103,6 @@ class GroupPoolService {
 
       // Update group with invite link
       group.inviteLink = inviteLinkData.invite_link;
-      group.inviteLinkExpiry = new Date(Date.now() + (6 * 60 * 60 * 1000));
       await group.save();
 
       return inviteLinkData.invite_link;
@@ -133,7 +130,6 @@ class GroupPoolService {
       group.status = 'completed';
       group.completedAt = new Date();
       group.inviteLink = null; // Clear invite link
-      group.inviteLinkExpiry = null;
       group.assignedEscrowId = null; // Clear assignment
       group.assignedAt = null;
       await group.save();
@@ -159,7 +155,6 @@ class GroupPoolService {
           assignedAt: null,
           completedAt: null,
           inviteLink: null,
-          inviteLinkExpiry: null
         }
       );
 
@@ -280,7 +275,6 @@ class GroupPoolService {
           assignedAt: null,
           completedAt: null,
           inviteLink: null,
-          inviteLinkExpiry: null
         }
       );
 
@@ -304,7 +298,6 @@ class GroupPoolService {
           assignedEscrowId: null,
           assignedAt: null,
           inviteLink: null,
-          inviteLinkExpiry: null
         }
       );
 
@@ -344,7 +337,6 @@ class GroupPoolService {
             group.assignedEscrowId = null;
             group.assignedAt = null;
             group.inviteLink = null;
-            group.inviteLinkExpiry = null;
             await group.save();
             
             cleanedCount++;

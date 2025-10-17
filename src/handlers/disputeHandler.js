@@ -78,8 +78,7 @@ async function sendAdminDisputeNotification(ctx, escrow) {
     let inviteLink;
     try {
       const chatInviteLink = await ctx.telegram.createChatInviteLink(escrow.groupId, {
-        member_limit: 1,
-        expire_date: Math.floor(Date.now() / 1000) + (24 * 60 * 60) // 24 hours
+        member_limit: 1
       });
       inviteLink = chatInviteLink.invite_link;
     } catch (linkError) {
