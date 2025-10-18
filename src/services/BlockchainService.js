@@ -45,6 +45,10 @@ class BlockchainService {
 
   async initialize() {
     try {
+      // Get the desired fee percentage from environment
+      const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
+      console.log(`🎯 Looking for contracts with ${desiredFeePercent}% fee (${desiredFeePercent * 100} basis points)`);
+      
       // Show all available EscrowVault contracts
       const contracts = await ContractModel.find({ name: 'EscrowVault' });
       if (contracts.length === 0) {
@@ -54,16 +58,28 @@ class BlockchainService {
       
       console.log('📋 Available EscrowVault contracts:');
       contracts.forEach(contract => {
-        console.log(`  • ${contract.token} on ${contract.network}: ${contract.address}`);
+        const feeDisplay = contract.feePercent ? `${contract.feePercent}%` : 'Unknown';
+        console.log(`  • ${contract.token} on ${contract.network}: ${contract.address} (Fee: ${feeDisplay})`);
       });
       
-      // Initialize with the first available contract; actions use per-network wallets anyway
-      const entry = contracts[0];
-      console.log(`✅ Initializing with: ${entry.token} on ${entry.network}`);
+      // Find contract with matching fee percentage
+      const matchingContract = contracts.find(contract => 
+        contract.feePercent === desiredFeePercent
+      );
       
-      const wallet = this.wallets[entry.network.toUpperCase()];
-      this.vault = new ethers.Contract(entry.address, ESCROW_VAULT_ABI, wallet);
-      return entry.address;
+      if (!matchingContract) {
+        console.log(`❌ No contract found with ${desiredFeePercent}% fee`);
+        console.log('Available fee percentages:');
+        const uniqueFees = [...new Set(contracts.map(c => c.feePercent))];
+        uniqueFees.forEach(fee => console.log(`  • ${fee}%`));
+        throw new Error(`No EscrowVault contract found with ${desiredFeePercent}% fee. Please deploy a contract with this fee percentage.`);
+      }
+      
+      console.log(`✅ Using contract: ${matchingContract.token} on ${matchingContract.network} (${matchingContract.feePercent}% fee)`);
+      
+      const wallet = this.wallets[matchingContract.network.toUpperCase()];
+      this.vault = new ethers.Contract(matchingContract.address, ESCROW_VAULT_ABI, wallet);
+      return matchingContract.address;
     } catch (error) {
       console.error('Error initializing BlockchainService:', error);
       throw error;
@@ -72,13 +88,15 @@ class BlockchainService {
 
   async getVaultForToken(token, network) {
     try {
+      const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
       const entry = await ContractModel.findOne({ 
         name: 'EscrowVault',
         token: token.toUpperCase(),
-        network: network.toUpperCase()
+        network: network.toUpperCase(),
+        feePercent: desiredFeePercent
       });
       if (!entry) {
-        throw new Error(`EscrowVault not found for ${token} on ${network}`);
+        throw new Error(`EscrowVault not found for ${token} on ${network} with ${desiredFeePercent}% fee`);
       }
       const wallet = this.wallets[network.toUpperCase()];
       return new ethers.Contract(entry.address, ESCROW_VAULT_ABI, wallet);
@@ -416,10 +434,12 @@ class BlockchainService {
    */
   async getEscrowContractAddress(token, network) {
     try {
+      const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
       const contract = await ContractModel.findOne({
         name: 'EscrowVault',
         token: token.toUpperCase(),
-        network: network.toUpperCase()
+        network: network.toUpperCase(),
+        feePercent: desiredFeePercent
       });
 
       return contract ? contract.address : null;

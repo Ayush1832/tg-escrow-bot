@@ -11,8 +11,7 @@ async function main() {
     BUSD_BSC,
     FEE_WALLET_1,
     FEE_WALLET_2,
-    FEE_WALLET_3,
-    ESCROW_FEE_BPS
+    FEE_WALLET_3
   } = process.env;
 
   if (!MONGODB_URI) throw new Error('MONGODB_URI missing');
@@ -21,7 +20,7 @@ async function main() {
 
   await mongoose.connect(MONGODB_URI);
 
-  const feeBps = Number(ESCROW_FEE_BPS || 100); // default 1%
+  const feePercent = Number(process.env.ESCROW_FEE_PERCENT || 0); // default 0%
   const w1 = FEE_WALLET_1;
   const w2 = FEE_WALLET_2 || FEE_WALLET_1;
   const w3 = FEE_WALLET_3 || FEE_WALLET_1;
@@ -32,7 +31,7 @@ async function main() {
     w1,
     w2,
     w3,
-    feeBps
+    feePercent * 100 // Convert percentage to basis points for contract
   );
   await contract.waitForDeployment();
   const address = await contract.getAddress();
@@ -46,12 +45,13 @@ async function main() {
   }
 
   await ContractModel.updateOne(
-    { name: 'EscrowVault', token: 'BUSD', network: 'BSC' },
+    { name: 'EscrowVault', token: 'BUSD', network: 'BSC', feePercent: feeBps },
     { 
       name: 'EscrowVault', 
       token: 'BUSD',
       network: 'BSC',
       address, 
+      feePercent: feePercent,
       deployedAt: new Date() 
     },
     { upsert: true }

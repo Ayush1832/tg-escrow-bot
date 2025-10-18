@@ -42,7 +42,7 @@ module.exports = {
 
   // Escrow Configuration
   ESCROW_FEE_PERCENT: Number(process.env.ESCROW_FEE_PERCENT || 1.0),
-  ESCROW_FEE_BPS: Number(process.env.ESCROW_FEE_BPS || 100),
+
   MIN_TRADE_AMOUNT: Number(process.env.MIN_TRADE_AMOUNT || 1),
   MAX_TRADE_AMOUNT: Number(process.env.MAX_TRADE_AMOUNT || 10000),
   DEPOSIT_ADDRESS_TTL_MINUTES: Number(process.env.DEPOSIT_ADDRESS_TTL_MINUTES || 20),
