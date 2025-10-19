@@ -1,20 +1,8 @@
 const { Markup } = require('telegraf');
 const Escrow = require('../models/Escrow');
 const Event = require('../models/Event');
-
-// Define supported tokens and their networks
-const SUPPORTED_TOKENS = {
-  USDC: ['BSC[BEP20]', 'SOL'],
-  BUSD: ['BSC[BEP20]'],
-  ETH: ['ETH'],
-  BTC: ['BTC', 'BSC[BEP20]'],
-  TRX: ['TRON[TRC20]'],
-  SOL: ['SOL'],
-  LTC: ['LTC'],
-  BNB: ['BSC[BEP20]'],
-  DOGE: ['DOGE', 'BSC[BEP20]'],
-  USDT: ['BSC[BEP20]', 'SOL', 'TRON[TRC20]', 'SEPOLIA']
-};
+const Contract = require('../models/Contract');
+const config = require('../../config');
 
 module.exports = async (ctx) => {
   try {
@@ -40,19 +28,38 @@ module.exports = async (ctx) => {
       return ctx.reply('❌ Please set both buyer and seller addresses first using /buyer and /seller commands.');
     }
 
+    // Get available tokens from database based on current fee percentage
+    const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
+    const availableContracts = await Contract.find({
+      name: 'EscrowVault',
+      feePercent: desiredFeePercent
+    });
+    
+    if (availableContracts.length === 0) {
+      return ctx.reply(`❌ No escrow contracts available with ${desiredFeePercent}% fee. Please contact admin to deploy contracts.`);
+    }
+    
+    // Get unique tokens from available contracts
+    const availableTokens = [...new Set(availableContracts.map(contract => contract.token))];
+    
+    if (availableTokens.length === 0) {
+      return ctx.reply('❌ No tokens available. Please contact admin to deploy contracts.');
+    }
+    
     // Show token selection keyboard
     const tokenButtons = [];
-    const tokens = Object.keys(SUPPORTED_TOKENS);
     
     // Create 3x3 grid for tokens (except USDT which goes on bottom row)
-    const gridTokens = tokens.filter(t => t !== 'USDT');
+    const gridTokens = availableTokens.filter(t => t !== 'USDT');
     for (let i = 0; i < gridTokens.length; i += 3) {
       const row = gridTokens.slice(i, i + 3);
       tokenButtons.push(row.map(token => Markup.button.callback(token, `select_token_${token}`)));
     }
     
-    // Add USDT on separate row at bottom
-    tokenButtons.push([Markup.button.callback('USDT', 'select_token_USDT')]);
+    // Add USDT on separate row at bottom if available
+    if (availableTokens.includes('USDT')) {
+      tokenButtons.push([Markup.button.callback('USDT', 'select_token_USDT')]);
+    }
 
     const tokenSelectionText = `
 choose token from the list below

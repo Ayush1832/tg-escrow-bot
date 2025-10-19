@@ -293,23 +293,25 @@ Thank you for using @Easy_Escrow_Bot 🙌
       const token = callbackData.split('_')[2];
       await ctx.answerCbQuery(`Selected ${token}`);
       
-      // Show network selection for this token
-      const SUPPORTED_TOKENS = {
-        USDC: ['BSC[BEP20]', 'SOL'],
-        BUSD: ['BSC[BEP20]'],
-        ETH: ['ETH'],
-        BTC: ['BTC', 'BSC[BEP20]'],
-        TRX: ['TRON[TRC20]'],
-        SOL: ['SOL'],
-        LTC: ['LTC'],
-        BNB: ['BSC[BEP20]'],
-        DOGE: ['DOGE', 'BSC[BEP20]'],
-        USDT: ['BSC[BEP20]', 'SOL', 'TRON[TRC20]', 'SEPOLIA']
-      };
+      // Get available networks for this token from database
+      const Contract = require('../models/Contract');
+      const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
       
-      const networks = SUPPORTED_TOKENS[token];
-      if (!networks) {
-        return ctx.reply('❌ Token not supported.');
+      const availableContracts = await Contract.find({
+        name: 'EscrowVault',
+        token: token,
+        feePercent: desiredFeePercent
+      });
+      
+      if (availableContracts.length === 0) {
+        return ctx.reply(`❌ No escrow contracts available for ${token} with ${desiredFeePercent}% fee. Please contact admin to deploy the contract.`);
+      }
+      
+      // Get unique networks from available contracts
+      const networks = [...new Set(availableContracts.map(contract => contract.network))];
+      
+      if (networks.length === 0) {
+        return ctx.reply(`❌ No networks available for ${token}. Please contact admin to deploy contracts.`);
       }
       
       const networkButtons = [];
@@ -352,16 +354,18 @@ choose network from the list below for ${token} 00:00
         return ctx.reply('❌ No active escrow found.');
       }
       
-      // Check if escrow contract exists for this token-network pair
+      // Check if escrow contract exists for this token-network pair with correct fee percentage
       const Contract = require('../models/Contract');
+      const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
       const contract = await Contract.findOne({
         name: 'EscrowVault',
         token: token,
-        network: network.toUpperCase()
+        network: network.toUpperCase(),
+        feePercent: desiredFeePercent
       });
       
       if (!contract) {
-        return ctx.reply(`❌ Escrow contract not deployed for ${token} on ${network}. Please contact admin to deploy the contract first.`);
+        return ctx.reply(`❌ Escrow contract not deployed for ${token} on ${network} with ${desiredFeePercent}% fee. Please contact admin to deploy the contract first.`);
       }
       
       // Update escrow with selected token and network
