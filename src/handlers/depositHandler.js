@@ -34,10 +34,12 @@ module.exports = async (ctx) => {
     // Generate deposit address
     // Use on-chain vault address as deposit address for the selected token-network pair
     const Contract = require('../models/Contract');
+    const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
     const vault = await Contract.findOne({ 
       name: 'EscrowVault',
       token: escrow.token,
-      network: escrow.chain.toUpperCase()
+      network: escrow.chain.toUpperCase(),
+      feePercent: desiredFeePercent
     });
     if (!vault) {
       return ctx.reply(`❌ Escrow vault not deployed for ${escrow.token} on ${escrow.chain}. Please contact admin to deploy the contract first.`);

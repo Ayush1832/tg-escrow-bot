@@ -26,7 +26,7 @@ async function main() {
     console.log('❌ No contracts found');
   } else {
     contracts.forEach((contract, index) => {
-      const feeDisplay = contract.feePercent ? `${contract.feePercent}%` : 'Unknown';
+      const feeDisplay = contract.feePercent !== undefined && contract.feePercent !== null ? `${contract.feePercent}%` : 'Unknown';
       console.log(`${index + 1}. ${contract.token} on ${contract.network}`);
       console.log(`   Address: ${contract.address}`);
       console.log(`   Fee: ${feeDisplay}`);
