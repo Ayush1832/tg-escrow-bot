@@ -95,11 +95,11 @@ Note: The default fee is ${config.ESCROW_FEE_PERCENT}%, which is applied when fu
 
 ⚡️ *SELLER*
 ${sellerTag} | [${escrow.sellerId || 'N/A'}]
-${escrow.sellerAddress ? `${escrow.sellerAddress} [${escrow.token}] [${escrow.chain}]` : ''}
+${escrow.sellerAddress || ''}
 
 ⚡️ *BUYER*
 ${buyerTag} | [${escrow.buyerId || 'N/A'}]
-${escrow.buyerAddress ? `${escrow.buyerAddress} [${escrow.token}] [${escrow.chain}]` : ''}
+${escrow.buyerAddress || ''}
 
 🟢 *ESCROW ADDRESS*
 [Click to copy: ${address}] [${escrow.token}] [${escrow.chain}]

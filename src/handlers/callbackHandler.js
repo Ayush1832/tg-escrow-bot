@@ -329,7 +329,7 @@ Thank you for using @Easy_Escrow_Bot 🙌
 ✅ *CRYPTO*
 ${token}
 
-choose network from the list below for ${token} 00:00
+choose network from the list below for ${token} 
       `;
       
       await ctx.reply(networkSelectionText, {
@@ -395,11 +395,11 @@ choose network from the list below for ${token} 00:00
 
 ⚡️ *SELLER*
 ${sellerTag} | [${escrow.sellerId}]
-${escrow.sellerAddress} [${token}] [${network}]
+${escrow.sellerAddress}
 
 ⚡️ *BUYER*
 ${buyerTag} | [${escrow.buyerId}]
-${escrow.buyerAddress} [${token}] [${network}]
+${escrow.buyerAddress}
 
 ⏰ Trade Start Time: ${new Date().toLocaleString('en-GB', { 
         day: '2-digit', 
