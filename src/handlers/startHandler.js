@@ -5,10 +5,10 @@ const path = require('path');
 
 module.exports = async (ctx) => {
   const welcomeText = `
-💫 *@Easy_Escrow_Bot* 💫
+💫 *@mm_escrow_bot* 💫
 Your Trustworthy Telegram Escrow Service
 
-Welcome to @Easy_Escrow_Bot. This bot provides a reliable escrow service for your transactions on Telegram.
+Welcome to @mm_escrow_bot. This bot provides a reliable escrow service for your transactions on Telegram.
 Avoid scams, your funds are safeguarded throughout your deals. If you run into any issues, simply type /dispute and an arbitrator will join the group chat within 24 hours.
 
 🎟 *ESCROW FEE:*

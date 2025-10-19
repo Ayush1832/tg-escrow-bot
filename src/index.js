@@ -205,7 +205,7 @@ ${escrow.status === 'draft' || escrow.status === 'awaiting_details' ?
     // Menu command
     this.bot.command('menu', (ctx) => {
       const menuText = `
-🤖 *Easy Escrow Bot Menu*
+🤖 *MM Escrow Bot Menu*
 
 📋 *Available Commands:*
 /start - Start the bot

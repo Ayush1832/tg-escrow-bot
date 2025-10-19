@@ -21,7 +21,7 @@ module.exports = async (ctx) => {
     } else if (callbackData === 'show_menu') {
       await ctx.answerCbQuery('Showing menu...');
       const menuText = `
-🤖 *Easy Escrow Bot Menu*
+🤖 *MM Escrow Bot Menu*
 
 📋 *Available Commands:*
 /start - Start the bot
@@ -270,9 +270,9 @@ module.exports = async (ctx) => {
 ${netAmount.toFixed(5)} ${escrow.token} [$${netAmount.toFixed(2)}] 💸 + NETWORK FEE has been ${action === 'release' ? 'released' : 'refunded'} to the ${action === 'release' ? 'Buyer' : 'Seller'}'s address! 🚀
 
 Approved By: @${ctx.from.username} | [${userId}]
-Thank you for using @Easy_Escrow_Bot 🙌
+Thank you for using @mm_escrow_bot 🙌
 
-@${ctx.from.username}, if you liked the bot please leave a good review about the bot and use command /vouch in reply to the review, and please also mention @Easy_Escrow_Bot in your vouch.
+@${ctx.from.username}, if you liked the bot please leave a good review about the bot and use command /vouch in reply to the review, and please also mention @mm_escrow_bot in your vouch.
           `;
 
           await ctx.reply(successText);
