@@ -45,7 +45,7 @@ async function adminDashboard(ctx) {
     message += `• \`/admin_resolve_refund <escrowId>\` - Refund to seller\n`;
     // Inactivity commands removed
 
-    await ctx.reply(message, { parse_mode: 'Markdown' });
+    await ctx.reply(message);
 
   } catch (error) {
     console.error('Error in admin dashboard:', error);
@@ -319,7 +319,7 @@ async function adminGroupPool(ctx) {
 • \`/admin_pool_delete_all\` - Delete all groups from pool
     `;
 
-    await ctx.reply(message, { parse_mode: 'Markdown' });
+    await ctx.reply(message);
 
   } catch (error) {
     console.error('Error in admin group pool:', error);
@@ -389,7 +389,7 @@ async function adminPoolList(ctx) {
       message += 'No groups in pool.';
     }
 
-    await ctx.reply(message, { parse_mode: 'Markdown' });
+    await ctx.reply(message);
 
   } catch (error) {
     console.error('Error listing groups:', error);

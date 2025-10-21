@@ -5,7 +5,7 @@ const contractSchema = new mongoose.Schema({
   token: { type: String, required: true }, // e.g., "USDT"
   network: { type: String, required: true }, // e.g., "SEPOLIA"
   address: { type: String, required: true },
-  feePercent: { type: Number, required: true, default: 0 }, // Fee percentage in basis points (100 = 1%)
+  feePercent: { type: Number, required: true, default: 0 }, // Fee percentage (1 = 1%)
   deployedAt: { type: Date, default: Date.now }
 });
 

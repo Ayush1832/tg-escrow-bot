@@ -8,8 +8,8 @@ module.exports = async (ctx) => {
 💫 *@mm_escrow_bot* 💫
 Your Trustworthy Telegram Escrow Service
 
-Welcome to @mm_escrow_bot. This bot provides a reliable escrow service for your transactions on Telegram.
-Avoid scams, your funds are safeguarded throughout your deals. If you run into any issues, simply type /dispute and an arbitrator will join the group chat within 24 hours.
+Welcome to MM escrow. This bot provides a reliable escrow service for your transactions on Telegram.
+Avoid scams, your funds are safeguarded throughout your deals.
 
 🔐 Proceed with confidence — your trust, security, and satisfaction are our top priorities.  
 
@@ -18,12 +18,24 @@ ${config.ESCROW_FEE_PERCENT}% Flat
 
 ⚠️ *IMPORTANT* - Make sure coin is same of Buyer and Seller else you may loose your coin.
 
-💡 Type /menu to summon a menu with all bots features
+🌐 Please choose how you'd like to proceed below: 👇
   `;
 
   const keyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('🚀 Start New Escrow', 'start_escrow')],
-    [Markup.button.callback('📋 Show Menu', 'show_menu')]
+    [
+      Markup.button.callback('✅ Start Escrow', 'start_escrow'),
+      Markup.button.callback('👤 My Escrows', 'my_escrows')
+    ],
+    [
+      Markup.button.callback('🤖 Help', 'help'),
+      Markup.button.callback('📜 Terms', 'terms')
+    ],
+    [
+      Markup.button.callback('❓ How Escrow Works', 'how_escrow_works')
+    ],
+    [
+      Markup.button.url('📢 Updates & Vouches ↗️', 'https://t.me/oftenly')
+    ]
   ]).reply_markup;
 
   const localBannerPath = path.join(process.cwd(), 'public', 'images', 'logo.jpg');
@@ -32,20 +44,17 @@ ${config.ESCROW_FEE_PERCENT}% Flat
     if (fs.existsSync(localBannerPath)) {
       await ctx.replyWithPhoto({ source: fs.createReadStream(localBannerPath) }, {
         caption: welcomeText,
-        parse_mode: 'Markdown',
         reply_markup: keyboard
       });
     } else {
       // Fallback to text-only message
       await ctx.reply(welcomeText, {
-        parse_mode: 'Markdown',
         reply_markup: keyboard
       });
     }
   } catch (err) {
     // If sending photo fails for any reason, fallback to text message
     await ctx.reply(welcomeText, {
-      parse_mode: 'Markdown',
       reply_markup: keyboard
     });
   }

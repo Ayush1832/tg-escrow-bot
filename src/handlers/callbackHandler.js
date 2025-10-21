@@ -37,7 +37,7 @@ module.exports = async (ctx) => {
 - Make sure both parties confirm their roles
 - Always verify addresses before depositing
       `;
-      return ctx.reply(menuText, { parse_mode: 'Markdown' });
+      return ctx.reply(menuText);
     } else if (callbackData === 'check_deposit') {
       await ctx.answerCbQuery('Checking for your deposit...');
       const chatId = ctx.chat.id;
@@ -289,6 +289,66 @@ Thank you for using @mm_escrow_bot 🙌
     } else if (callbackData.startsWith('reject_')) {
       await ctx.answerCbQuery('❌ Transaction rejected');
       await ctx.reply('❌ Transaction has been rejected by one of the parties.');
+    } else if (callbackData === 'my_escrows') {
+      await ctx.answerCbQuery('Loading your escrows...');
+      await handleMyEscrows(ctx);
+    } else if (callbackData === 'help') {
+      await ctx.answerCbQuery('Showing help...');
+      await handleHelp(ctx);
+    } else if (callbackData === 'terms') {
+      await ctx.answerCbQuery('Showing terms...');
+      await handleTerms(ctx);
+    } else if (callbackData === 'how_escrow_works') {
+      await ctx.answerCbQuery('Showing guide...');
+      await handleHowEscrowWorks(ctx);
+    } else if (callbackData.startsWith('filter_')) {
+      await ctx.answerCbQuery('Filtering escrows...');
+      const filter = callbackData.split('_')[1];
+      await handleMyEscrows(ctx, filter);
+    } else if (callbackData === 'back_to_start') {
+      await ctx.answerCbQuery('Returning to main menu...');
+      // Send the start message directly to avoid circular require
+      const welcomeText = `
+💫 *@mm_escrow_bot* 💫
+Your Trustworthy Telegram Escrow Service
+
+Welcome to MM escrow. This bot provides a reliable escrow service for your transactions on Telegram.
+Avoid scams, your funds are safeguarded throughout your deals.
+
+🔐 Proceed with confidence — your trust, security, and satisfaction are our top priorities.  
+
+🎟 *ESCROW FEE:*
+${config.ESCROW_FEE_PERCENT}% Flat
+
+⚠️ *IMPORTANT* - Make sure coin is same of Buyer and Seller else you may loose your coin.
+
+🌐 Please choose how you'd like to proceed below: 👇
+      `;
+
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('✅ Start Escrow', 'start_escrow'),
+          Markup.button.callback('👤 My Escrows', 'my_escrows')
+        ],
+        [
+          Markup.button.callback('🤖 Help', 'help'),
+          Markup.button.callback('📜 Terms', 'terms')
+        ],
+        [
+          Markup.button.callback('❓ How Escrow Works', 'how_escrow_works')
+        ],
+        [
+          Markup.button.url('📢 Updates & Vouches ↗️', 'https://t.me/oftenly')
+        ]
+      ]).reply_markup;
+
+      await ctx.replyWithPhoto(
+        { source: 'public/images/logo.jpg' },
+        {
+          caption: welcomeText,
+          reply_markup: keyboard
+        }
+      );
     } else if (callbackData.startsWith('select_token_')) {
       const token = callbackData.split('_')[2];
       await ctx.answerCbQuery(`Selected ${token}`);
@@ -387,7 +447,7 @@ choose network from the list below for ${token}
 ✅ ${network} NETWORK
       `;
       
-      await ctx.reply(declarationText, { parse_mode: 'Markdown' });
+      await ctx.reply(declarationText);
       
       // Get transaction information
       const transactionText = `
@@ -415,7 +475,7 @@ ${escrow.buyerAddress}
 🗒 Please use /deposit command to generate a deposit address for your trade.
       `;
       
-      await ctx.reply(transactionText, { parse_mode: 'Markdown' });
+      await ctx.reply(transactionText);
       
       // Log event
       await new Event({
@@ -447,3 +507,241 @@ ${escrow.buyerAddress}
     }
   }
 };
+
+// Helper function to handle My Escrows
+async function handleMyEscrows(ctx, filter = 'all') {
+  try {
+    const userId = ctx.from.id;
+    
+    // Get all escrows where user is involved (as buyer or seller)
+    const userEscrows = await Escrow.find({
+      $or: [
+        { buyerId: userId },
+        { sellerId: userId },
+        { creatorId: userId }
+      ]
+    }).sort({ createdAt: -1 });
+
+    // Apply filter
+    let filteredEscrows = userEscrows;
+    let filterTitle = 'All Escrows';
+
+    if (filter === 'active') {
+      filteredEscrows = userEscrows.filter(e => ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'].includes(e.status));
+      filterTitle = 'Active Escrows';
+    } else if (filter === 'completed') {
+      filteredEscrows = userEscrows.filter(e => e.status === 'completed');
+      filterTitle = 'Completed Escrows';
+    } else if (filter === 'pending') {
+      filteredEscrows = userEscrows.filter(e => ['draft', 'awaiting_details'].includes(e.status));
+      filterTitle = 'Pending Escrows';
+    } else if (filter === 'disputed') {
+      filteredEscrows = userEscrows.filter(e => e.status === 'disputed');
+      filterTitle = 'Disputed Escrows';
+    }
+
+    // Calculate statistics
+    const totalEscrows = userEscrows.length;
+    const totalWorth = userEscrows.reduce((sum, escrow) => {
+      // Use confirmedAmount if available, otherwise depositAmount, otherwise 0
+      const amount = escrow.confirmedAmount || escrow.depositAmount || 0;
+      return sum + (parseFloat(amount) || 0);
+    }, 0);
+
+    // Count by status
+    const activeCount = userEscrows.filter(e => ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'].includes(e.status)).length;
+    const completedCount = userEscrows.filter(e => e.status === 'completed').length;
+    const pendingCount = userEscrows.filter(e => e.status === 'draft' || e.status === 'awaiting_details').length;
+    const disputedCount = userEscrows.filter(e => e.status === 'disputed').length;
+
+    let myEscrowsText = `${filterTitle}\n\n`;
+    myEscrowsText += `Statistics:\n`;
+    myEscrowsText += `- Total Escrows: ${totalEscrows}\n`;
+    myEscrowsText += `- Total Worth: ${totalWorth.toFixed(2)} USDT\n`;
+    myEscrowsText += `- Active: ${activeCount}\n`;
+    myEscrowsText += `- Completed: ${completedCount}\n`;
+    myEscrowsText += `- Pending: ${pendingCount}\n`;
+    myEscrowsText += `- Disputed: ${disputedCount}\n\n`;
+
+    if (filteredEscrows.length > 0) {
+      myEscrowsText += `Your Escrows (${filteredEscrows.length}):\n`;
+      filteredEscrows.slice(0, 5).forEach((escrow, index) => {
+        const role = escrow.buyerId === userId ? 'Buyer' : (escrow.sellerId === userId ? 'Seller' : 'Creator');
+        myEscrowsText += `\n${index + 1}. ID: ${escrow._id.toString().substring(0, 8)}\n`;
+        myEscrowsText += `   Status: ${escrow.status.replace(/_/g, ' ').toUpperCase()}\n`;
+        myEscrowsText += `   Role: ${role}\n`;
+        myEscrowsText += `   Token: ${escrow.token} on ${escrow.chain}\n`;
+        myEscrowsText += `   Amount: ${escrow.confirmedAmount || escrow.depositAmount || 'N/A'} ${escrow.token}\n`;
+      });
+      if (filteredEscrows.length > 5) {
+        myEscrowsText += `\n...and ${filteredEscrows.length - 5} more.`;
+      }
+    } else {
+      myEscrowsText += `No ${filterTitle.toLowerCase()} found.`;
+    }
+
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback(`🟢 Active (${activeCount})`, 'filter_active'),
+        Markup.button.callback(`✅ Completed (${completedCount})`, 'filter_completed')
+      ],
+      [
+        Markup.button.callback(`⏳ Pending (${pendingCount})`, 'filter_pending'),
+        Markup.button.callback(`⚖️ Disputed (${disputedCount})`, 'filter_disputed')
+      ],
+      [
+        Markup.button.callback('⬅️ Back', 'back_to_start')
+      ]
+    ]).reply_markup;
+
+    // Use different image based on filter
+    const imagePath = (filter === 'all') 
+      ? 'public/images/my escrow.jpg' 
+      : 'public/images/escrow.jpg';
+
+    await ctx.replyWithPhoto(
+      { source: imagePath },
+      {
+        caption: myEscrowsText,
+        reply_markup: keyboard
+      }
+    );
+  } catch (error) {
+    console.error('Error in handleMyEscrows:', error);
+    await ctx.reply('❌ Error loading your escrows. Please try again.');
+  }
+}
+
+// Helper function to handle Help
+async function handleHelp(ctx) {
+  const helpText = `BOT COMMANDS HELP
+
+Available Commands:
+
+In Private Chat:
+- /start - Show main menu and options
+- /escrow - Create new escrow (assigns managed group)
+- /my_escrows - View your escrow history
+
+In Group Chat:
+- /dd - Set deal details (Quantity - Rate)
+- /seller address - Set seller wallet address
+- /buyer address - Set buyer wallet address
+- /token - Select token and network
+- /deposit - Generate deposit address
+
+Tips:
+- Always verify addresses before depositing
+- Make sure both parties confirm their roles
+- Use /dd to set deal details first
+- Contact admin if you need help`;
+
+  const keyboard = Markup.inlineKeyboard([
+    [Markup.button.callback('⬅️ Back to Menu', 'back_to_start')]
+  ]).reply_markup;
+
+    await ctx.replyWithPhoto(
+      { source: 'public/images/help.jpg' },
+      {
+        caption: helpText,
+        reply_markup: keyboard
+      }
+    );
+}
+
+// Helper function to handle Terms
+async function handleTerms(ctx) {
+  const termsText = `TERMS OF USAGE
+
+Fees: ${config.ESCROW_FEE_PERCENT}% for P2P / OTC
+Transactions fee applies. Consider this when depositing.
+
+1. Record/screenshot testing of logins, data, or opening items. Delete if satisfied.
+Failure to provide evidence = loss of funds.
+
+2. Learn what you are buying. Sellers not required to explain, but guidance helps.
+
+3. Buyer releases funds ONLY after receiving what was paid.
+No responsibility for early release.
+
+4. Use trusted wallets (Electrum, Exodus).
+Online wallets may block accounts.
+
+5. Fees are deducted from wallet balance (${config.ESCROW_FEE_PERCENT}%). Keep this in mind.
+
+6. Ensure coin & network match for Buyer & Seller to avoid losses.
+
+Important: Always verify addresses and terms before proceeding with any transaction.`;
+
+  const keyboard = Markup.inlineKeyboard([
+    [Markup.button.callback('⬅️ Back to Menu', 'back_to_start')]
+  ]).reply_markup;
+
+    await ctx.replyWithPhoto(
+      { source: 'public/images/terms.jpg' },
+      {
+        caption: termsText,
+        reply_markup: keyboard
+      }
+    );
+}
+
+// Helper function to handle How Escrow Works
+async function handleHowEscrowWorks(ctx) {
+  const guideText = `HOW ESCROW WORKS - STEP BY STEP GUIDE
+
+Smart Contract Protection:
+Your funds are secured by blockchain smart contracts, ensuring automatic and transparent transactions.
+
+Step-by-Step Process:
+
+Step 1: Create Escrow
+- Use /escrow command to create new escrow
+- Bot assigns a secure group for your transaction
+- Get invite link to share with trading partner
+
+Step 2: Set Deal Details
+- Use /dd command to set quantity and rate
+- Example: "100 USDT at $1.00 per unit"
+- Both parties must agree on terms
+
+Step 3: Set Roles & Addresses
+- Seller: Use /seller your_wallet_address
+- Buyer: Use /buyer your_wallet_address
+- Ensure addresses are correct for selected token/network
+
+Step 4: Select Token & Network
+- Use /token command to choose cryptocurrency
+- Select network (BSC, ETH, etc.)
+- Bot only shows available options
+
+Step 5: Generate Deposit Address
+- Use /deposit command to get escrow address
+- Buyer sends agreed amount to this address
+- Funds are locked in smart contract
+
+Step 6: Complete Transaction
+- Buyer confirms payment received
+- Seller confirms item/service delivered
+- Smart contract automatically releases funds
+
+Security Features:
+- Smart contracts prevent fraud
+- Funds locked until both parties confirm
+- Dispute resolution available
+- Transparent blockchain records
+
+Important Notes:
+- Always verify addresses before sending
+- Use correct token and network
+- Keep transaction records
+- Contact admin for disputes`;
+
+  const keyboard = Markup.inlineKeyboard([
+    [Markup.button.callback('⬅️ Back to Menu', 'back_to_start')]
+  ]).reply_markup;
+
+  await ctx.reply(guideText, {
+    reply_markup: keyboard
+  });
+}

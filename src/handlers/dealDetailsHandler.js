@@ -38,7 +38,6 @@ Remember without it disputes wouldn't be resolved. Once filled proceed with Spec
 Rate -`;
 
     await ctx.reply(dealText, { 
-      parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
           [
