@@ -11,12 +11,10 @@ Your Trustworthy Telegram Escrow Service
 Welcome to @mm_escrow_bot. This bot provides a reliable escrow service for your transactions on Telegram.
 Avoid scams, your funds are safeguarded throughout your deals. If you run into any issues, simply type /dispute and an arbitrator will join the group chat within 24 hours.
 
+🔐 Proceed with confidence — your trust, security, and satisfaction are our top priorities.  
+
 🎟 *ESCROW FEE:*
 ${config.ESCROW_FEE_PERCENT}% Flat
-
-🌐 (UPDATES) - (VOUCHES) ☑️
-
-💬 Proceed with /escrow (to start with a new escrow)
 
 ⚠️ *IMPORTANT* - Make sure coin is same of Buyer and Seller else you may loose your coin.
 
