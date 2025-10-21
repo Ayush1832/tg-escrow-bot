@@ -258,12 +258,18 @@ module.exports = async (ctx) => {
 
           // Activity tracking removed
 
-          // Release group back to pool
+          // Recycle group after completion - remove users and return to pool
           try {
             const GroupPoolService = require('../services/GroupPoolService');
-            await GroupPoolService.releaseGroup(escrow.escrowId);
+            await GroupPoolService.recycleGroupAfterCompletion(escrow, ctx.telegram);
           } catch (groupError) {
-            console.error('Error releasing group back to pool:', groupError);
+            console.error('Error recycling group after completion:', groupError);
+            // Fallback to regular release if recycling fails
+            try {
+              await GroupPoolService.releaseGroup(escrow.escrowId);
+            } catch (fallbackError) {
+              console.error('Error in fallback group release:', fallbackError);
+            }
           }
 
           const successText = `

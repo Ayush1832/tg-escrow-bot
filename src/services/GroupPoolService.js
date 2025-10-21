@@ -351,6 +351,115 @@ class GroupPoolService {
       throw error;
     }
   }
+
+  /**
+   * Recycle group after escrow completion - remove users and return to pool
+   */
+  async recycleGroupAfterCompletion(escrow, telegram) {
+    try {
+      if (!telegram) {
+        throw new Error('Telegram API instance is required for recycling');
+      }
+
+      const group = await GroupPool.findOne({ 
+        assignedEscrowId: escrow.escrowId 
+      });
+
+      if (!group) {
+        console.log(`No group found for escrow ${escrow.escrowId}`);
+        return null;
+      }
+
+      // Send completion notification to users before removal
+      await this.sendCompletionNotification(escrow, telegram);
+
+      // Remove users from group
+      await this.removeUsersFromGroup(escrow, group.groupId, telegram);
+
+      // Reset group to available status
+      group.status = 'available';
+      group.assignedEscrowId = null;
+      group.assignedAt = null;
+      group.completedAt = null;
+      group.inviteLink = null;
+      await group.save();
+
+      console.log(`✅ Group ${group.groupId} recycled successfully for escrow ${escrow.escrowId}`);
+      return group;
+
+    } catch (error) {
+      console.error('Error recycling group:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Send completion notification to users before removal
+   */
+  async sendCompletionNotification(escrow, telegram) {
+    try {
+      const message = `🎉 *TRADE COMPLETED SUCCESSFULLY!*
+
+✅ Your escrow has been completed
+✅ Funds have been released
+✅ This group will be recycled for future trades
+
+Thank you for using our escrow service!`;
+
+      // Send to buyer if they exist
+      if (escrow.buyerId) {
+        try {
+          await telegram.sendMessage(escrow.buyerId, message);
+        } catch (error) {
+          console.log(`Could not send completion message to buyer ${escrow.buyerId}:`, error.message);
+        }
+      }
+
+      // Send to seller if they exist
+      if (escrow.sellerId) {
+        try {
+          await telegram.sendMessage(escrow.sellerId, message);
+        } catch (error) {
+          console.log(`Could not send completion message to seller ${escrow.sellerId}:`, error.message);
+        }
+      }
+
+    } catch (error) {
+      console.error('Error sending completion notification:', error);
+    }
+  }
+
+  /**
+   * Remove users from group after completion
+   */
+  async removeUsersFromGroup(escrow, groupId, telegram) {
+    try {
+      const chatId = String(groupId);
+
+      // Remove buyer if they exist
+      if (escrow.buyerId) {
+        try {
+          await telegram.kickChatMember(chatId, escrow.buyerId);
+          console.log(`Removed buyer ${escrow.buyerId} from group ${groupId}`);
+        } catch (error) {
+          console.log(`Could not remove buyer ${escrow.buyerId} from group:`, error.message);
+        }
+      }
+
+      // Remove seller if they exist
+      if (escrow.sellerId) {
+        try {
+          await telegram.kickChatMember(chatId, escrow.sellerId);
+          console.log(`Removed seller ${escrow.sellerId} from group ${groupId}`);
+        } catch (error) {
+          console.log(`Could not remove seller ${escrow.sellerId} from group:`, error.message);
+        }
+      }
+
+    } catch (error) {
+      console.error('Error removing users from group:', error);
+    }
+  }
 }
 
 module.exports = new GroupPoolService();

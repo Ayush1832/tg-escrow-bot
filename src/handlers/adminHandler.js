@@ -98,12 +98,18 @@ async function adminResolveRelease(ctx) {
         console.error('Error marking trade completed:', activityError);
       }
 
-      // Release group back to pool
+      // Recycle group after completion - remove users and return to pool
       try {
         const GroupPoolService = require('../services/GroupPoolService');
-        await GroupPoolService.releaseGroup(escrow.escrowId);
+        await GroupPoolService.recycleGroupAfterCompletion(escrow, ctx.telegram);
       } catch (groupError) {
-        console.error('Error releasing group back to pool:', groupError);
+        console.error('Error recycling group after completion:', groupError);
+        // Fallback to regular release if recycling fails
+        try {
+          await GroupPoolService.releaseGroup(escrow.escrowId);
+        } catch (fallbackError) {
+          console.error('Error in fallback group release:', fallbackError);
+        }
       }
 
     // Execute the release
@@ -189,12 +195,18 @@ async function adminResolveRefund(ctx) {
     escrow.status = 'refunded';
     await escrow.save();
 
-    // Release group back to pool
+    // Recycle group after completion - remove users and return to pool
     try {
       const GroupPoolService = require('../services/GroupPoolService');
-      await GroupPoolService.releaseGroup(escrow.escrowId);
+      await GroupPoolService.recycleGroupAfterCompletion(escrow, ctx.telegram);
     } catch (groupError) {
-      console.error('Error releasing group back to pool:', groupError);
+      console.error('Error recycling group after completion:', groupError);
+      // Fallback to regular release if recycling fails
+      try {
+        await GroupPoolService.releaseGroup(escrow.escrowId);
+      } catch (fallbackError) {
+        console.error('Error in fallback group release:', fallbackError);
+      }
     }
 
     // Execute the refund
@@ -542,6 +554,45 @@ async function adminRemoveInactive(ctx) {
   }
 }
 
+/**
+ * Admin command to manually recycle a group
+ */
+async function adminRecycleGroup(ctx) {
+  try {
+    if (!isAdmin(ctx)) {
+      return ctx.reply('❌ Access denied. Admin privileges required.');
+    }
+
+    const escrowId = ctx.message.text.split(' ')[1];
+    if (!escrowId) {
+      return ctx.reply('❌ Please provide escrow ID.\nUsage: `/admin_recycle_group <escrowId>`');
+    }
+
+    const escrow = await Escrow.findOne({ escrowId });
+    if (!escrow) {
+      return ctx.reply('❌ Escrow not found.');
+    }
+
+    if (escrow.status !== 'completed' && escrow.status !== 'refunded') {
+      return ctx.reply('❌ Escrow must be completed or refunded to recycle group.');
+    }
+
+    // Recycle the group
+    try {
+      const GroupPoolService = require('../services/GroupPoolService');
+      await GroupPoolService.recycleGroupAfterCompletion(escrow, ctx.telegram);
+      await ctx.reply(`✅ Group recycled successfully for escrow ${escrowId}`);
+    } catch (error) {
+      console.error('Error recycling group:', error);
+      await ctx.reply(`❌ Error recycling group: ${error.message}`);
+    }
+
+  } catch (error) {
+    console.error('Error in admin recycle group:', error);
+    ctx.reply('❌ Error recycling group.');
+  }
+}
+
 module.exports = {
   adminDashboard,
   adminResolveRelease,
@@ -554,7 +605,8 @@ module.exports = {
   adminPoolResetAssigned,
   adminPoolCleanup,
   adminPoolArchive,
-  adminPoolDelete
+  adminPoolDelete,
+  adminRecycleGroup
 };
 
 /**
