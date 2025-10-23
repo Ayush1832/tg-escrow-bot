@@ -47,10 +47,9 @@ module.exports = {
   MAX_TRADE_AMOUNT: Number(process.env.MAX_TRADE_AMOUNT || 10000),
   DEPOSIT_ADDRESS_TTL_MINUTES: Number(process.env.DEPOSIT_ADDRESS_TTL_MINUTES || 20),
 
-  // Fee wallets (Distribution: 70% - 22.5% - 7.5%)
+  // Fee wallets (Distribution: 70% - 30%)
   FEE_WALLET_1: process.env.FEE_WALLET_1, // 70% of total fees
-  FEE_WALLET_2: process.env.FEE_WALLET_2, // 22.5% of total fees
-  FEE_WALLET_3: process.env.FEE_WALLET_3, // 7.5% of total fees
+  FEE_WALLET_2: process.env.FEE_WALLET_2, // 30% of total fees
 
   // Security
   NODE_ENV: process.env.NODE_ENV || 'development',

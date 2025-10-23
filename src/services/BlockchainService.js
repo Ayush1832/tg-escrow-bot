@@ -8,7 +8,6 @@ const ESCROW_VAULT_ABI = [
   'function feePercent() view returns (uint256)',
   'function feeWallet1() view returns (address)',
   'function feeWallet2() view returns (address)',
-  'function feeWallet3() view returns (address)',
   'function release(address to, uint256 amount) external',
   'function refund(address to, uint256 amount) external'
 ];

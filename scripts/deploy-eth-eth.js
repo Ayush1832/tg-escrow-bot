@@ -10,8 +10,7 @@ async function main() {
     MONGODB_URI,
     ETH_ETH,
     FEE_WALLET_1,
-    FEE_WALLET_2,
-    FEE_WALLET_3
+    FEE_WALLET_2
   } = process.env;
 
   if (!MONGODB_URI) throw new Error('MONGODB_URI missing');
@@ -23,14 +22,12 @@ async function main() {
   const feePercent = Number(process.env.ESCROW_FEE_PERCENT || 0); // default 0%
   const w1 = FEE_WALLET_1;
   const w2 = FEE_WALLET_2 || FEE_WALLET_1;
-  const w3 = FEE_WALLET_3 || FEE_WALLET_1;
 
   const EscrowVault = await hre.ethers.getContractFactory('EscrowVault');
   const contract = await EscrowVault.deploy(
     ETH_ETH,
     w1,
     w2,
-    w3,
     feePercent * 100 // Convert percentage to basis points for contract
   );
   await contract.waitForDeployment();

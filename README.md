@@ -9,7 +9,7 @@ A centralized Telegram escrow bot for USDT transactions on BSC network.
 - 🔒 **Secure Escrow**: Centralized hot wallet with deposit address generation
 - 📊 **Real-time Monitoring**: Automatic deposit detection via BscScan API
 - ⚖️ **Dispute Resolution**: Built-in dispute system with admin intervention
-- 💸 **Fee Management**: 1% escrow fee with transparent fee breakdown (70% - 22.5% - 7.5% distribution)
+- 💸 **Fee Management**: 1% escrow fee with transparent fee breakdown (70% - 30% distribution)
 
 ## Commands
 
@@ -61,8 +61,7 @@ A centralized Telegram escrow bot for USDT transactions on BSC network.
    MAX_TRADE_AMOUNT=10000
    DEPOSIT_ADDRESS_TTL_MINUTES=20
    FEE_WALLET_1=YOUR_FEE_WALLET_1  # 70% of escrow fees
-   FEE_WALLET_2=YOUR_FEE_WALLET_2  # 22.5% of escrow fees
-   FEE_WALLET_3=YOUR_FEE_WALLET_3  # 7.5% of escrow fees
+   FEE_WALLET_2=YOUR_FEE_WALLET_2  # 30% of escrow fees
    ```
 
    Warning: Do not paste real secrets into documentation or commit history.
