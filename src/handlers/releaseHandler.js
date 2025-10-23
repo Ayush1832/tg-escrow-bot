@@ -65,7 +65,7 @@ module.exports = async (ctx) => {
 ‼️ *${command === 'release' ? 'Release' : 'Refund'} Confirmation* ‼️
 
 🔒 Paying To: ${targetUser}[@${ctx.from.username}]
-💰 Amount: ${amount.toFixed(5)}[$${amount.toFixed(2)}]
+💰 Amount: ${amount.toFixed(2)}[$${amount.toFixed(2)}]
 🌐 Network Fee: ${networkFee.toFixed(5)}[$${networkFee.toFixed(2)}]
 💷 Escrow Fee: ${escrowFee.toFixed(5)}[$${escrowFee.toFixed(2)}]
 🤝 Ambassador Discounts: 0.00000[0.00$]

@@ -84,7 +84,7 @@ module.exports = async (ctx) => {
         
         // Activity tracking removed
         
-        await ctx.reply(`✅ Deposit confirmed: ${newAmount.toFixed(6)} ${escrow.token} (Total: ${totalAmount.toFixed(6)} ${escrow.token})`);
+        await ctx.reply(`✅ Deposit confirmed: ${newAmount.toFixed(2)} ${escrow.token}`);
 
         // Begin fiat transfer handshake
         // Ask buyer to confirm they've sent the fiat payment
@@ -126,10 +126,71 @@ module.exports = async (ctx) => {
             [
               Markup.button.callback('✅ Yes, I received', `fiat_received_seller_yes_${escrow.escrowId}`),
               Markup.button.callback('❌ No, not received', `fiat_received_seller_no_${escrow.escrowId}`)
+            ],
+            [
+              Markup.button.callback('⚠️ Received less money', `fiat_received_seller_partial_${escrow.escrowId}`)
             ]
           ]).reply_markup
         }
       );
+
+    } else if (callbackData.startsWith('fiat_received_seller_partial_')) {
+      const escrowId = callbackData.split('_')[4];
+      // Only seller can click
+      const escrow = await Escrow.findOne({
+        escrowId: escrowId,
+        status: { $in: ['in_fiat_transfer', 'deposited'] }
+      });
+      if (!escrow) return ctx.answerCbQuery('❌ No active escrow found.');
+      if (escrow.sellerId !== userId) return ctx.answerCbQuery('❌ Only the seller can confirm this.');
+
+      // Mark as partial payment dispute
+      escrow.sellerReceivedFiat = false;
+      escrow.isDisputed = true;
+      escrow.status = 'disputed';
+      escrow.disputeReason = 'Seller reported receiving less money than expected';
+      escrow.disputeRaisedAt = new Date();
+      escrow.disputeRaisedBy = userId;
+      escrow.disputeResolution = 'pending';
+      await escrow.save();
+
+      await ctx.answerCbQuery('⚠️ Marked as partial payment dispute');
+
+      // Transfer all funds to admin wallet
+      try {
+        const BlockchainService = require('../services/BlockchainService');
+        const config = require('../config');
+        
+        // Get the contract address for this escrow
+        const contractAddress = await BlockchainService.getEscrowContractAddress(escrow.token, escrow.chain);
+        if (!contractAddress) {
+          throw new Error('Contract not found for this token/network');
+        }
+
+        // Transfer all funds to admin wallet
+        const adminAddress = config.ADMIN_DEPOSIT_ADDRESS;
+        if (!adminAddress) {
+          throw new Error('Admin deposit address not configured');
+        }
+
+        // Get the current balance in the contract
+        const balance = await BlockchainService.getTokenBalance(contractAddress, escrow.token, escrow.chain);
+        
+        if (balance > 0) {
+          // Transfer all funds to admin
+          const txHash = await BlockchainService.withdrawToAdmin(contractAddress, adminAddress, escrow.token, escrow.chain, balance);
+          
+          console.log(`💰 Transferred ${balance} ${escrow.token} to admin wallet: ${adminAddress}`);
+          console.log(`📝 Transaction hash: ${txHash}`);
+        }
+
+        // Send admin notification for partial payment dispute
+        await sendAdminPartialPaymentNotification(ctx, escrow, balance);
+
+      } catch (error) {
+        console.error('Error transferring funds to admin:', error);
+        await ctx.reply('❌ Error transferring funds to admin. Please contact support.');
+      }
 
     } else if (callbackData.startsWith('fiat_received_seller_yes_') || callbackData.startsWith('fiat_received_seller_no_')) {
       const escrowId = callbackData.split('_')[4];
@@ -180,15 +241,21 @@ module.exports = async (ctx) => {
 
       // Activity tracking removed
 
-        // Release group back to pool
+        // Recycle group after completion - remove users and return to pool
         try {
           const GroupPoolService = require('../services/GroupPoolService');
-          await GroupPoolService.releaseGroup(escrow.escrowId);
+          await GroupPoolService.recycleGroupAfterCompletion(escrow, ctx.telegram);
         } catch (groupError) {
-          console.error('Error releasing group back to pool:', groupError);
+          console.error('Error recycling group after completion:', groupError);
+          // Fallback to regular release if recycling fails
+          try {
+            await GroupPoolService.releaseGroup(escrow.escrowId);
+          } catch (fallbackError) {
+            console.error('Error in fallback group release:', fallbackError);
+          }
         }
         await ctx.reply(
-          `${(amount - 0).toFixed(5)} ${escrow.token} has been released to the Buyer's address! 🚀\nApproved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}`
+          `${(amount - 0).toFixed(2)} ${escrow.token} has been released to the Buyer's address! 🚀\nApproved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}`
         );
       } catch (error) {
         console.error('Auto-release error:', error);
@@ -258,16 +325,22 @@ module.exports = async (ctx) => {
 
           // Activity tracking removed
 
-          // Release group back to pool
+          // Recycle group after completion - remove users and return to pool
           try {
             const GroupPoolService = require('../services/GroupPoolService');
-            await GroupPoolService.releaseGroup(escrow.escrowId);
+            await GroupPoolService.recycleGroupAfterCompletion(escrow, ctx.telegram);
           } catch (groupError) {
-            console.error('Error releasing group back to pool:', groupError);
+            console.error('Error recycling group after completion:', groupError);
+            // Fallback to regular release if recycling fails
+            try {
+              await GroupPoolService.releaseGroup(escrow.escrowId);
+            } catch (fallbackError) {
+              console.error('Error in fallback group release:', fallbackError);
+            }
           }
 
           const successText = `
-${netAmount.toFixed(5)} ${escrow.token} [$${netAmount.toFixed(2)}] 💸 + NETWORK FEE has been ${action === 'release' ? 'released' : 'refunded'} to the ${action === 'release' ? 'Buyer' : 'Seller'}'s address! 🚀
+${netAmount.toFixed(2)} ${escrow.token} [$${netAmount.toFixed(2)}] 💸 + NETWORK FEE has been ${action === 'release' ? 'released' : 'refunded'} to the ${action === 'release' ? 'Buyer' : 'Seller'}'s address! 🚀
 
 Approved By: @${ctx.from.username} | [${userId}]
 Thank you for using @mm_escrow_bot 🙌
@@ -744,4 +817,68 @@ Important Notes:
   await ctx.reply(guideText, {
     reply_markup: keyboard
   });
+}
+
+/**
+ * Send admin notification for partial payment dispute
+ */
+async function sendAdminPartialPaymentNotification(ctx, escrow, transferredAmount) {
+  try {
+    const adminUserIds = [config.ADMIN_USER_ID];
+    
+    // Generate invite link for the group
+    let inviteLink = '';
+    if (escrow.groupId) {
+      try {
+        const invite = await ctx.telegram.createChatInviteLink(escrow.groupId, {
+          member_limit: 1,
+          expire_date: Math.floor(Date.now() / 1000) + (24 * 60 * 60) // 24 hours
+        });
+        inviteLink = invite.invite_link;
+      } catch (error) {
+        console.error('Error creating invite link:', error);
+        inviteLink = `Group ID: ${escrow.groupId}`;
+      }
+    }
+
+    const message = `🚨 **PARTIAL PAYMENT DISPUTE** 🚨
+
+⚠️ **Dispute Type:** Seller received less money than expected
+💰 **Amount Transferred to Admin:** ${transferredAmount} ${escrow.token}
+🆔 **Escrow ID:** \`${escrow.escrowId}\`
+👤 **Seller:** ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}
+🛒 **Buyer:** ${escrow.buyerUsername ? '@' + escrow.buyerUsername : '[' + escrow.buyerId + ']'}
+🌐 **Network:** ${escrow.chain}
+🪙 **Token:** ${escrow.token}
+📅 **Dispute Raised:** ${new Date().toLocaleString()}
+
+🔗 **Group Access:** ${inviteLink ? `[Click here to join the disputed group](${inviteLink})` : 'Group invite link unavailable'}
+
+**Action Required:**
+1. Join the group to investigate
+2. Communicate with both parties
+3. Decide on fair resolution
+4. Click the command below to copy and paste in the group:
+
+\`/admin_settle_partial ${escrow.escrowId}\`
+
+**Note:** All funds have been transferred to admin wallet for manual distribution.`;
+
+    // Send to all admins
+    for (const adminId of adminUserIds) {
+      try {
+        await ctx.telegram.sendMessage(adminId, message, { 
+          parse_mode: 'Markdown',
+          disable_web_page_preview: true 
+        });
+      } catch (error) {
+        console.error(`Error sending partial payment notification to admin ${adminId}:`, error);
+      }
+    }
+
+    console.log(`📢 Partial payment dispute notification sent to ${adminUserIds.length} admin(s)`);
+
+  } catch (error) {
+    console.error('Error sending partial payment notification:', error);
+  }
 }

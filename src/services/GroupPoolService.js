@@ -351,6 +351,161 @@ class GroupPoolService {
       throw error;
     }
   }
+
+  /**
+   * Recycle group after escrow completion - remove users and return to pool (with 15-minute delay)
+   * NOTE: This only works for groups that are in the GroupPool. Manually created groups are not recycled.
+   */
+  async recycleGroupAfterCompletion(escrow, telegram) {
+    try {
+      if (!telegram) {
+        throw new Error('Telegram API instance is required for recycling');
+      }
+
+      // Only recycle groups that are in the pool (not manually created groups)
+      const group = await GroupPool.findOne({ 
+        assignedEscrowId: escrow.escrowId 
+      });
+
+      if (!group) {
+        console.log(`No pool group found for escrow ${escrow.escrowId} - skipping recycling (likely manually created group)`);
+        return null;
+      }
+
+      // Send completion notification to users
+      await this.sendCompletionNotification(escrow, telegram);
+
+      // Schedule delayed recycling (15 minutes)
+      this.scheduleDelayedRecycling(escrow, group, telegram);
+
+      console.log(`⏰ Group ${group.groupId} scheduled for recycling in 15 minutes for escrow ${escrow.escrowId}`);
+      return group;
+
+    } catch (error) {
+      console.error('Error scheduling group recycling:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Schedule delayed group recycling (15 minutes)
+   */
+  scheduleDelayedRecycling(escrow, group, telegram) {
+    // Set timeout for 15 minutes (15 * 60 * 1000 ms)
+    setTimeout(async () => {
+      try {
+        console.log(`🔄 Starting delayed recycling for group ${group.groupId} (escrow ${escrow.escrowId})`);
+        
+        // Remove ALL users from group (buyer, seller, admins, everyone)
+        const allUsersRemoved = await this.removeUsersFromGroup(escrow, group.groupId, telegram);
+
+        if (allUsersRemoved) {
+          // Only add back to pool if ALL users were successfully removed
+          group.status = 'available';
+          group.assignedEscrowId = null;
+          group.assignedAt = null;
+          group.completedAt = null;
+          group.inviteLink = null;
+          await group.save();
+
+          console.log(`✅ Group ${group.groupId} recycled successfully after 15-minute delay for escrow ${escrow.escrowId} - ALL users removed`);
+        } else {
+          // Mark as completed but don't add back to pool if users couldn't be removed
+          group.status = 'completed';
+          group.assignedEscrowId = null;
+          group.assignedAt = null;
+          group.completedAt = new Date();
+          group.inviteLink = null;
+          await group.save();
+
+          console.log(`⚠️ Group ${group.groupId} marked as completed but NOT added back to pool - some users couldn't be removed`);
+        }
+      } catch (error) {
+        console.error('Error in delayed group recycling:', error);
+      }
+    }, 15 * 60 * 1000); // 15 minutes
+  }
+
+  /**
+   * Send completion notification to users before removal
+   */
+  async sendCompletionNotification(escrow, telegram) {
+    try {
+      const message = `🎉 *TRADE COMPLETED SUCCESSFULLY!*
+
+✅ Your escrow has been completed
+✅ Funds have been released
+⏰ This group will be recycled in 15 minutes for future trades
+
+Thank you for using our escrow service!`;
+
+      // Send to buyer if they exist
+      if (escrow.buyerId) {
+        try {
+          await telegram.sendMessage(escrow.buyerId, message);
+        } catch (error) {
+          console.log(`Could not send completion message to buyer ${escrow.buyerId}:`, error.message);
+        }
+      }
+
+      // Send to seller if they exist
+      if (escrow.sellerId) {
+        try {
+          await telegram.sendMessage(escrow.sellerId, message);
+        } catch (error) {
+          console.log(`Could not send completion message to seller ${escrow.sellerId}:`, error.message);
+        }
+      }
+
+    } catch (error) {
+      console.error('Error sending completion notification:', error);
+    }
+  }
+
+  /**
+   * Remove ALL users from group after completion (buyer, seller, admins, everyone except bot)
+   */
+  async removeUsersFromGroup(escrow, groupId, telegram) {
+    try {
+      const chatId = String(groupId);
+
+      // Get all chat members
+      let allMembers = [];
+      try {
+        const chatMembers = await telegram.getChatAdministrators(chatId);
+        allMembers = chatMembers.map(member => member.user.id);
+        console.log(`Found ${allMembers.length} members in group ${groupId}`);
+      } catch (error) {
+        console.log(`Could not get chat members for group ${groupId}:`, error.message);
+        return false; // Can't proceed without member list
+      }
+
+      // Remove ALL users except the bot itself
+      let removedCount = 0;
+      const botId = (await telegram.getMe()).id;
+      
+      for (const userId of allMembers) {
+        // Skip the bot itself
+        if (userId === botId) {
+          continue;
+        }
+
+        try {
+          await telegram.kickChatMember(chatId, userId);
+          console.log(`Removed user ${userId} from group ${groupId}`);
+          removedCount++;
+        } catch (error) {
+          console.log(`Could not remove user ${userId} from group:`, error.message);
+        }
+      }
+
+      console.log(`Removed ${removedCount} users from group ${groupId}`);
+      return removedCount > 0;
+
+    } catch (error) {
+      console.error('Error removing users from group:', error);
+    }
+  }
 }
 
 module.exports = new GroupPoolService();

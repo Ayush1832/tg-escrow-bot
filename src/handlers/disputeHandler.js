@@ -104,7 +104,7 @@ async function sendAdminDisputeNotification(ctx, escrow) {
 • Reason: ${escrow.disputeReason}
 • Time: ${new Date().toLocaleString()}
 
-🔗 *Join Group:* [Click here](${inviteLink})
+🔗 *Join Group:* [Click here to join the disputed group](${inviteLink})
 
 ⚡ *Quick Actions:*
 • \`/admin_resolve_release ${escrow.escrowId}\` - Release to buyer

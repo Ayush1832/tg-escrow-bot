@@ -116,7 +116,14 @@ class EscrowBot {
     adminPoolCleanup,
     adminPoolArchive,
     adminPoolDeleteAll,
-    adminPoolDelete
+    adminPoolDelete,
+    adminCleanupAbandoned,
+    adminHelp,
+    adminTradeStats,
+    adminExportTrades,
+    adminRecentTrades,
+    adminSettlePartial,
+    adminRecycleAll
   } = require('./handlers/adminHandler');
     this.bot.command('admin_disputes', adminDashboard);
     this.bot.command('admin_resolve_release', adminResolveRelease);
@@ -131,6 +138,13 @@ class EscrowBot {
     this.bot.command('admin_pool_archive', adminPoolArchive);
     this.bot.command('admin_pool_delete_all', adminPoolDeleteAll);
     this.bot.command('admin_pool_delete', adminPoolDelete);
+    this.bot.command('admin_recycle_all', adminRecycleAll);
+    this.bot.command('admin_help', adminHelp);
+    this.bot.command('admin_trade_stats', adminTradeStats);
+    this.bot.command('admin_export_trades', adminExportTrades);
+    this.bot.command('admin_recent_trades', adminRecentTrades);
+    this.bot.command('admin_cleanup_abandoned', adminCleanupAbandoned);
+    this.bot.command('admin_settle_partial', adminSettlePartial);
     // Inactivity manual commands removed
 
     // Callback query handler
@@ -344,7 +358,7 @@ ${escrow.status === 'draft' || escrow.status === 'awaiting_details' ?
               // Notify in group
               await this.bot.telegram.sendMessage(
                 escrow.groupId,
-                `💰 *Deposit Confirmed*\n\n🪙 Token: BSC-USDT\n💰 Amount: ${totalAmount.toFixed(5)} [$${totalAmount.toFixed(2)}]\n💸 Balance: ${totalAmount.toFixed(5)} [$${totalAmount.toFixed(2)}]\n\nPlease click update button to show the updated data.`,
+                `💰 *Deposit Confirmed*\n\n🪙 Token: BSC-USDT\n💰 Amount: ${totalAmount.toFixed(2)} [$${totalAmount.toFixed(2)}]\n💸 Balance: ${totalAmount.toFixed(2)} [$${totalAmount.toFixed(2)}]\n\nPlease click update button to show the updated data.`,
                 { parse_mode: 'Markdown' }
               );
             }

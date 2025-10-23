@@ -448,6 +448,35 @@ class BlockchainService {
       return null;
     }
   }
+
+  /**
+   * Withdraw all funds from escrow contract to admin wallet
+   */
+  async withdrawToAdmin(contractAddress, adminAddress, token, network, amount) {
+    try {
+      const wallet = this.wallets[network.toUpperCase()];
+      if (!wallet) {
+        throw new Error(`Wallet not configured for network: ${network}`);
+      }
+
+      const vaultContract = new ethers.Contract(contractAddress, ESCROW_VAULT_ABI, wallet);
+      const decimals = this.getTokenDecimals(token, network);
+      const amountWei = ethers.parseUnits(amount.toString(), decimals);
+
+      console.log(`Withdrawing ${amount} ${token} to admin wallet ${adminAddress} on ${network}`);
+      
+      // Use the withdrawToken function from the contract
+      const tx = await vaultContract.withdrawToken(token, adminAddress);
+      const receipt = await tx.wait();
+
+      console.log(`✅ Admin withdrawal transaction successful: ${receipt.transactionHash}`);
+      return receipt.transactionHash;
+
+    } catch (error) {
+      console.error('Error withdrawing to admin:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = new BlockchainService();
