@@ -1,5 +1,4 @@
 const Escrow = require('../models/Escrow');
-const Event = require('../models/Event');
 
 module.exports = async (ctx) => {
   try {
@@ -31,7 +30,7 @@ Kindly tell deal details i.e.
 Quantity -
 Rate -
 
-Remember without it disputes wouldn't be resolved. Once filled proceed with Specifications of the seller or buyer with /seller or /buyer [CRYPTO ADDRESS]
+Remember without it disputes wouldn't be resolved. Once filled proceed with buyer address using /buyer [CRYPTO ADDRESS]
     `;
 
     const templateText = `Quantity -
@@ -51,13 +50,6 @@ Rate -`;
     escrow.status = 'awaiting_details';
     await escrow.save();
 
-    // Log event
-    await new Event({
-      escrowId: escrow.escrowId,
-      actorId: userId,
-      action: 'deal_details_requested',
-      payload: {}
-    }).save();
 
   } catch (error) {
     console.error('Error in deal details handler:', error);

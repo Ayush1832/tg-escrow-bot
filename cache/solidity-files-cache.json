@@ -2,8 +2,8 @@
   "_format": "hh-sol-cache-2",
   "files": {
     "C:\\Users\\LENOVO\\Desktop\\tg-escrow-bot\\contracts\\EscrowVault.sol": {
-      "lastModificationDate": 1760372626293,
-      "contentHash": "ec675cc7cec24c0a9dd6d75ba66524c2",
+      "lastModificationDate": 1761507717534,
+      "contentHash": "f6e584ca95a54a501f8008e9f746c620",
       "sourceName": "contracts/EscrowVault.sol",
       "solcConfig": {
         "version": "0.8.24",

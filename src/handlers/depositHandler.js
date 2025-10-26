@@ -2,7 +2,8 @@ const { Markup } = require("telegraf");
 const Escrow = require("../models/Escrow");
 const DepositAddress = require("../models/DepositAddress");
 const WalletService = require("../services/WalletService");
-const Event = require("../models/Event");
+const AddressAssignmentService = require("../services/AddressAssignmentService");
+const TradeTimeoutService = require("../services/TradeTimeoutService");
 const config = require("../../config");
 
 module.exports = async (ctx) => {
@@ -43,55 +44,55 @@ module.exports = async (ctx) => {
 
     await ctx.reply("Requesting a deposit address for you, please wait...");
 
-    // Generate deposit address
-    // Use on-chain vault address as deposit address for the selected token-network pair
-    const Contract = require("../models/Contract");
-    const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
-    const vault = await Contract.findOne({
-      name: "EscrowVault",
-      token: escrow.token,
-      network: escrow.chain.toUpperCase(),
-      feePercent: desiredFeePercent,
-    });
-    if (!vault) {
+    // Use new address assignment system
+    try {
+      const addressInfo = await AddressAssignmentService.assignDepositAddress(
+        escrow.escrowId,
+        escrow.token,
+        escrow.chain.toUpperCase(),
+        escrow.quantity,
+        Number(config.ESCROW_FEE_PERCENT || 0)
+      );
+
+      const address = addressInfo.address;
+      const contractAddress = addressInfo.contractAddress;
+      const sharedWithAmount = addressInfo.sharedWithAmount;
+
+      // Update escrow with unique deposit address
+      escrow.uniqueDepositAddress = address;
+      escrow.depositAddress = address; // Keep for backward compatibility
+      escrow.status = "awaiting_deposit";
+      await escrow.save();
+
+      // Set trade timeout (1 hour) AFTER escrow is updated
+      await TradeTimeoutService.setTradeTimeout(escrow.escrowId, ctx.telegram);
+
+      // Show sharing information if applicable
+      if (sharedWithAmount) {
+        await ctx.reply(
+          `ℹ️ This address is shared with another trade (${sharedWithAmount} ${escrow.token}). Different amounts can share the same address.`
+        );
+      }
+
+    } catch (addressError) {
+      // Handle address assignment errors
+      if (addressError.message.includes('already exists')) {
+        return ctx.reply(
+          `❌ ${addressError.message}\n\nPlease try with a different amount.`
+        );
+      }
+      
+      if (addressError.message.includes('No available addresses')) {
+        return ctx.reply(
+          `❌ ${addressError.message}\n\nPlease try again later or contact admin.`
+        );
+      }
+      
+      console.error('Address assignment error:', addressError);
       return ctx.reply(
-        `❌ Escrow vault not deployed for ${escrow.token} on ${escrow.chain}. Please contact admin to deploy the contract first.`
+        `❌ Error assigning deposit address: ${addressError.message}`
       );
     }
-    const address = vault.address;
-    const derivationPath = "vault";
-
-    // Calculate expiry time
-    const expiresAt = new Date();
-    expiresAt.setMinutes(
-      expiresAt.getMinutes() + config.DEPOSIT_ADDRESS_TTL_MINUTES
-    );
-
-    // Save or update deposit address (vault address can be reused)
-    // First, try to remove any existing unique index on address
-    try {
-      await DepositAddress.collection.dropIndex("address_1");
-    } catch (e) {
-      // Index might not exist, ignore error
-    }
-
-    await DepositAddress.updateOne(
-      { escrowId: escrow.escrowId },
-      {
-        escrowId: escrow.escrowId,
-        address,
-        derivationPath,
-        expiresAt,
-        status: "active",
-        observedAmount: 0,
-      },
-      { upsert: true }
-    );
-
-    // Update escrow
-    escrow.depositAddress = address;
-    escrow.status = "awaiting_deposit";
-    await escrow.save();
 
     const feeText = `
 Note: The default fee is ${config.ESCROW_FEE_PERCENT}%, which is applied when funds are released.
@@ -99,11 +100,6 @@ Note: The default fee is ${config.ESCROW_FEE_PERCENT}%, which is applied when fu
 
     await ctx.reply(feeText);
 
-    const sellerTag = escrow.sellerUsername
-      ? `@${escrow.sellerUsername}`
-      : escrow.sellerId
-      ? `[${escrow.sellerId}]`
-      : "N/A";
     const buyerTag = escrow.buyerUsername
       ? `@${escrow.buyerUsername}`
       : escrow.buyerId
@@ -118,10 +114,6 @@ Note: The default fee is ${config.ESCROW_FEE_PERCENT}%, which is applied when fu
     const depositText = `
 📍 *TRANSACTION INFORMATION [${escrow.escrowId.slice(-8)}]*
 
-⚡️ *SELLER*
-${sellerTag} | [${escrow.sellerId || "N/A"}]
-${escrow.sellerAddress || ""}
-
 ⚡️ *BUYER*
 ${buyerTag} | [${escrow.buyerId || "N/A"}]
 ${escrow.buyerAddress || ""}
@@ -129,7 +121,7 @@ ${escrow.buyerAddress || ""}
 🟢 *ESCROW ADDRESS*
  ${address}
 
-Seller ${sellerTag} Will Pay on the Escrow Address, And Click On Check Payment.
+Deposit the required amount to the Escrow Address, And Click On Check Payment.
 
 Amount to be Received: [$${amountDisplay}]
 
@@ -141,9 +133,9 @@ Amount to be Received: [$${amountDisplay}]
       minute: "2-digit",
       second: "2-digit",
     })}
-⏰ Address Reset In: ${config.DEPOSIT_ADDRESS_TTL_MINUTES}.00 Min
+⏰ Trade Timeout: 1 hour (automatic group recycling if abandoned)
 
-📄 Note: Address will reset after the given time, so make sure to deposit in the bot before the address expires.
+📄 Note: Trade will timeout in 1 hour if not completed. Deposit address will be released after timeout.
 ⚠️ *CRITICAL TOKEN/NETWORK WARNING*
 • Send ONLY *${escrow.token}* on *${escrow.chain}* to this address.
 • ❌ Do NOT send any other token (e.g., USDC/BNB/ETH) or from another network.
@@ -169,13 +161,6 @@ Remember, once commands are used payment will be released, there is no revert!
       },
     });
 
-    // Log event
-    await new Event({
-      escrowId: escrow.escrowId,
-      actorId: userId,
-      action: "deposit_address_generated",
-      payload: { address, expiresAt },
-    }).save();
   } catch (error) {
     console.error("Error in deposit handler:", error);
     ctx.reply(

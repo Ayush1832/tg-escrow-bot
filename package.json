@@ -18,7 +18,10 @@
     "deploy:eth:eth": "hardhat run scripts/deploy-eth-eth.js --network ethereum",
     "deploy:btc:bsc": "hardhat run scripts/deploy-btc-bsc.js --network bsc",
     "deploy:ltc:ltc": "hardhat run scripts/deploy-ltc-ltc.js --network litecoin",
-    "deploy:bnb:bsc": "hardhat run scripts/deploy-bnb-bsc.js --network bsc"
+    "deploy:bnb:bsc": "hardhat run scripts/deploy-bnb-bsc.js --network bsc",
+    "deploy:usdt:sepolia:10": "hardhat run scripts/deploy-usdt-sepolia-10.js --network sepolia",
+    "deploy:usdt:bsc:10": "hardhat run scripts/deploy-usdt-bsc-10.js --network bsc",
+    "deploy:usdc:bsc:10": "hardhat run scripts/deploy-usdc-bsc-10.js --network bsc"
   },
   "dependencies": {
     "axios": "^1.6.2",

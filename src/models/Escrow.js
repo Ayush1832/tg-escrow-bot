@@ -62,6 +62,24 @@ const escrowSchema = new mongoose.Schema({
   buyerAddress: String,
   sellerAddress: String,
   depositAddress: String,
+  uniqueDepositAddress: String,
+  tradeTimeout: {
+    type: Date,
+    default: null
+  },
+  timeoutStatus: {
+    type: String,
+    enum: ['active', 'expired', 'cancelled'],
+    default: null
+  },
+  isAbandoned: {
+    type: Boolean,
+    default: false
+  },
+  abandonedAt: {
+    type: Date,
+    default: null
+  },
   inviteLink: String,
   depositAmount: {
     type: Number,

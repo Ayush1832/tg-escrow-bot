@@ -2,7 +2,6 @@ const { Markup } = require('telegraf');
 const { ethers } = require('ethers');
 const Escrow = require('../models/Escrow');
 const BlockchainService = require('../services/BlockchainService');
-const Event = require('../models/Event');
 const config = require('../../config');
 const escrowHandler = require('./escrowHandler');
 const DepositAddress = require('../models/DepositAddress');
@@ -27,7 +26,6 @@ module.exports = async (ctx) => {
 /start - Start the bot
 /escrow - Create new escrow
 /dd - Set deal details
-/seller [address] - Set seller address
 /buyer [address] - Set buyer address
 /token - Select token and network
 /deposit - Get deposit address
@@ -550,13 +548,6 @@ ${escrow.buyerAddress}
       
       await ctx.reply(transactionText);
       
-      // Log event
-      await new Event({
-        escrowId: escrow.escrowId,
-        actorId: ctx.from.id,
-        action: 'token_network_selected',
-        payload: { token, network }
-      }).save();
       
     } else if (callbackData === 'back_to_tokens') {
       await ctx.answerCbQuery('Back to tokens');
@@ -698,7 +689,6 @@ In Private Chat:
 
 In Group Chat:
 - /dd - Set deal details (Quantity - Rate)
-- /seller address - Set seller wallet address
 - /buyer address - Set buyer wallet address
 - /token - Select token and network
 - /deposit - Generate deposit address
@@ -779,7 +769,6 @@ Step 2: Set Deal Details
 - Both parties must agree on terms
 
 Step 3: Set Roles & Addresses
-- Seller: Use /seller your_wallet_address
 - Buyer: Use /buyer your_wallet_address
 - Ensure addresses are correct for selected token/network
 

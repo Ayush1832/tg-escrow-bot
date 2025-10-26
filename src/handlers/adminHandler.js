@@ -1,7 +1,8 @@
 const Escrow = require('../models/Escrow');
-const Event = require('../models/Event');
 const BlockchainService = require('../services/BlockchainService');
 const GroupPoolService = require('../services/GroupPoolService');
+const AddressAssignmentService = require('../services/AddressAssignmentService');
+const TradeTimeoutService = require('../services/TradeTimeoutService');
 const { isAdmin } = require('../middleware/adminAuth');
 const config = require('../../config');
 
@@ -122,17 +123,6 @@ async function adminResolveRelease(ctx) {
         amount
       );
 
-      // Log event
-      await new Event({
-        escrowId: escrow.escrowId,
-        actorId: ctx.from.id,
-        action: 'admin_release',
-        payload: { 
-          amount,
-          buyerAddress: escrow.buyerAddress,
-          reason: 'Admin dispute resolution'
-        }
-      }).save();
 
       // Notify group
       try {
@@ -219,17 +209,6 @@ async function adminResolveRefund(ctx) {
         amount
       );
 
-      // Log event
-      await new Event({
-        escrowId: escrow.escrowId,
-        actorId: ctx.from.id,
-        action: 'admin_refund',
-        payload: { 
-          amount,
-          sellerAddress: escrow.sellerAddress,
-          reason: 'Admin dispute resolution'
-        }
-      }).save();
 
       // Notify group
       try {
@@ -324,10 +303,6 @@ async function adminGroupPool(ctx) {
 ⚡ *Commands:*
 • \`/admin_pool_add <groupId>\` - Add group to pool
 • \`/admin_pool_list\` - List all groups
-• \`/admin_pool_reset\` - Reset completed groups
-• \`/admin_pool_reset_assigned\` - Reset assigned groups to available
-• \`/admin_pool_cleanup\` - Clean up invalid groups
-• \`/admin_pool_archive <groupId>\` - Archive group
 • \`/admin_pool_delete_all\` - Delete all groups from pool
     `;
 
@@ -409,84 +384,9 @@ async function adminPoolList(ctx) {
   }
 }
 
-/**
- * Reset completed groups back to available
- */
-async function adminPoolReset(ctx) {
-  try {
-    if (!isAdmin(ctx)) {
-      return ctx.reply('❌ Access denied. Admin privileges required.');
-    }
 
-    const resetCount = await GroupPoolService.resetCompletedGroups();
-    await ctx.reply(`✅ Reset ${resetCount} completed groups back to available status.`);
 
-  } catch (error) {
-    console.error('Error resetting groups:', error);
-    ctx.reply('❌ Error resetting groups.');
-  }
-}
 
-/**
- * Reset assigned groups back to available (manual override)
- */
-async function adminPoolResetAssigned(ctx) {
-  try {
-    if (!isAdmin(ctx)) {
-      return ctx.reply('❌ Access denied. Admin privileges required.');
-    }
-
-    const resetCount = await GroupPoolService.resetAssignedGroups();
-    await ctx.reply(`✅ Reset ${resetCount} assigned groups back to available status.`);
-
-  } catch (error) {
-    console.error('Error resetting assigned groups:', error);
-    ctx.reply('❌ Error resetting assigned groups.');
-  }
-}
-
-/**
- * Clean up invalid groups (groups that don't exist or bot is not a member)
- */
-async function adminPoolCleanup(ctx) {
-  try {
-    if (!isAdmin(ctx)) {
-      return ctx.reply('❌ Access denied. Admin privileges required.');
-    }
-
-    const cleanedCount = await GroupPoolService.cleanupInvalidGroups(ctx.telegram);
-    await ctx.reply(`✅ Cleaned up ${cleanedCount} invalid groups. They have been archived.`);
-
-  } catch (error) {
-    console.error('Error cleaning up invalid groups:', error);
-    ctx.reply('❌ Error cleaning up invalid groups.');
-  }
-}
-
-/**
- * Archive a group
- */
-async function adminPoolArchive(ctx) {
-  try {
-    if (!isAdmin(ctx)) {
-      return ctx.reply('❌ Access denied. Admin privileges required.');
-    }
-
-    const groupId = ctx.message.text.split(' ')[1];
-    if (!groupId) {
-      return ctx.reply('❌ Please provide group ID.\nUsage: `/admin_pool_archive <groupId>`', {
-        parse_mode: 'Markdown'
-      });
-    }
-
-    await GroupPoolService.archiveGroup(groupId);
-    await ctx.reply(`✅ Archived group ${groupId}.`);
-
-  } catch (error) {
-    console.error('Error archiving group:', error);
-    await ctx.reply(`❌ Error archiving group: ${error.message}`);
-  }
-}
 
 // Activity monitoring stats removed
 
@@ -554,6 +454,103 @@ async function adminRemoveInactive(ctx) {
   }
 }
 
+/**
+ * Admin command to show address pool statistics
+ */
+async function adminAddressPool(ctx) {
+  try {
+    if (!isAdmin(ctx)) {
+      return ctx.reply('❌ Access denied. Admin privileges required.');
+    }
+
+    const stats = await AddressAssignmentService.getAddressPoolStats();
+    
+    if (stats.length === 0) {
+      return ctx.reply('📊 No addresses in pool. Run /admin_init_addresses to initialize.');
+    }
+
+    let message = `🏦 **ADDRESS POOL STATISTICS**\n\n`;
+
+    stats.forEach(stat => {
+      message += `**${stat.token} on ${stat.network}:**\n`;
+      message += `• Total: ${stat.total}\n`;
+      message += `• Available: ${stat.available}\n`;
+      message += `• Assigned: ${stat.assigned}\n`;
+      message += `• Busy: ${stat.busy}\n\n`;
+    });
+
+    await ctx.reply(message);
+
+  } catch (error) {
+    console.error('Error getting address pool stats:', error);
+    ctx.reply('❌ Error loading address pool statistics.');
+  }
+}
+
+/**
+ * Admin command to initialize address pool
+ */
+async function adminInitAddresses(ctx) {
+  try {
+    if (!isAdmin(ctx)) {
+      return ctx.reply('❌ Access denied. Admin privileges required.');
+    }
+
+    await ctx.reply('🚀 Initializing address pool...');
+    
+    const config = require('../../config');
+    const feePercent = Number(config.ESCROW_FEE_PERCENT || 0);
+    await AddressAssignmentService.initializeAddressPool(feePercent);
+    
+    await ctx.reply(`✅ Address pool initialized successfully for ${feePercent}% fee!`);
+
+  } catch (error) {
+    console.error('Error initializing address pool:', error);
+    ctx.reply('❌ Error initializing address pool.');
+  }
+}
+
+/**
+ * Admin command to show timeout statistics
+ */
+async function adminTimeoutStats(ctx) {
+  try {
+    if (!isAdmin(ctx)) {
+      return ctx.reply('❌ Access denied. Admin privileges required.');
+    }
+
+    const stats = await TradeTimeoutService.getTimeoutStats();
+    const abandonedTrades = await TradeTimeoutService.getAbandonedTrades();
+
+    let message = `⏰ **TRADE TIMEOUT STATISTICS**\n\n`;
+    message += `• Active Timeouts: ${stats.active}\n`;
+    message += `• Expired Timeouts: ${stats.expired}\n`;
+    message += `• Cancelled Timeouts: ${stats.cancelled}\n`;
+    message += `• No Timeout Set: ${stats.null}\n\n`;
+    
+    if (abandonedTrades.length > 0) {
+      message += `🚫 **ABANDONED TRADES (${abandonedTrades.length}):**\n\n`;
+      abandonedTrades.slice(0, 5).forEach(trade => {
+        const timeAgo = trade.abandonedAt ? 
+          Math.floor((Date.now() - trade.abandonedAt) / (1000 * 60 * 60)) : 'Unknown';
+        message += `• ${trade.escrowId} - ${timeAgo}h ago\n`;
+      });
+      
+      if (abandonedTrades.length > 5) {
+        message += `• ... and ${abandonedTrades.length - 5} more\n`;
+      }
+    }
+
+    await ctx.reply(message);
+
+  } catch (error) {
+    console.error('Error getting timeout stats:', error);
+    ctx.reply('❌ Error loading timeout statistics.');
+  }
+}
+
+
+
 module.exports = {
   adminDashboard,
   adminResolveRelease,
@@ -562,20 +559,39 @@ module.exports = {
   adminGroupPool,
   adminPoolAdd,
   adminPoolList,
-  adminPoolReset,
-  adminPoolResetAssigned,
-  adminPoolCleanup,
-  adminPoolArchive,
   adminPoolDeleteAll,
   adminPoolDelete,
-  adminCleanupAbandoned,
   adminHelp,
   adminTradeStats,
   adminExportTrades,
   adminRecentTrades,
   adminSettlePartial,
-  adminRecycleAll
+  adminAddressPool,
+  adminInitAddresses,
+  adminTimeoutStats,
+  adminCleanupAddresses,
 };
+
+/**
+ * Admin command to cleanup abandoned addresses
+ */
+async function adminCleanupAddresses(ctx) {
+  try {
+    if (!isAdmin(ctx)) {
+      return ctx.reply('❌ Access denied. Admin privileges required.');
+    }
+
+    await ctx.reply('🧹 Cleaning up abandoned addresses...');
+    
+    const cleanedCount = await AddressAssignmentService.cleanupAbandonedAddresses();
+    
+    await ctx.reply(`✅ Cleaned up ${cleanedCount} abandoned addresses.`);
+
+  } catch (error) {
+    console.error('Error cleaning up addresses:', error);
+    ctx.reply('❌ Error cleaning up abandoned addresses.');
+  }
+}
 
 /**
  * Delete ALL groups from pool (dangerous)
@@ -596,40 +612,6 @@ async function adminPoolDeleteAll(ctx) {
 }
 
 
-/**
- * Clean up abandoned escrows (draft status for more than 24 hours)
- */
-async function adminCleanupAbandoned(ctx) {
-  try {
-    if (!isAdmin(ctx)) {
-      return ctx.reply('❌ Access denied. Admin privileges required.');
-    }
-
-    const abandonedEscrows = await Escrow.find({
-      status: 'draft',
-      assignedFromPool: true,
-      createdAt: { $lt: new Date(Date.now() - (24 * 60 * 60 * 1000)) }
-    });
-
-    let cleanedCount = 0;
-    for (const abandoned of abandonedEscrows) {
-      try {
-        await GroupPoolService.releaseGroup(abandoned.escrowId);
-        abandoned.status = 'completed';
-        await abandoned.save();
-        cleanedCount++;
-      } catch (cleanupError) {
-        console.error('Error cleaning up abandoned escrow:', cleanupError);
-      }
-    }
-
-    await ctx.reply(`🧹 Cleaned up ${cleanedCount} abandoned escrows.`);
-
-  } catch (error) {
-    console.error('Error in admin cleanup:', error);
-    ctx.reply('❌ Error during cleanup.');
-  }
-}
 
 
 /**
@@ -685,18 +667,14 @@ async function adminHelp(ctx) {
 • \`/admin_pool\` - View group pool status and statistics
 • \`/admin_pool_add <groupId>\` - Add group to pool
 • \`/admin_pool_list\` - List all groups in pool
-• \`/admin_pool_reset\` - Reset completed groups to available
-• \`/admin_pool_reset_assigned\` - Reset assigned groups to available
-• \`/admin_pool_cleanup\` - Clean up invalid groups (archived)
-• \`/admin_pool_archive <groupId>\` - Archive specific group
 • \`/admin_pool_delete <groupId>\` - Delete specific group from pool
 • \`/admin_pool_delete_all\` - Delete ALL groups from pool (dangerous)
 
-🔄 **GROUP RECYCLING:**
-• \`/admin_recycle_all\` - Comprehensive recycling of all eligible groups (completed, disputed, abandoned drafts)
+🔄 **AUTOMATIC GROUP RECYCLING:**
+✅ **Automatic 15-minute delayed recycling** after trade completion
+✅ **Automatic 1-hour timeout recycling** for abandoned trades
 
 🧹 **MAINTENANCE:**
-• \`/admin_cleanup_abandoned\` - Clean up abandoned draft escrows (24h+ old)
 
 📋 **AUTOMATIC FEATURES:**
 ✅ **Group Recycling**: Automatic 15-minute delayed recycling after trade completion
@@ -717,8 +695,8 @@ async function adminHelp(ctx) {
 • Export all trades: \`/admin_export_trades\`
 • Trade statistics: \`/admin_trade_stats\`
 • Settle partial payments: \`/admin_settle_partial <escrowId>\`
-• Comprehensive recycling: \`/admin_recycle_all\`
-• Clean up: \`/admin_cleanup_abandoned\``;
+• Address pool status: \`/admin_address_pool\`
+`;
 
     await ctx.reply(helpMessage, { parse_mode: 'Markdown' });
 
@@ -1021,133 +999,6 @@ async function adminRecentTrades(ctx) {
   }
 }
 
-/**
- * Admin command to recycle all eligible groups (comprehensive recycling)
- */
-async function adminRecycleAll(ctx) {
-  try {
-    if (!isAdmin(ctx)) {
-      return ctx.reply('❌ Access denied. Admin privileges required.');
-    }
-
-    const GroupPool = require('../models/GroupPool');
-    const Escrow = require('../models/Escrow');
-    
-    // Find all groups that can be recycled
-    const eligibleGroups = await GroupPool.find({
-      status: { $in: ['assigned', 'completed'] }
-    });
-
-    if (eligibleGroups.length === 0) {
-      return ctx.reply('📊 No groups eligible for recycling found.');
-    }
-
-    let recycledCount = 0;
-    let failedCount = 0;
-    const results = [];
-
-    for (const group of eligibleGroups) {
-      try {
-        // Get the associated escrow
-        const escrow = await Escrow.findOne({ escrowId: group.assignedEscrowId });
-        
-        if (!escrow) {
-          // No escrow found, mark group as available
-          group.status = 'available';
-          group.assignedEscrowId = null;
-          group.assignedAt = null;
-          group.completedAt = null;
-          group.inviteLink = null;
-          await group.save();
-          
-          results.push(`✅ Group ${group.groupId}: No escrow found - marked as available`);
-          recycledCount++;
-          continue;
-        }
-
-        // Check if escrow is completed or disputed
-        if (escrow.status === 'completed' || escrow.status === 'refunded' || escrow.status === 'disputed') {
-          // Try to remove all users from the group
-          const GroupPoolService = require('../services/GroupPoolService');
-          const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, ctx.telegram);
-
-          if (allUsersRemoved) {
-            // All users removed successfully - add back to pool
-            group.status = 'available';
-            group.assignedEscrowId = null;
-            group.assignedAt = null;
-            group.completedAt = null;
-            group.inviteLink = null;
-            await group.save();
-            
-            results.push(`✅ Group ${group.groupId}: Recycled successfully (${escrow.status})`);
-            recycledCount++;
-          } else {
-            // Some users couldn't be removed - mark as completed but don't add to pool
-            group.status = 'completed';
-            group.assignedEscrowId = null;
-            group.assignedAt = null;
-            group.completedAt = new Date();
-            group.inviteLink = null;
-            await group.save();
-            
-            results.push(`⚠️ Group ${group.groupId}: Marked completed but NOT added to pool (users couldn't be removed)`);
-            failedCount++;
-          }
-        } else if (escrow.status === 'draft' && group.assignedAt && 
-                   (Date.now() - new Date(group.assignedAt).getTime()) > (24 * 60 * 60 * 1000)) {
-          // Draft escrow older than 24 hours - clean up
-          group.status = 'available';
-          group.assignedEscrowId = null;
-          group.assignedAt = null;
-          group.completedAt = null;
-          group.inviteLink = null;
-          await group.save();
-          
-          // Mark escrow as completed to free user lock
-          escrow.status = 'completed';
-          await escrow.save();
-          
-          results.push(`🧹 Group ${group.groupId}: Cleaned up abandoned draft (24h+ old)`);
-          recycledCount++;
-        } else {
-          results.push(`⏳ Group ${group.groupId}: Not eligible (escrow status: ${escrow.status})`);
-        }
-
-      } catch (error) {
-        console.error(`Error recycling group ${group.groupId}:`, error);
-        results.push(`❌ Group ${group.groupId}: Error during recycling`);
-        failedCount++;
-      }
-    }
-
-    // Send comprehensive results
-    let resultMessage = `🔄 **COMPREHENSIVE GROUP RECYCLING COMPLETE**
-
-📊 **Summary:**
-• Total Groups Checked: ${eligibleGroups.length}
-• Successfully Recycled: ${recycledCount}
-• Failed/Issues: ${failedCount}
-
-📋 **Detailed Results:**`;
-
-    // Add first 10 results to avoid message length issues
-    const displayResults = results.slice(0, 10);
-    displayResults.forEach(result => {
-      resultMessage += `\n${result}`;
-    });
-
-    if (results.length > 10) {
-      resultMessage += `\n... and ${results.length - 10} more results`;
-    }
-
-    await ctx.reply(resultMessage, { parse_mode: 'Markdown' });
-
-  } catch (error) {
-    console.error('Error in admin recycle all:', error);
-    ctx.reply('❌ Error during comprehensive recycling.');
-  }
-}
 
 /**
  * Admin command to settle partial payment disputes

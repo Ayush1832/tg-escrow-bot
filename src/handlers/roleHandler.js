@@ -1,12 +1,11 @@
 const { Markup } = require('telegraf');
 const Escrow = require('../models/Escrow');
-const Event = require('../models/Event');
 
 module.exports = async (ctx) => {
   try {
     const chatId = ctx.chat.id;
     const userId = ctx.from.id;
-    // Normalize command: handle /seller and /seller@botname
+    // Normalize command: handle /buyer and /buyer@botname
     const rawCmd = ctx.message.text.split(' ')[0].substring(1);
     const command = rawCmd.split('@')[0]; // base command without @bot
     const address = ctx.message.text.split(' ').slice(1).join(' ');
@@ -36,13 +35,8 @@ module.exports = async (ctx) => {
     }
 
     const isBuyer = command === 'buyer';
-    const isSeller = command === 'seller';
 
     if (isBuyer) {
-      // Prevent same user from being both buyer and seller
-      if (escrow.sellerId && escrow.sellerId === userId) {
-        return ctx.reply('❌ You are already set as the seller. The buyer must be a different user.');
-      }
       // Assign buyer role if unassigned; otherwise enforce the assigned user
       if (!escrow.buyerId) {
         escrow.buyerId = userId;
@@ -51,18 +45,8 @@ module.exports = async (ctx) => {
         return ctx.reply('❌ Buyer role is already taken by another user.');
       }
       escrow.buyerAddress = address;
-    } else if (isSeller) {
-      // Prevent same user from being both seller and buyer
-      if (escrow.buyerId && escrow.buyerId === userId) {
-        return ctx.reply('❌ You are already set as the buyer. The seller must be a different user.');
-      }
-      if (!escrow.sellerId) {
-        escrow.sellerId = userId;
-        escrow.sellerUsername = ctx.from.username;
-      } else if (escrow.sellerId !== userId) {
-        return ctx.reply('❌ Seller role is already taken by another user.');
-      }
-      escrow.sellerAddress = address;
+    } else {
+      return ctx.reply('❌ Only /buyer command is supported. Seller address is not required.');
     }
 
     await escrow.save();
@@ -79,17 +63,10 @@ Note: If you don't see any address, then your address will used from saved addre
 
     await ctx.reply(roleText, { parse_mode: 'Markdown' });
 
-    // Log event
-    await new Event({
-      escrowId: escrow.escrowId,
-      actorId: userId,
-      action: `${command}_address_set`,
-      payload: { address }
-    }).save();
 
-    // Check if both addresses are set
-    if (escrow.buyerAddress && escrow.sellerAddress) {
-      await ctx.reply('✅ Both buyer and seller addresses have been set. Use /token to choose crypto.');
+    // Check if buyer address is set
+    if (escrow.buyerAddress) {
+      await ctx.reply('✅ Buyer address has been set. Use /token to choose crypto.');
     }
 
   } catch (error) {

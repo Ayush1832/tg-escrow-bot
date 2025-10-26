@@ -1,7 +1,6 @@
 const { Markup } = require('telegraf');
 const Escrow = require('../models/Escrow');
 const BlockchainService = require('../services/BlockchainService');
-const Event = require('../models/Event');
 const config = require('../../config');
 
 module.exports = async (ctx) => {
@@ -100,13 +99,6 @@ For help: Hit /dispute to call an Administrator.
       reply_markup: keyboard.reply_markup
     });
 
-    // Log event
-    await new Event({
-      escrowId: escrow.escrowId,
-      actorId: userId,
-      action: `${command}_requested`,
-      payload: { amount, targetAddress }
-    }).save();
 
   } catch (error) {
     console.error('Error in release handler:', error);

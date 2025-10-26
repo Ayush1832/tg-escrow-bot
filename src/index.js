@@ -6,7 +6,6 @@ const config = require('../config');
 const User = require('./models/User');
 const Escrow = require('./models/Escrow');
 const DepositAddress = require('./models/DepositAddress');
-const Event = require('./models/Event');
 
 // Import services
 const WalletService = require('./services/WalletService');
@@ -75,7 +74,7 @@ class EscrowBot {
         escrow.status = 'draft';
         await escrow.save();
         
-        await ctx.reply('✅ Deal details saved. Now set /seller and /buyer addresses.\n\n📋 Examples:\n• /seller 0x1234567890abcdef1234567890abcdef12345678\n• /buyer 0xabcdef1234567890abcdef1234567890abcdef12');
+        await ctx.reply('✅ Deal details saved. Now set /buyer address.\n\n📋 Example:\n• /buyer 0xabcdef1234567890abcdef1234567890abcdef12');
         return; // Don't continue to next handlers
       } catch (e) {
         console.error('deal details parse error', e);
@@ -111,19 +110,17 @@ class EscrowBot {
       adminGroupPool,
       adminPoolAdd,
       adminPoolList,
-      adminPoolReset,
-    adminPoolResetAssigned,
-    adminPoolCleanup,
-    adminPoolArchive,
     adminPoolDeleteAll,
     adminPoolDelete,
-    adminCleanupAbandoned,
     adminHelp,
     adminTradeStats,
     adminExportTrades,
     adminRecentTrades,
     adminSettlePartial,
-    adminRecycleAll
+    adminAddressPool,
+    adminInitAddresses,
+    adminTimeoutStats,
+    adminCleanupAddresses
   } = require('./handlers/adminHandler');
     this.bot.command('admin_disputes', adminDashboard);
     this.bot.command('admin_resolve_release', adminResolveRelease);
@@ -132,20 +129,17 @@ class EscrowBot {
     this.bot.command('admin_pool', adminGroupPool);
     this.bot.command('admin_pool_add', adminPoolAdd);
     this.bot.command('admin_pool_list', adminPoolList);
-    this.bot.command('admin_pool_reset', adminPoolReset);
-    this.bot.command('admin_pool_reset_assigned', adminPoolResetAssigned);
-    this.bot.command('admin_pool_cleanup', adminPoolCleanup);
-    this.bot.command('admin_pool_archive', adminPoolArchive);
     this.bot.command('admin_pool_delete_all', adminPoolDeleteAll);
     this.bot.command('admin_pool_delete', adminPoolDelete);
-    this.bot.command('admin_recycle_all', adminRecycleAll);
     this.bot.command('admin_help', adminHelp);
     this.bot.command('admin_trade_stats', adminTradeStats);
     this.bot.command('admin_export_trades', adminExportTrades);
     this.bot.command('admin_recent_trades', adminRecentTrades);
-    this.bot.command('admin_cleanup_abandoned', adminCleanupAbandoned);
     this.bot.command('admin_settle_partial', adminSettlePartial);
-    // Inactivity manual commands removed
+    this.bot.command('admin_address_pool', adminAddressPool);
+    this.bot.command('admin_init_addresses', adminInitAddresses);
+    this.bot.command('admin_timeout_stats', adminTimeoutStats);
+    this.bot.command('admin_cleanup_addresses', adminCleanupAddresses);
 
     // Callback query handler
     this.bot.on('callback_query', callbackHandler);
@@ -186,7 +180,7 @@ ${escrow.status === 'draft' ? '📝 Setting up deal details' :
 
 📋 *Next Steps:*
 ${escrow.status === 'draft' || escrow.status === 'awaiting_details' ? 
-  '1. Use /dd to set deal details (Quantity - Rate)\n2. Set your role with /seller or /buyer [address]\n3. Select token with /token' :
+  '1. Use /dd to set deal details (Quantity - Rate)\n2. Set buyer address with /buyer [address]\n3. Select token with /token' :
   escrow.status === 'awaiting_deposit' ?
   '1. Use /deposit to generate deposit address\n2. Send the agreed amount to the address' :
   escrow.status === 'deposited' ?
@@ -201,7 +195,6 @@ ${escrow.status === 'draft' || escrow.status === 'awaiting_details' ?
 💡 *Useful Commands:*
 • /menu - Show all commands
 • /dd - Set deal details
-• /seller [address] - Set seller address  
 • /buyer [address] - Set buyer address
 • /token - Select token and network
 • /deposit - Get deposit address
@@ -225,7 +218,6 @@ ${escrow.status === 'draft' || escrow.status === 'awaiting_details' ?
 /start - Start the bot
 /escrow - Create new escrow
 /dd - Set deal details
-/seller [address] - Set seller address
 /buyer [address] - Set buyer address
 /token - Select token and network
 /deposit - Get deposit address
@@ -322,47 +314,41 @@ ${escrow.status === 'draft' || escrow.status === 'awaiting_details' ?
 
   async checkDeposits() {
     try {
-      const activeAddresses = await DepositAddress.find({
-        status: 'active',
-        expiresAt: { $gt: new Date() }
+      // Get active escrows with unique deposit addresses
+      const activeEscrows = await Escrow.find({
+        status: 'awaiting_deposit',
+        uniqueDepositAddress: { $exists: true, $ne: null }
       });
 
-      for (const depositAddr of activeAddresses) {
-        const transactions = await BSCService.getUSDTTransactions(depositAddr.address);
-        
-        if (transactions.length > 0) {
-          const escrow = await Escrow.findOne({ escrowId: depositAddr.escrowId });
-          const sellerAddr = (escrow?.sellerAddress || '').toLowerCase();
-          const vaultAddr = depositAddr.address.toLowerCase();
-          const totalAmount = transactions.reduce((sum, tx) => {
-            const from = (tx.from || '').toLowerCase();
-            const to = (tx.to || '').toLowerCase();
-            if (to === vaultAddr && (!sellerAddr || from === sellerAddr)) {
-              return sum + Number(tx.valueDecimal || 0);
-            }
-            return sum;
-          }, 0);
+      for (const escrow of activeEscrows) {
+        try {
+          // Get token balance for the unique deposit address
+          const BlockchainService = require('./services/BlockchainService');
+          const balance = await BlockchainService.getTokenBalance(
+            escrow.token,
+            escrow.chain,
+            escrow.uniqueDepositAddress
+          );
 
-          if (totalAmount > depositAddr.observedAmount) {
-            depositAddr.observedAmount = totalAmount;
-            depositAddr.status = 'used';
-            await depositAddr.save();
+          if (balance > 0) {
+            // Update escrow with deposit information
+            escrow.depositAmount = balance;
+            escrow.confirmedAmount = balance;
+            escrow.status = 'deposited';
+            await escrow.save();
 
-            // Update escrow
-            if (escrow) {
-              escrow.depositAmount = totalAmount;
-              escrow.confirmedAmount = totalAmount;
-              escrow.status = 'deposited';
-              await escrow.save();
+            // Cancel trade timeout since deposit was made
+            const TradeTimeoutService = require('./services/TradeTimeoutService');
+            await TradeTimeoutService.cancelTradeTimeout(escrow.escrowId);
 
-              // Notify in group
-              await this.bot.telegram.sendMessage(
-                escrow.groupId,
-                `💰 *Deposit Confirmed*\n\n🪙 Token: BSC-USDT\n💰 Amount: ${totalAmount.toFixed(2)} [$${totalAmount.toFixed(2)}]\n💸 Balance: ${totalAmount.toFixed(2)} [$${totalAmount.toFixed(2)}]\n\nPlease click update button to show the updated data.`,
-                { parse_mode: 'Markdown' }
-              );
-            }
+            // Notify in group
+            await this.bot.telegram.sendMessage(
+              escrow.groupId,
+              `💰 *Deposit Confirmed*\n\n🪙 Token: ${escrow.token}-${escrow.chain}\n💰 Amount: ${balance.toFixed(2)} ${escrow.token}\n💸 Balance: ${balance.toFixed(2)} ${escrow.token}\n\nPlease click update button to show the updated data.`
+            );
           }
+        } catch (error) {
+          console.error(`Error checking deposit for escrow ${escrow.escrowId}:`, error);
         }
       }
     } catch (error) {
@@ -404,3 +390,17 @@ ${escrow.status === 'draft' || escrow.status === 'awaiting_details' ?
 // Start the bot
 const bot = new EscrowBot();
 bot.start();
+
+// Startup cleanup for timeouts and addresses
+setTimeout(async () => {
+  try {
+    const TradeTimeoutService = require('./services/TradeTimeoutService');
+    const AddressAssignmentService = require('./services/AddressAssignmentService');
+    
+    await TradeTimeoutService.cleanupExpiredTimeouts();
+    await AddressAssignmentService.cleanupAbandonedAddresses();
+    console.log('🧹 Startup cleanup completed');
+  } catch (error) {
+    console.error('Startup cleanup error:', error);
+  }
+}, 5000); // Wait 5 seconds after bot starts

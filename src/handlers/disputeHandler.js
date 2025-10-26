@@ -1,5 +1,4 @@
 const Escrow = require('../models/Escrow');
-const Event = require('../models/Event');
 const config = require('../../config');
 
 module.exports = async (ctx) => {
@@ -49,13 +48,6 @@ Please provide details about the issue and wait for admin intervention.
 
     await ctx.reply(disputeText, { parse_mode: 'Markdown' });
 
-    // Log event
-    await new Event({
-      escrowId: escrow.escrowId,
-      actorId: userId,
-      action: 'dispute_raised',
-      payload: { reason: 'User requested dispute' }
-    }).save();
 
     // Send notification to admin
     await sendAdminDisputeNotification(ctx, escrow);

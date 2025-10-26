@@ -1,6 +1,5 @@
 const { Markup } = require('telegraf');
 const Escrow = require('../models/Escrow');
-const Event = require('../models/Event');
 const Contract = require('../models/Contract');
 const config = require('../../config');
 
@@ -24,8 +23,8 @@ module.exports = async (ctx) => {
       return ctx.reply('❌ No active escrow found in this group. Please use /escrow to create one first.');
     }
 
-    if (!escrow.buyerAddress || !escrow.sellerAddress) {
-      return ctx.reply('❌ Please set both buyer and seller addresses first using /buyer and /seller commands.');
+    if (!escrow.buyerAddress) {
+      return ctx.reply('❌ Please set buyer address first using /buyer command.');
     }
 
     // Get available tokens from database based on current fee percentage
@@ -69,12 +68,6 @@ choose token from the list below
       reply_markup: Markup.inlineKeyboard(tokenButtons).reply_markup
     });
 
-    // Log event
-    await new Event({
-      escrowId: escrow.escrowId,
-      actorId: userId,
-      action: 'token_selection_started'
-    }).save();
 
   } catch (error) {
     console.error('Error in token handler:', error);

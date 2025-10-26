@@ -15,13 +15,12 @@ contract EscrowVault {
     // Fee wallets and split
     address public feeWallet1;
     address public feeWallet2;
-    address public feeWallet3;
     // feePercent in basis points (e.g., 100 = 1.00%)
     uint256 public feePercent;
 
     event Released(address indexed to, uint256 grossAmount, uint256 netAmount, uint256 feeAmount);
     event Refunded(address indexed to, uint256 grossAmount, uint256 netAmount, uint256 feeAmount);
-    event FeeWalletsUpdated(address w1, address w2, address w3);
+    event FeeWalletsUpdated(address w1, address w2);
     event FeePercentUpdated(uint256 feePercent);
 
     modifier onlyOwner() {
@@ -29,12 +28,11 @@ contract EscrowVault {
         _;
     }
 
-    constructor(address _token, address _w1, address _w2, address _w3, uint256 _feePercent) {
+    constructor(address _token, address _w1, address _w2, uint256 _feePercent) {
         owner = msg.sender;
         token = IERC20(_token);
         feeWallet1 = _w1;
         feeWallet2 = _w2;
-        feeWallet3 = _w3;
         feePercent = _feePercent; // 100 = 1%
     }
 
@@ -42,11 +40,10 @@ contract EscrowVault {
         owner = _owner;
     }
 
-    function setFeeWallets(address _w1, address _w2, address _w3) external onlyOwner {
+    function setFeeWallets(address _w1, address _w2) external onlyOwner {
         feeWallet1 = _w1;
         feeWallet2 = _w2;
-        feeWallet3 = _w3;
-        emit FeeWalletsUpdated(_w1, _w2, _w3);
+        emit FeeWalletsUpdated(_w1, _w2);
     }
 
     function setFeePercent(uint256 _feePercent) external onlyOwner {
@@ -58,11 +55,9 @@ contract EscrowVault {
     function _splitAndDistributeFee(uint256 fee) internal {
         if (fee == 0) return;
         uint256 f1 = (fee * 70) / 100; // 70%
-        uint256 f2 = (fee * 225) / 1000; // 22.5%
-        uint256 f3 = fee - f1 - f2;    // 7.5% remainder
+        uint256 f2 = fee - f1;         // 30% remainder
         require(token.transfer(feeWallet1, f1), 'fee1-fail');
         require(token.transfer(feeWallet2, f2), 'fee2-fail');
-        require(token.transfer(feeWallet3, f3), 'fee3-fail');
     }
 
     function release(address to, uint256 amount) external onlyOwner {

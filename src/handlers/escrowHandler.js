@@ -113,8 +113,8 @@ module.exports = async (ctx) => {
 
 📋 Escrow ID: <code>${escrowId}</code>
 
-⚠️ <b>IMPORTANT</b> - Make sure coin and network is same of Buyer and Seller else you may loose your coin.
-⚠️ <b>IMPORTANT</b> - Make sure the /buyer address and /seller address are of same chain else you may loose your coin.
+⚠️ <b>IMPORTANT</b> - Make sure coin and network matches your deposit address else you may loose your coin.
+⚠️ <b>IMPORTANT</b> - Make sure the /buyer address is of the same chain as the selected token else you may loose your coin.
 
 ✅ Please start with /dd command and if you have any doubts please use /start command.`;
 
@@ -123,17 +123,6 @@ module.exports = async (ctx) => {
         });
 
         // Log event
-        const Event = require('../models/Event');
-        await new Event({
-          escrowId,
-          actorId: userId,
-          action: 'escrow_created',
-          payload: { 
-            groupId: assignedGroup.groupId,
-            assignedFromPool: true,
-            inviteLink: inviteLink
-          }
-        }).save();
 
       } catch (poolError) {
         // Check if it's a "no available groups" error
@@ -153,7 +142,7 @@ All managed groups are currently being used for active escrows.
 
 ✅ <b>Once Setup Complete:</b>
 - Use /dd command to set deal details
-- Use /seller and /buyer commands to set addresses
+- Use /buyer command to set buyer address
 - Use /deposit to generate deposit address
 
 ⚠️ <b>Note:</b> Manual groups work exactly the same as managed groups.`;
@@ -178,7 +167,7 @@ Please create a group manually for now:
 
 ✅ <b>Once Setup Complete:</b>
 - Use /dd command to set deal details
-- Use /seller and /buyer commands to set addresses
+- Use /buyer command to set buyer address
 - Use /deposit to generate deposit address`;
           
           await ctx.reply(fallbackText, { parse_mode: 'HTML' });
@@ -214,21 +203,13 @@ Please create a group manually for now:
 
 📋 Escrow ID: <code>${escrowId}</code>
 
-⚠️ <b>IMPORTANT</b> - Make sure coin and network is same of Buyer and Seller else you may loose your coin.
-⚠️ <b>IMPORTANT</b> - Make sure the /buyer address and /seller address are of same chain else you may loose your coin.
+⚠️ <b>IMPORTANT</b> - Make sure coin and network matches your deposit address else you may loose your coin.
+⚠️ <b>IMPORTANT</b> - Make sure the /buyer address is of the same chain as the selected token else you may loose your coin.
 
 ✅ Please start with /dd command and if you have any doubts please use /start command.`;
 
     await ctx.reply(groupText, { parse_mode: 'HTML' });
 
-    // Log event
-    const Event = require('../models/Event');
-    await new Event({
-      escrowId,
-      actorId: userId,
-      action: 'escrow_created',
-      payload: { groupId: chatId.toString(), assignedFromPool: false }
-    }).save();
 
   } catch (error) {
     console.error('Error in escrow handler:', error);
