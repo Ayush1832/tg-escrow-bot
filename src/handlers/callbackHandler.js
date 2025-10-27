@@ -381,17 +381,10 @@ Thank you for using @mm_escrow_bot 🙌
       // Send the start message directly to avoid circular require
       const welcomeText = `
 💫 *@mm_escrow_bot* 💫
-Your Trustworthy Telegram Escrow Service
 
-Welcome to MM escrow. This bot provides a reliable escrow service for your transactions on Telegram.
-Avoid scams, your funds are safeguarded throughout your deals.
+Experience the next level of secure trusted Escrow services Our system is built to protect both parties in every deal,ensuring each transaction is verified, smooth, and fully safeguarded
 
 🔐 Proceed with confidence — your trust, security, and satisfaction are our top priorities.  
-
-🎟 *ESCROW FEE:*
-${config.ESCROW_FEE_PERCENT}% Flat
-
-⚠️ *IMPORTANT* - Make sure coin is same of Buyer and Seller else you may loose your coin.
 
 🌐 Please choose how you'd like to proceed below: 👇
       `;

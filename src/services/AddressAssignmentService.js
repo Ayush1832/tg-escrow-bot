@@ -10,7 +10,14 @@ class AddressAssignmentService {
    */
   async assignDepositAddress(escrowId, token, network, amount, feePercent = null) {
     try {
-      console.log(`🔍 Assigning deposit address for escrow ${escrowId}, amount: ${amount} ${token} on ${network}, fee: ${feePercent}%`);
+      // Validate input parameters
+      if (!escrowId || !token || !network) {
+        throw new Error('Missing required parameters: escrowId, token, or network');
+      }
+
+      if (amount === undefined || amount === null || isNaN(amount) || amount <= 0) {
+        throw new Error(`Invalid amount: ${amount}. Amount must be a positive number.`);
+      }
 
       // Get the fee percentage from config if not provided
       if (feePercent === null) {
@@ -35,7 +42,6 @@ class AddressAssignmentService {
       let assignedAddress = await this.findAvailableAddress(token, network, amount, feePercent);
 
       if (!assignedAddress) {
-        console.log(`❌ No available addresses for ${token} on ${network}`);
         throw new Error(`No available addresses for ${token} on ${network}. Please try again later.`);
       }
 
@@ -102,14 +108,11 @@ class AddressAssignmentService {
    */
   async releaseDepositAddress(escrowId) {
     try {
-      console.log(`🔄 Releasing deposit address for escrow ${escrowId}`);
-
       const address = await AddressPool.findOne({
         assignedEscrowId: escrowId
       });
 
       if (!address) {
-        console.log(`⚠️ No address found for escrow ${escrowId}`);
         return null;
       }
 
@@ -124,7 +127,6 @@ class AddressAssignmentService {
         // Other escrows are using this address, just mark as released but keep assigned
         address.releasedAt = new Date();
         await address.save();
-        console.log(`✅ Address ${address.address} marked as released but kept assigned (other escrows using it)`);
       } else {
         // No other escrows using this address, make it available
         address.status = 'available';
@@ -133,7 +135,6 @@ class AddressAssignmentService {
         address.assignedAt = null;
         address.releasedAt = new Date();
         await address.save();
-        console.log(`✅ Address ${address.address} released and made available`);
       }
 
       return address;
@@ -164,7 +165,6 @@ class AddressAssignmentService {
       });
 
       if (contracts.length === 0) {
-        console.log(`⚠️ No deployed contracts found with ${feePercent}% fee`);
         return;
       }
 
@@ -190,7 +190,7 @@ class AddressAssignmentService {
         }
       }
 
-      console.log(`🎉 Address pool initialized with ${addedCount} addresses`);
+      console.log(`✅ Address pool initialized with ${addedCount} addresses`);
 
     } catch (error) {
       console.error('Error initializing address pool:', error);

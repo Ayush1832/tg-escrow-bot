@@ -21,7 +21,8 @@ module.exports = async (ctx) => {
       groupId: chatId.toString(),
       status: {
         $in: [
-          "awaiting_deposit",
+          "draft",           // After deal details are set
+          "awaiting_deposit", // After token/network selection
           "deposited",
           "in_fiat_transfer",
           "ready_to_release",
@@ -36,15 +37,56 @@ module.exports = async (ctx) => {
       );
     }
 
-    if (escrow.status !== "awaiting_deposit") {
+    // Validate required fields
+    if (!escrow.quantity || escrow.quantity === undefined || escrow.quantity === null) {
+      return ctx.reply("❌ Error: Trade amount is not set. Please recreate the trade.");
+    }
+    
+    if (!escrow.token || !escrow.chain) {
+      return ctx.reply("❌ Error: Token or network information is missing. Please recreate the trade.");
+    }
+
+    if (escrow.status !== "draft" && escrow.status !== "awaiting_deposit") {
       return ctx.reply(
         "⚠️ Deposit address has already been generated for this escrow."
       );
     }
 
+    // If escrow is in draft status, we need to select token/network first
+    if (escrow.status === "draft") {
+      // Check if token/network are already set
+      if (!escrow.token || !escrow.chain) {
+        return ctx.reply(
+          "❌ Please select token and network first using /token command."
+        );
+      }
+      
+      // Token/network are set, but we need to check if contract exists
+      const Contract = require('../models/Contract');
+      const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
+      const contract = await Contract.findOne({
+        name: 'EscrowVault',
+        token: escrow.token,
+        network: escrow.chain.toUpperCase(),
+        feePercent: desiredFeePercent
+      });
+      
+      if (!contract) {
+        return ctx.reply(
+          `❌ Escrow contract not deployed for ${escrow.token} on ${escrow.chain} with ${desiredFeePercent}% fee. Please contact admin to deploy the contract first.`
+        );
+      }
+      
+      // Update status to awaiting_deposit
+      escrow.status = 'awaiting_deposit';
+      await escrow.save();
+    }
+
     await ctx.reply("Requesting a deposit address for you, please wait...");
 
-    // Use new address assignment system
+    // Declare variables outside try block to avoid ReferenceError
+    let address, sharedWithAmount;
+    
     try {
       const addressInfo = await AddressAssignmentService.assignDepositAddress(
         escrow.escrowId,
@@ -54,9 +96,8 @@ module.exports = async (ctx) => {
         Number(config.ESCROW_FEE_PERCENT || 0)
       );
 
-      const address = addressInfo.address;
-      const contractAddress = addressInfo.contractAddress;
-      const sharedWithAmount = addressInfo.sharedWithAmount;
+      address = addressInfo.address;
+      sharedWithAmount = addressInfo.sharedWithAmount;
 
       // Update escrow with unique deposit address
       escrow.uniqueDepositAddress = address;
@@ -88,10 +129,14 @@ module.exports = async (ctx) => {
         );
       }
       
-      console.error('Address assignment error:', addressError);
       return ctx.reply(
         `❌ Error assigning deposit address: ${addressError.message}`
       );
+    }
+
+    // Check if address was successfully assigned
+    if (!address) {
+      return ctx.reply("❌ Failed to generate deposit address. Please try again.");
     }
 
     const feeText = `
