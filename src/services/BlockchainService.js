@@ -46,7 +46,6 @@ class BlockchainService {
     try {
       // Get the desired fee percentage from environment
       const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
-      console.log(`🎯 Looking for contracts with ${desiredFeePercent}% fee (${desiredFeePercent * 100} basis points)`);
       
       // Show all available EscrowVault contracts
       const contracts = await ContractModel.find({ name: 'EscrowVault' });
@@ -55,11 +54,7 @@ class BlockchainService {
         throw new Error('EscrowVault not deployed / not saved');
       }
       
-      console.log('📋 Available EscrowVault contracts:');
-      contracts.forEach(contract => {
-        const feeDisplay = contract.feePercent !== undefined && contract.feePercent !== null ? `${contract.feePercent}%` : 'Unknown';
-        console.log(`  • ${contract.token} on ${contract.network}: ${contract.address} (Fee: ${feeDisplay})`);
-      });
+      
       
       // Find contract with matching fee percentage
       const matchingContract = contracts.find(contract => 
@@ -74,7 +69,6 @@ class BlockchainService {
         throw new Error(`No EscrowVault contract found with ${desiredFeePercent}% fee. Please deploy a contract with this fee percentage.`);
       }
       
-      console.log(`✅ Using contract: ${matchingContract.token} on ${matchingContract.network} (${matchingContract.feePercent}% fee)`);
       
       const wallet = this.wallets[matchingContract.network.toUpperCase()];
       this.vault = new ethers.Contract(matchingContract.address, ESCROW_VAULT_ABI, wallet);

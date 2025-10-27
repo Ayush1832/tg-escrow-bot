@@ -28,7 +28,6 @@ class AddressAssignmentService {
       });
 
       if (existingSameAmount) {
-        console.log(`❌ Address with amount ${amount} ${token} already exists for different escrow: ${existingSameAmount.address}`);
         throw new Error(`Address with amount ${amount} ${token} already exists. Please enter a different amount.`);
       }
 
@@ -47,7 +46,6 @@ class AddressAssignmentService {
       assignedAddress.assignedAt = new Date();
       await assignedAddress.save();
 
-      console.log(`✅ Assigned address ${assignedAddress.address} for escrow ${escrowId} with amount ${amount} ${token}`);
 
       return {
         address: assignedAddress.address,
@@ -75,7 +73,6 @@ class AddressAssignmentService {
       });
 
       if (address) {
-        console.log(`✅ Found available address: ${address.address} (fee: ${feePercent}%)`);
         return address;
       }
 
@@ -89,7 +86,6 @@ class AddressAssignmentService {
       });
 
       if (address) {
-        console.log(`✅ Found address with different amount: ${address.address} (current: ${address.assignedAmount}, requested: ${amount}, fee: ${feePercent}%)`);
         return address;
       }
 
@@ -153,7 +149,6 @@ class AddressAssignmentService {
    */
   async initializeAddressPool(feePercent = null) {
     try {
-      console.log('🚀 Initializing address pool...');
 
       // Get the fee percentage from config if not provided
       if (feePercent === null) {
@@ -192,7 +187,6 @@ class AddressAssignmentService {
 
           await addressPool.save();
           addedCount++;
-          console.log(`✅ Added address ${contract.address} for ${contract.token} on ${contract.network}`);
         }
       }
 
@@ -266,7 +260,6 @@ class AddressAssignmentService {
    */
   async cleanupAbandonedAddresses() {
     try {
-      console.log('🧹 Cleaning up abandoned addresses...');
 
       // Find addresses assigned to non-existent or completed escrows
       const abandonedAddresses = await AddressPool.find({
@@ -291,11 +284,9 @@ class AddressAssignmentService {
           address.releasedAt = new Date();
           await address.save();
           cleanedCount++;
-          console.log(`✅ Cleaned up abandoned address ${address.address}`);
         }
       }
 
-      console.log(`🎉 Cleaned up ${cleanedCount} abandoned addresses`);
       return cleanedCount;
 
     } catch (error) {

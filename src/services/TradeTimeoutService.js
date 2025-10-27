@@ -244,7 +244,6 @@ If you want to start a new trade, please create a new escrow.`;
    */
   async cleanupExpiredTimeouts() {
     try {
-      console.log('🧹 Cleaning up expired timeouts...');
 
       const expiredEscrows = await Escrow.find({
         tradeTimeout: { $lt: new Date() },
@@ -263,7 +262,6 @@ If you want to start a new trade, please create a new escrow.`;
         cleanedCount++;
       }
 
-      console.log(`🎉 Cleaned up ${cleanedCount} expired timeouts`);
       return cleanedCount;
 
     } catch (error) {

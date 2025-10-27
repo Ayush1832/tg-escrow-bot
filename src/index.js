@@ -279,13 +279,10 @@ ${escrow.status === 'draft' || escrow.status === 'awaiting_details' ?
       
       // Connect to MongoDB and wait for full connection
       await connectDB();
-      console.log('✅ MongoDB connection established');
       
       // Initialize on-chain vault (optional for basic bot functionality)
       try {
-        console.log('🔧 Initializing BlockchainService...');
         const addr = await BlockchainService.initialize();
-        console.log('✅ BlockchainService initialized');
       } catch (e) {
         console.warn('⚠️ EscrowVault not found. Bot will work in limited mode. Deploy with `npm run deploy:sepolia`');
       }
@@ -403,9 +400,7 @@ bot.start();
 
 // Startup cleanup for timeouts and addresses
 setTimeout(async () => {
-  try {
-    console.log('🧹 Starting cleanup tasks...');
-    
+  try {    
     // Ensure MongoDB is connected with timeout
     if (mongoose.connection.readyState !== 1) {
       console.log('⏳ Waiting for MongoDB connection...');
@@ -433,13 +428,10 @@ setTimeout(async () => {
     const TradeTimeoutService = require('./services/TradeTimeoutService');
     const AddressAssignmentService = require('./services/AddressAssignmentService');
     
-    console.log('🧹 Cleaning up expired timeouts...');
     await TradeTimeoutService.cleanupExpiredTimeouts();
     
-    console.log('🧹 Cleaning up abandoned addresses...');
     await AddressAssignmentService.cleanupAbandonedAddresses();
     
-    console.log('✅ Startup cleanup completed');
   } catch (error) {
     console.error('❌ Startup cleanup error:', error);
   }
