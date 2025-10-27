@@ -372,10 +372,13 @@ class BlockchainService {
       const tx = await vaultContract.release(buyerAddress, amountWei);
       const receipt = await tx.wait();
 
-      console.log(`✅ Release transaction successful: ${receipt.transactionHash}`);
+      // Get transaction hash from receipt or transaction object
+      const transactionHash = receipt.transactionHash || receipt.hash || tx.hash;
+      
+      console.log(`✅ Release transaction successful: ${transactionHash}`);
       return {
         success: true,
-        transactionHash: receipt.transactionHash,
+        transactionHash: transactionHash,
         blockNumber: receipt.blockNumber
       };
 
@@ -409,10 +412,13 @@ class BlockchainService {
       const tx = await vaultContract.refund(sellerAddress, amountWei);
       const receipt = await tx.wait();
 
-      console.log(`✅ Refund transaction successful: ${receipt.transactionHash}`);
+      // Get transaction hash from receipt or transaction object
+      const transactionHash = receipt.transactionHash || receipt.hash || tx.hash;
+      
+      console.log(`✅ Refund transaction successful: ${transactionHash}`);
       return {
         success: true,
-        transactionHash: receipt.transactionHash,
+        transactionHash: transactionHash,
         blockNumber: receipt.blockNumber
       };
 
@@ -476,8 +482,11 @@ class BlockchainService {
       const tx = await vaultContract.withdrawToken(tokenAddress, adminAddress);
       const receipt = await tx.wait();
 
-      console.log(`✅ Admin withdrawal transaction successful: ${receipt.transactionHash}`);
-      return receipt.transactionHash;
+      // Get transaction hash from receipt or transaction object
+      const transactionHash = receipt.transactionHash || receipt.hash || tx.hash;
+      
+      console.log(`✅ Admin withdrawal transaction successful: ${transactionHash}`);
+      return transactionHash;
 
     } catch (error) {
       console.error('Error withdrawing to admin:', error);
