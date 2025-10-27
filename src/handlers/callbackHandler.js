@@ -157,7 +157,7 @@ module.exports = async (ctx) => {
       // Transfer all funds to admin wallet
       try {
         const BlockchainService = require('../services/BlockchainService');
-        const config = require('../config');
+        const config = require('../../config');
         
         // Get the contract address for this escrow
         const contractAddress = await BlockchainService.getEscrowContractAddress(escrow.token, escrow.chain);
@@ -172,7 +172,7 @@ module.exports = async (ctx) => {
         }
 
         // Get the current balance in the contract
-        const balance = await BlockchainService.getTokenBalance(contractAddress, escrow.token, escrow.chain);
+        const balance = await BlockchainService.getTokenBalance(escrow.token, escrow.chain, contractAddress);
         
         if (balance > 0) {
           // Transfer all funds to admin
@@ -813,7 +813,7 @@ Important Notes:
  */
 async function sendAdminPartialPaymentNotification(ctx, escrow, transferredAmount) {
   try {
-    const adminUserIds = [config.ADMIN_USER_ID];
+    const adminUserIds = config.getAllAdminIds();
     
     // Generate invite link for the group
     let inviteLink = '';

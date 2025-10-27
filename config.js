@@ -39,6 +39,7 @@ module.exports = {
 
   // Wallet Configuration
   HOT_WALLET_PRIVATE_KEY: process.env.HOT_WALLET_PRIVATE_KEY,
+  ADMIN_DEPOSIT_ADDRESS: process.env.ADMIN_DEPOSIT_ADDRESS,
 
   // Escrow Configuration
   ESCROW_FEE_PERCENT: Number(process.env.ESCROW_FEE_PERCENT || 1.0),

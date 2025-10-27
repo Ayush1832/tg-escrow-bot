@@ -57,7 +57,7 @@ class BlockchainService {
       
       console.log('📋 Available EscrowVault contracts:');
       contracts.forEach(contract => {
-        const feeDisplay = contract.feePercent ? `${contract.feePercent}%` : 'Unknown';
+        const feeDisplay = contract.feePercent !== undefined && contract.feePercent !== null ? `${contract.feePercent}%` : 'Unknown';
         console.log(`  • ${contract.token} on ${contract.network}: ${contract.address} (Fee: ${feeDisplay})`);
       });
       
@@ -449,6 +449,14 @@ class BlockchainService {
   }
 
   /**
+   * Get token contract address for a given token and network
+   */
+  getTokenAddress(token, network) {
+    const tokenKey = `${token}_${network.toUpperCase()}`;
+    return config[tokenKey];
+  }
+
+  /**
    * Withdraw all funds from escrow contract to admin wallet
    */
   async withdrawToAdmin(contractAddress, adminAddress, token, network, amount) {
@@ -464,8 +472,14 @@ class BlockchainService {
 
       console.log(`Withdrawing ${amount} ${token} to admin wallet ${adminAddress} on ${network}`);
       
+      // Get the token contract address
+      const tokenAddress = this.getTokenAddress(token, network);
+      if (!tokenAddress) {
+        throw new Error(`Token address not found for ${token} on ${network}`);
+      }
+      
       // Use the withdrawToken function from the contract
-      const tx = await vaultContract.withdrawToken(token, adminAddress);
+      const tx = await vaultContract.withdrawToken(tokenAddress, adminAddress);
       const receipt = await tx.wait();
 
       console.log(`✅ Admin withdrawal transaction successful: ${receipt.transactionHash}`);

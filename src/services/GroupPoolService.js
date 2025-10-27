@@ -215,6 +215,13 @@ class GroupPoolService {
   }
 
   /**
+   * Get pool statistics (alias for getPoolStats)
+   */
+  async getGroupPoolStats() {
+    return this.getPoolStats();
+  }
+
+  /**
    * Get pool statistics
    */
   async getPoolStats() {

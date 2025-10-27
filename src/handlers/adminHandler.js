@@ -1085,3 +1085,26 @@ Thank you for using our escrow service!`;
     ctx.reply('❌ Error settling partial payment dispute.');
   }
 }
+
+module.exports = {
+  adminDashboard,
+  adminResolveRelease,
+  adminResolveRefund,
+  adminStats,
+  adminGroupPool,
+  adminPoolAdd,
+  adminPoolList,
+  adminWarnInactive,
+  adminRemoveInactive,
+  adminAddressPool,
+  adminInitAddresses,
+  adminTimeoutStats,
+  adminCleanupAddresses,
+  adminPoolDeleteAll,
+  adminPoolDelete,
+  adminHelp,
+  adminTradeStats,
+  adminExportTrades,
+  adminRecentTrades,
+  adminSettlePartial
+};

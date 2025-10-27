@@ -53,6 +53,5 @@ const addressPoolSchema = new mongoose.Schema({
 // Index for efficient querying
 addressPoolSchema.index({ token: 1, network: 1, feePercent: 1, status: 1 });
 addressPoolSchema.index({ assignedEscrowId: 1 });
-addressPoolSchema.index({ address: 1 });
 
 module.exports = mongoose.model('AddressPool', addressPoolSchema);

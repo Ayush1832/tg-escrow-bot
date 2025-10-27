@@ -1,4 +1,5 @@
 const { Telegraf, Markup } = require('telegraf');
+const mongoose = require('mongoose');
 const connectDB = require('./utils/database');
 const config = require('../config');
 
@@ -274,13 +275,22 @@ ${escrow.status === 'draft' || escrow.status === 'awaiting_details' ?
 
   async start() {
     try {
+      console.log('🚀 Starting Escrow Bot...');
+      
+      // Connect to MongoDB and wait for full connection
       await connectDB();
+      console.log('✅ MongoDB connection established');
+      
       // Initialize on-chain vault (optional for basic bot functionality)
       try {
+        console.log('🔧 Initializing BlockchainService...');
         const addr = await BlockchainService.initialize();
+        console.log('✅ BlockchainService initialized');
       } catch (e) {
         console.warn('⚠️ EscrowVault not found. Bot will work in limited mode. Deploy with `npm run deploy:sepolia`');
       }
+      
+      // Launch the bot
       await this.bot.launch();
       console.log('🤖 Escrow Bot started successfully!');
       
@@ -394,13 +404,43 @@ bot.start();
 // Startup cleanup for timeouts and addresses
 setTimeout(async () => {
   try {
+    console.log('🧹 Starting cleanup tasks...');
+    
+    // Ensure MongoDB is connected with timeout
+    if (mongoose.connection.readyState !== 1) {
+      console.log('⏳ Waiting for MongoDB connection...');
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('MongoDB connection timeout during cleanup'));
+        }, 15000); // 15 second timeout
+        
+        if (mongoose.connection.readyState === 1) {
+          clearTimeout(timeout);
+          resolve();
+        } else {
+          mongoose.connection.once('open', () => {
+            clearTimeout(timeout);
+            resolve();
+          });
+          mongoose.connection.once('error', (error) => {
+            clearTimeout(timeout);
+            reject(error);
+          });
+        }
+      });
+    }
+    
     const TradeTimeoutService = require('./services/TradeTimeoutService');
     const AddressAssignmentService = require('./services/AddressAssignmentService');
     
+    console.log('🧹 Cleaning up expired timeouts...');
     await TradeTimeoutService.cleanupExpiredTimeouts();
+    
+    console.log('🧹 Cleaning up abandoned addresses...');
     await AddressAssignmentService.cleanupAbandonedAddresses();
-    console.log('🧹 Startup cleanup completed');
+    
+    console.log('✅ Startup cleanup completed');
   } catch (error) {
-    console.error('Startup cleanup error:', error);
+    console.error('❌ Startup cleanup error:', error);
   }
 }, 5000); // Wait 5 seconds after bot starts
