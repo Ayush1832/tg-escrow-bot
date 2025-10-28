@@ -50,6 +50,7 @@ module.exports = async (ctx) => {
     // Calculate fees
     const escrowFee = (amount * config.ESCROW_FEE_PERCENT) / 100;
     // Network fee is paid in BNB by operator wallet; vault takes only escrow fee
+    const networkFee = 0.1; // Fixed network fee (paid separately in BNB)
     const totalFees = escrowFee;
     const netAmount = amount - totalFees;
 
@@ -57,22 +58,32 @@ module.exports = async (ctx) => {
       return ctx.reply('❌ Amount is too small after fees.');
     }
 
-    const targetAddress = command === 'release' ? escrow.buyerAddress : escrow.sellerAddress;
-    const targetUser = command === 'release' ? 'Buyer' : 'Seller';
+    // For refunds, seller address is required but no longer set via /seller command
+    // Refunds are handled by admin only or should extract from deposit transaction
+    if (command === 'refund') {
+      return ctx.reply('❌ Refund functionality requires seller address. Please contact admin for refunds or use admin commands.');
+    }
+
+    const targetAddress = escrow.buyerAddress;
+    const targetUser = 'Buyer';
+
+    if (!targetAddress) {
+      return ctx.reply('❌ Buyer address is not set. Please set buyer address using /buyer command.');
+    }
 
     const confirmationText = `
-‼️ *${command === 'release' ? 'Release' : 'Refund'} Confirmation* ‼️
+‼️ *Release Confirmation* ‼️
 
-🔒 Paying To: ${targetUser}[@${ctx.from.username}]
-💰 Amount: ${amount.toFixed(2)}[$${amount.toFixed(2)}]
+🔒 Paying To: ${targetUser}[@${ctx.from.username || 'N/A'}]
+💰 Amount: ${amount.toFixed(2)} ${escrow.token}[$${amount.toFixed(2)}]
 🌐 Network Fee: ${networkFee.toFixed(5)}[$${networkFee.toFixed(2)}]
 💷 Escrow Fee: ${escrowFee.toFixed(5)}[$${escrowFee.toFixed(2)}]
 🤝 Ambassador Discounts: 0.00000[0.00$]
 🎫 Ticket Discount: 0.00000[0.00$]
 
 📬 Address: ${targetAddress}
-🪙 Token: USDT
-🌐 Network: BSC
+🪙 Token: ${escrow.token}
+🌐 Network: ${escrow.chain}
 
 (Network fee will be deducted from amount)
 (Escrow fee will be deducted from total balance)
@@ -86,12 +97,13 @@ For help: Hit /dispute to call an Administrator.
 ✅ Seller Confirmed: ${escrow.sellerConfirmedRelease ? 'Yes' : 'No'}
     `;
 
+    // Only release is supported, so force command to 'release'
     const keyboard = Markup.inlineKeyboard([
       [
-        Markup.button.callback('✅ Buyer Confirm', `confirm_${command}_buyer_${amount}`),
-        Markup.button.callback('✅ Seller Confirm', `confirm_${command}_seller_${amount}`)
+        Markup.button.callback('✅ Buyer Confirm', `confirm_release_buyer_${amount}`),
+        Markup.button.callback('✅ Seller Confirm', `confirm_release_seller_${amount}`)
       ],
-      [Markup.button.callback('❌ Reject', `reject_${command}_${amount}`)]
+      [Markup.button.callback('❌ Reject', `reject_release_${amount}`)]
     ]);
 
     await ctx.reply(confirmationText, { 

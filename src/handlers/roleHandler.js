@@ -43,7 +43,7 @@ module.exports = async (ctx) => {
         escrow.buyerId = userId;
         escrow.buyerUsername = ctx.from.username;
       } else if (escrow.buyerId !== userId) {
-        return ctx.reply('❌ Buyer role is already taken by another user.');
+        return ctx.reply('❌ Buyer role is already taken by another user. Only the buyer can send this command.');
       }
       escrow.buyerAddress = address;
     } else {
@@ -55,7 +55,7 @@ module.exports = async (ctx) => {
     const roleText = `
 📍 *ESCROW-ROLE DECLARATION*
 
-⚡️ BUYER @${ctx.from.username} | Userid: [${userId}]
+⚡️ BUYER @${ctx.from.username}
 
 ✅ BUYER WALLET
 
@@ -68,8 +68,7 @@ Note: If you don't see any address, then your address will used from saved addre
     // Show token selection menu automatically when buyer address is set
     if (escrow.buyerAddress) {
       await ctx.reply('✅ Buyer address has been set.');
-      await ctx.reply('Choose token from the list below');
-      // Automatically show token selection menu
+      // Automatically show token selection menu (it already shows "choose token from the list below")
       await tokenHandler(ctx);
     }
 

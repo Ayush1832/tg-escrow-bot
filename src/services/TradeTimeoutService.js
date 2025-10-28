@@ -117,6 +117,7 @@ class TradeTimeoutService {
 
   /**
    * Send timeout notification to users
+   * REMOVED: No longer sending DM messages, only in-group messages
    */
   async sendTimeoutNotification(escrow, telegram) {
     try {
@@ -130,28 +131,10 @@ Your escrow has been automatically cancelled due to inactivity.
 
 If you want to start a new trade, please create a new escrow.`;
 
-      // Send to buyer if they exist
-      if (escrow.buyerId) {
-        try {
-          await telegram.sendMessage(escrow.buyerId, message);
-        } catch (error) {
-          console.log(`Could not send timeout message to buyer ${escrow.buyerId}:`, error.message);
-        }
-      }
-
-      // Send to seller if they exist
-      if (escrow.sellerId) {
-        try {
-          await telegram.sendMessage(escrow.sellerId, message);
-        } catch (error) {
-          console.log(`Could not send timeout message to seller ${escrow.sellerId}:`, error.message);
-        }
-      }
-
-      // Send to group if it exists
+      // Only send to group, not to users personally
       if (escrow.groupId) {
         try {
-          await telegram.sendMessage(escrow.groupId, message);
+          await telegram.sendMessage(escrow.groupId, message, { parse_mode: 'Markdown' });
         } catch (error) {
           console.log(`Could not send timeout message to group ${escrow.groupId}:`, error.message);
         }

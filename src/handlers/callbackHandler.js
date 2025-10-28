@@ -239,35 +239,59 @@ module.exports = async (ctx) => {
       if (!escrow || !escrow.depositAddress) {
         return ctx.reply('❌ No active deposit address found.');
       }
-      const activeAddr = await DepositAddress.findOne({ escrowId: escrow.escrowId, address: escrow.depositAddress, status: { $in: ['active', 'used'] } });
-      if (!activeAddr) return ctx.reply('❌ Deposit address expired or missing.');
+      
+      // Check AddressPool to verify address is still assigned (new system uses AddressPool)
+      const AddressPool = require('../models/AddressPool');
+      const activeAddr = await AddressPool.findOne({ 
+        address: escrow.depositAddress,
+        assignedEscrowId: escrow.escrowId,
+        status: { $in: ['assigned', 'busy'] }
+      });
+      
+      // Allow check if address exists in escrow (fallback for older escrows)
+      if (!activeAddr && !escrow.depositAddress) {
+        return ctx.reply('❌ Deposit address expired or missing.');
+      }
+      
+      const checkAddress = escrow.depositAddress;
 
       // On-chain first: query RPC logs, then fallback to explorer
-      let txs = await BlockchainService.getTokenTransfersViaRPC(escrow.token, escrow.chain, activeAddr.address, activeAddr.lastCheckedBlock || 0);
+      // Start from 0 if no previous check, or we can use escrow's last checked block field
+      const lastCheckedBlock = escrow.lastCheckedBlock || 0;
+      let txs = await BlockchainService.getTokenTransfersViaRPC(escrow.token, escrow.chain, checkAddress, lastCheckedBlock);
       if (!txs || txs.length === 0) {
-        txs = await BlockchainService.getTokenTransactions(escrow.token, escrow.chain, activeAddr.address);
+        txs = await BlockchainService.getTokenTransactions(escrow.token, escrow.chain, checkAddress);
       }
+      
       const sellerAddr = (escrow.sellerAddress || '').toLowerCase();
-      const vaultAddr = activeAddr.address.toLowerCase();
-      // Only count new deposits since the last check
+      const vaultAddr = checkAddress.toLowerCase();
+      
+      // Only count new deposits since the last check - filter for deposits TO the vault
       const newDeposits = (txs || []).filter(tx => {
         const from = (tx.from || '').toLowerCase();
         const to = (tx.to || '').toLowerCase();
-        return to === vaultAddr && (!sellerAddr || from === sellerAddr);
+        // Accept deposit if it's to the vault address
+        // If seller address is set, optionally filter by sender (but allow any sender for now)
+        return to === vaultAddr;
       });
       
       const newAmount = newDeposits.reduce((sum, tx) => sum + Number(tx.valueDecimal || 0), 0);
-      const totalAmount = (activeAddr.observedAmount || 0) + newAmount;
+      const previousAmount = escrow.depositAmount || 0;
+      const totalAmount = previousAmount + newAmount;
 
       if (newAmount > 0) {
-        activeAddr.observedAmount = totalAmount;
+        // Update AddressPool status to busy
+        if (activeAddr) {
+          activeAddr.status = 'busy';
+          await activeAddr.save();
+        }
+        
         // Track last checked block from RPC
         try {
           const latest = await BlockchainService.getLatestBlockNumber(escrow.chain);
-          if (latest) activeAddr.lastCheckedBlock = latest;
+          if (latest) escrow.lastCheckedBlock = latest;
         } catch {}
-        activeAddr.status = 'used';
-        await activeAddr.save();
+        
         escrow.depositAmount = totalAmount;
         escrow.confirmedAmount = totalAmount;
         escrow.status = 'deposited';
@@ -426,7 +450,7 @@ module.exports = async (ctx) => {
       }
       try {
         await ctx.reply('🚀 Release of payment is in progress...');
-        await BlockchainService.release(escrow.buyerAddress, amount, escrow.token, escrow.chain);
+        await BlockchainService.releaseFunds(escrow.token, escrow.chain, escrow.buyerAddress, amount);
         escrow.status = 'completed';
         await escrow.save();
 
@@ -478,26 +502,24 @@ module.exports = async (ctx) => {
         return ctx.answerCbQuery('❌ Only the seller can confirm this action.');
       }
 
-      // Update confirmation status
+      // Only release is supported (refunds require seller address which is no longer set)
+      if (action === 'refund') {
+        return ctx.answerCbQuery('❌ Refund functionality requires seller address. Please contact admin for refunds.');
+      }
+
+      // Update confirmation status (only for release)
       if (action === 'release') {
         if (role === 'buyer') {
           escrow.buyerConfirmedRelease = true;
         } else {
           escrow.sellerConfirmedRelease = true;
         }
-      } else if (action === 'refund') {
-        if (role === 'buyer') {
-          escrow.buyerConfirmedRefund = true;
-        } else {
-          escrow.sellerConfirmedRefund = true;
-        }
       }
 
       await escrow.save();
 
-      // Check if both parties confirmed
-      const bothConfirmed = (action === 'release' && escrow.buyerConfirmedRelease && escrow.sellerConfirmedRelease) ||
-                           (action === 'refund' && escrow.buyerConfirmedRefund && escrow.sellerConfirmedRefund);
+      // Check if both parties confirmed (only for release)
+      const bothConfirmed = action === 'release' && escrow.buyerConfirmedRelease && escrow.sellerConfirmedRelease;
 
       if (bothConfirmed) {
         // Execute the transaction
@@ -506,22 +528,23 @@ module.exports = async (ctx) => {
         const networkFee = 0.1;
         const netAmount = amount - networkFee;
 
-        const targetAddress = action === 'release' ? escrow.buyerAddress : escrow.sellerAddress;
+        // Action should be 'release' only (checked earlier)
+        const targetAddress = escrow.buyerAddress;
+        if (!targetAddress) {
+          return ctx.reply('❌ Buyer address is not set. Cannot proceed with release.');
+        }
+
         try {
-          if (action === 'release') {
-            await BlockchainService.release(targetAddress, amount);
-          } else {
-            await BlockchainService.refund(targetAddress, amount);
-          }
+          await BlockchainService.releaseFunds(escrow.token, escrow.chain, targetAddress, amount);
           
-          // Update escrow status
-          escrow.status = action === 'release' ? 'completed' : 'refunded';
+          // Update escrow status to completed
+          escrow.status = 'completed';
           await escrow.save();
 
           // Activity tracking removed
 
           const successText = `
-${netAmount.toFixed(5)} ${escrow.token} [$${netAmount.toFixed(2)}] 💸 + NETWORK FEE has been ${action === 'release' ? 'released' : 'refunded'} to the ${action === 'release' ? 'Buyer' : 'Seller'}'s address! 🚀
+${netAmount.toFixed(5)} ${escrow.token} [$${netAmount.toFixed(2)}] 💸 + NETWORK FEE has been released to the Buyer's address! 🚀
 
 Approved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}
           `;
@@ -549,14 +572,160 @@ Approved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escro
           await ctx.reply('❌ Error executing transaction. Please try again or contact support.');
         }
       } else {
-        const waitingText = `${action === 'release' ? 'Release' : 'Refund'} confirmation received. Waiting for the other party to confirm.`;
+        const waitingText = `Release confirmation received. Waiting for the other party to confirm.`;
         await ctx.reply(waitingText);
       }
 
       await ctx.answerCbQuery('✅ Confirmation recorded');
     } else if (callbackData.startsWith('reject_')) {
+      const [, action] = callbackData.split('_');
+      
+      // Only release is supported, but handle both for safety
+      if (action === 'refund') {
+        return ctx.answerCbQuery('❌ Refund functionality requires seller address. Please contact admin for refunds.');
+      }
+      
+      // Find active escrow and reset confirmations
+      const escrow = await Escrow.findOne({
+        groupId: chatId.toString(),
+        status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
+      });
+      
+      if (escrow) {
+        escrow.buyerConfirmedRelease = false;
+        escrow.sellerConfirmedRelease = false;
+        escrow.buyerConfirmedRefund = false;
+        escrow.sellerConfirmedRefund = false;
+        await escrow.save();
+      }
+      
       await ctx.answerCbQuery('❌ Transaction rejected');
-      await ctx.reply('❌ Transaction has been rejected by one of the parties.');
+      await ctx.reply('❌ Transaction has been rejected by one of the parties. Please restart the process if needed.');
+    } else if (callbackData.startsWith('confirm_refund_address_')) {
+      await ctx.answerCbQuery('Processing address confirmation...');
+      const escrowId = callbackData.split('_')[3];
+      const escrow = await Escrow.findOne({ escrowId });
+      
+      if (!escrow) {
+        return ctx.reply('❌ Escrow not found.');
+      }
+
+      // Verify seller exists and user is the seller
+      if (!escrow.sellerId) {
+        return ctx.reply('❌ Seller ID is not set for this escrow.');
+      }
+
+      if (escrow.sellerId !== userId) {
+        return ctx.reply('❌ Only the seller can confirm the refund address.');
+      }
+
+      // Verify escrow is in refund pending state
+      if (escrow.disputeResolution !== 'refund_pending_address') {
+        return ctx.reply('❌ This escrow is not waiting for a refund address.');
+      }
+
+      if (!escrow.pendingSellerAddress) {
+        return ctx.reply('❌ No pending address found. Please provide your address again.');
+      }
+
+      // Address confirmed - proceed with refund
+      try {
+        const sellerAddress = escrow.pendingSellerAddress;
+        const amount = escrow.confirmedAmount || escrow.depositAmount || 0;
+        
+        if (!amount || amount <= 0) {
+          return ctx.reply('❌ Invalid amount. Cannot proceed with refund.');
+        }
+
+        if (!escrow.token || !escrow.chain) {
+          return ctx.reply('❌ Token or network not set. Cannot proceed with refund.');
+        }
+        
+        // Execute refund
+        await BlockchainService.refundFunds(
+          escrow.token,
+          escrow.chain,
+          sellerAddress,
+          amount
+        );
+
+        // Update escrow status
+        escrow.sellerAddress = sellerAddress;
+        escrow.pendingSellerAddress = null;
+        escrow.disputeResolution = 'refund';
+        escrow.disputeResolvedAt = new Date();
+        escrow.status = 'refunded';
+        await escrow.save();
+
+        // Notify group of successful refund
+        const successMessage = `✅ *REFUND COMPLETED*
+
+📋 Escrow ID: \`${escrow.escrowId}\`
+💰 Amount: ${amount} ${escrow.token}
+📍 Address: \`${sellerAddress}\`
+🪙 Token: ${escrow.token}
+🌐 Network: ${escrow.chain}
+
+✅ Funds have been successfully refunded to the seller's address.
+
+Resolved by: Admin`;
+
+        await ctx.telegram.sendMessage(
+          escrow.groupId,
+          successMessage,
+          { parse_mode: 'Markdown' }
+        );
+
+        // Send trade completion message with close trade button (same as release flow)
+        await ctx.telegram.sendMessage(
+          escrow.groupId,
+          `✅ The trade has been completed successfully!\n\nTo close this trade, click on the button below.`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: '🔒 Close Trade',
+                    callback_data: `close_trade_${escrow.escrowId}`
+                  }
+                ]
+              ]
+            }
+          }
+        );
+
+        await ctx.reply(`✅ Refund completed successfully! ${amount} ${escrow.token} has been sent to ${sellerAddress}`);
+
+      } catch (error) {
+        console.error('Error processing refund:', error);
+        await ctx.reply('❌ Error processing refund. Please contact admin.');
+      }
+
+    } else if (callbackData.startsWith('cancel_refund_address_')) {
+      await ctx.answerCbQuery('Address confirmation cancelled');
+      const escrowId = callbackData.split('_')[3];
+      const escrow = await Escrow.findOne({ escrowId });
+      
+      if (!escrow) {
+        return ctx.reply('❌ Escrow not found.');
+      }
+
+      // Verify user is the seller
+      if (!escrow.sellerId) {
+        return ctx.reply('❌ Seller ID is not set for this escrow.');
+      }
+
+      if (escrow.sellerId !== userId) {
+        return ctx.reply('❌ Only the seller can cancel the refund address confirmation.');
+      }
+
+      if (escrow.disputeResolution !== 'refund_pending_address') {
+        return ctx.reply('❌ This escrow is not waiting for a refund address.');
+      }
+
+      escrow.pendingSellerAddress = null;
+      await escrow.save();
+      await ctx.reply('❌ Address confirmation cancelled. Please provide your address again in the group.');
     } else if (callbackData === 'my_escrows') {
       await ctx.answerCbQuery('Loading your escrows...');
       await handleMyEscrows(ctx);
@@ -701,8 +870,8 @@ choose network from the list below for ${token}
       const declarationText = `
 📍 *ESCROW DECLARATION*
 
-⚡️ Buyer ${buyerTag} | Userid: [${escrow.buyerId}]
-⚡️ Seller ${sellerTag} | Userid: [${escrow.sellerId}]
+⚡️ Buyer ${buyerTag}
+⚡️ Seller ${sellerTag}
 
 ✅ ${token} CRYPTO
 ✅ ${network} NETWORK
@@ -710,26 +879,36 @@ choose network from the list below for ${token}
       
       await ctx.reply(declarationText);
       
+      // Calculate trade start time from escrow creation (IST timezone)
+      const tradeStartTime = escrow.tradeStartTime || escrow.createdAt;
+      const istTime = new Date(tradeStartTime).toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit',
+        month: '2-digit',
+        year: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+      
+      // Store trade start time if not already stored
+      if (!escrow.tradeStartTime) {
+        escrow.tradeStartTime = escrow.createdAt;
+        await escrow.save();
+      }
+      
       // Get transaction information
       const transactionText = `
-📍 *TRANSACTION INFORMATION [${escrow.escrowId.slice(-8)}]*
+📍 *TRANSACTION INFORMATION*
 
 ⚡️ *SELLER*
-${sellerTag} | [${escrow.sellerId}]
-${escrow.sellerAddress}
+${sellerTag}
 
 ⚡️ *BUYER*
-${buyerTag} | [${escrow.buyerId}]
+${buyerTag}
 ${escrow.buyerAddress}
 
-⏰ Trade Start Time: ${new Date().toLocaleString('en-GB', { 
-        day: '2-digit', 
-        month: '2-digit', 
-        year: '2-digit', 
-        hour: '2-digit', 
-        minute: '2-digit', 
-        second: '2-digit' 
-      })}
+⏰ Trade Start Time: ${istTime}
 
 ⚠️ *IMPORTANT:* Make sure to finalise and agree each-others terms before depositing.
 

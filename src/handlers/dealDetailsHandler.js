@@ -33,7 +33,7 @@ Quantity -
 Rate -
     `;
 
-    const templateText = `Copy above mentioned text`;
+    const templateText = `Quantity -\nRate -`;
 
     const dealSetupImage = path.join(process.cwd(), 'public', 'images', 'deal setup.png');
     try {

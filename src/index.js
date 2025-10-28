@@ -47,6 +47,67 @@ class EscrowBot {
     
     // (Inactivity tracking disabled)
     
+    // Capture seller address for refund (MUST be before deal details middleware)
+    this.bot.use(async (ctx, next) => {
+      try {
+        const chatId = ctx.chat.id;
+        if (chatId > 0 || !ctx.message || !ctx.message.text) return next();
+        
+        // Skip if it's a command
+        if (ctx.message.text.startsWith('/')) return next();
+
+        // Check if escrow is waiting for seller address for refund
+        const escrow = await Escrow.findOne({
+          groupId: chatId.toString(),
+          disputeResolution: 'refund_pending_address',
+          status: { $in: ['disputed', 'awaiting_deposit', 'deposited'] }
+        });
+
+        // Verify seller exists and user is the seller
+        if (escrow && escrow.sellerId && escrow.sellerId === ctx.from.id) {
+          // Seller is providing address
+          const text = ctx.message.text.trim();
+          
+          // Basic address validation (0x followed by 40 hex characters)
+          if (text.startsWith('0x') && text.length === 42 && /^0x[a-fA-F0-9]{40}$/.test(text)) {
+            // Store the address temporarily and ask for confirmation
+            escrow.pendingSellerAddress = text; // Temporary field - will be saved after confirmation
+            await escrow.save();
+
+            const confirmationMessage = `✅ *Address Received*
+
+📋 **Escrow ID:** \`${escrow.escrowId}\`
+💼 **Your Address:** \`${text}\`
+🪙 **Token:** ${escrow.token}
+🌐 **Network:** ${escrow.chain}
+
+⚠️ **Please verify this address is correct before confirming.**
+
+Is this address correct?`;
+            
+            await ctx.reply(confirmationMessage, {
+              parse_mode: 'Markdown',
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    { text: '✅ Yes, Confirm Address', callback_data: `confirm_refund_address_${escrow.escrowId}` },
+                    { text: '❌ No, Cancel', callback_data: `cancel_refund_address_${escrow.escrowId}` }
+                  ]
+                ]
+              }
+            });
+            return; // Don't continue to next handlers
+          } else {
+            await ctx.reply('❌ Invalid address format. Please provide a valid wallet address (0x followed by 40 hexadecimal characters).');
+            return; // Don't continue
+          }
+        }
+      } catch (e) {
+        console.error('seller address capture error', e);
+      }
+      return next();
+    });
+
     // Capture deal details after /dd - MUST be before command handlers
     this.bot.use(async (ctx, next) => {
       try {
@@ -56,7 +117,10 @@ class EscrowBot {
         // Skip if it's a command
         if (ctx.message.text.startsWith('/')) return next();
                 
-        const escrow = await Escrow.findOne({ groupId: chatId.toString(), status: 'awaiting_details' });
+        const escrow = await Escrow.findOne({ 
+          groupId: chatId.toString(), 
+          status: { $in: ['awaiting_details', 'draft'] } // Also allow updating draft escrows
+        });
         if (!escrow) {
           return next();
         }
@@ -70,9 +134,28 @@ class EscrowBot {
           return ctx.reply('❌ Please provide at least Quantity and Rate in the format:\nQuantity - 10\nRate - 90');
         }
         
-        escrow.quantity = Number(qtyMatch[1]);
-        escrow.rate = Number(rateMatch[1]);
+        const newQuantity = Number(qtyMatch[1]);
+        const newRate = Number(rateMatch[1]);
+        
+        // If quantity changed and address was already assigned, release it so new amount can be assigned
+        if (escrow.quantity !== newQuantity && escrow.depositAddress) {
+          const AddressAssignmentService = require('./services/AddressAssignmentService');
+          try {
+            await AddressAssignmentService.releaseDepositAddress(escrow.escrowId);
+            escrow.depositAddress = null;
+            escrow.uniqueDepositAddress = null;
+          } catch (releaseError) {
+            console.error('Error releasing address on quantity change:', releaseError);
+          }
+        }
+        
+        escrow.quantity = newQuantity;
+        escrow.rate = newRate;
         escrow.status = 'draft';
+        // Initialize tradeStartTime when deal details are set
+        if (!escrow.tradeStartTime) {
+          escrow.tradeStartTime = escrow.createdAt || new Date();
+        }
         await escrow.save();
         
         // Show role selection buttons
@@ -114,26 +197,27 @@ class EscrowBot {
     this.bot.command('dispute', disputeHandler);
 
     // Admin commands
-    const { 
+    const {
       adminDashboard,
-      adminResolveRelease, 
-      adminResolveRefund, 
+      adminResolveRelease,
+      adminResolveRefund,
       adminStats,
       adminGroupPool,
       adminPoolAdd,
       adminPoolList,
-    adminPoolDeleteAll,
-    adminPoolDelete,
-    adminHelp,
-    adminTradeStats,
-    adminExportTrades,
-    adminRecentTrades,
-    adminSettlePartial,
-    adminAddressPool,
-    adminInitAddresses,
-    adminTimeoutStats,
-    adminCleanupAddresses
-  } = require('./handlers/adminHandler');
+      adminPoolDeleteAll,
+      adminPoolDelete,
+      adminHelp,
+      adminTradeStats,
+      adminExportTrades,
+      adminRecentTrades,
+      adminSettlePartial,
+      adminAddressPool,
+      adminInitAddresses,
+      adminTimeoutStats,
+      adminCleanupAddresses,
+      adminRecycleGroups
+    } = require('./handlers/adminHandler');
     this.bot.command('admin_disputes', adminDashboard);
     this.bot.command('admin_resolve_release', adminResolveRelease);
     this.bot.command('admin_resolve_refund', adminResolveRefund);
@@ -152,6 +236,7 @@ class EscrowBot {
     this.bot.command('admin_init_addresses', adminInitAddresses);
     this.bot.command('admin_timeout_stats', adminTimeoutStats);
     this.bot.command('admin_cleanup_addresses', adminCleanupAddresses);
+    this.bot.command('admin_recycle_groups', adminRecycleGroups);
 
     // Callback query handler
     this.bot.on('callback_query', callbackHandler);

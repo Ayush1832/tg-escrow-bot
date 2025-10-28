@@ -77,68 +77,15 @@ module.exports = async (ctx) => {
           groupId: assignedGroup.groupId,
           assignedFromPool: true,
           status: 'draft',
-          inviteLink
+          inviteLink,
+          tradeStartTime: new Date() // Initialize trade start time when escrow is created
         });
         await newEscrow.save();
 
         // Activity tracking removed
 
-        // Send DM to user with group invite
-        const dmText = `🤖 <b>Escrow Group Assigned</b>
-
-📋 Escrow ID: <code>${escrowId}</code>
-👥 Group: Assigned from managed pool
-🔗 Invite Link: <a href="${inviteLink}">Join Escrow Group</a>
-
-⚠️ <b>Important Notes:</b>
-- This invite link is limited to 2 members (buyer + seller)
-- Link expires in 1 day
-- Share this link with your trading partner
-- Both parties must join before starting the escrow
-
-✅ Once both parties join, use /dd command in the group to set deal details.`;
-
-        const groupCreatedImage = path.join(process.cwd(), 'public', 'images', 'group created.png');
-        try {
-          if (fs.existsSync(groupCreatedImage)) {
-            await ctx.replyWithPhoto({ source: fs.createReadStream(groupCreatedImage) }, {
-              caption: dmText,
-              parse_mode: 'HTML',
-              disable_web_page_preview: true,
-              reply_markup: {
-                inline_keyboard: [
-                  [
-                    { text: '📋 Copy Invite Link', copy_text: { text: inviteLink } }
-                  ]
-                ]
-              }
-            });
-          } else {
-            await ctx.reply(dmText, { 
-              parse_mode: 'HTML',
-              disable_web_page_preview: true,
-              reply_markup: {
-                inline_keyboard: [
-                  [
-                    { text: '📋 Copy Invite Link', copy_text: { text: inviteLink } }
-                  ]
-                ]
-              }
-            });
-          }
-        } catch (err) {
-          await ctx.reply(dmText, { 
-            parse_mode: 'HTML',
-            disable_web_page_preview: true,
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  { text: '📋 Copy Invite Link', copy_text: { text: inviteLink } }
-                ]
-              ]
-            }
-          });
-        }
+        // REMOVED: No longer sending DM messages to user after group creation
+        // Message is only sent in the group itself
 
         // Send welcome message to the assigned group
         const groupText = `📍 <b>Hey there traders! Welcome to our escrow service.</b>
@@ -238,7 +185,8 @@ Please create a group manually for now:
     const newEscrow = new Escrow({
       escrowId,
       groupId: chatId.toString(),
-      status: 'draft'
+      status: 'draft',
+      tradeStartTime: new Date() // Initialize trade start time when escrow is created
     });
 
     await newEscrow.save();

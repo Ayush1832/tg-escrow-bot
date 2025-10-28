@@ -49,9 +49,29 @@ module.exports = async (ctx) => {
     }
 
     if (escrow.status !== "draft" && escrow.status !== "awaiting_deposit") {
-      return ctx.reply(
-        "⚠️ Deposit address has already been generated for this escrow."
-      );
+      // If address was generated but quantity changed, allow regeneration
+      const AddressAssignmentService = require("../services/AddressAssignmentService");
+      const AddressPool = require("../models/AddressPool");
+      
+      // Check if current assignment matches the quantity
+      const currentAssignment = await AddressPool.findOne({
+        assignedEscrowId: escrow.escrowId,
+        status: { $in: ['assigned', 'busy'] }
+      });
+      
+      if (currentAssignment && currentAssignment.assignedAmount !== escrow.quantity) {
+        // Quantity changed - release old address and allow new assignment
+        await AddressAssignmentService.releaseDepositAddress(escrow.escrowId);
+        escrow.depositAddress = null;
+        escrow.uniqueDepositAddress = null;
+        escrow.status = 'awaiting_deposit';
+        await escrow.save();
+      } else if (currentAssignment && currentAssignment.assignedAmount === escrow.quantity) {
+        // Address already assigned for this quantity
+        return ctx.reply(
+          "⚠️ Deposit address has already been generated for this escrow."
+        );
+      }
     }
 
     // If escrow is in draft status, we need to select token/network first
@@ -90,17 +110,31 @@ module.exports = async (ctx) => {
     let address, sharedWithAmount;
     
     try {
+      // Normalize inputs before calling assignment service
+      const normalizedToken = (escrow.token || '').toUpperCase();
+      const normalizedNetwork = (escrow.chain || '').toUpperCase();
+      const normalizedQuantity = Number(escrow.quantity);
+      const normalizedFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
+      
+      // Add debug logging for troubleshooting
+      console.log(`🔍 Assigning address for: Escrow ${escrow.escrowId}, ${normalizedToken} on ${normalizedNetwork}, Amount: ${normalizedQuantity}, Fee: ${normalizedFeePercent}%`);
+      
       const addressInfo = await AddressAssignmentService.assignDepositAddress(
         escrow.escrowId,
-        escrow.token,
-        escrow.chain.toUpperCase(),
-        escrow.quantity,
-        Number(config.ESCROW_FEE_PERCENT || 0)
+        normalizedToken,
+        normalizedNetwork,
+        normalizedQuantity,
+        normalizedFeePercent
       );
 
       address = addressInfo.address;
       sharedWithAmount = addressInfo.sharedWithAmount;
 
+      // Initialize tradeStartTime if not set
+      if (!escrow.tradeStartTime) {
+        escrow.tradeStartTime = escrow.createdAt;
+      }
+      
       // Update escrow with unique deposit address
       escrow.uniqueDepositAddress = address;
       escrow.depositAddress = address; // Keep for backward compatibility
@@ -118,6 +152,7 @@ module.exports = async (ctx) => {
       }
 
     } catch (addressError) {
+      console.error('Address assignment error:', addressError);
       // Handle address assignment errors
       if (addressError.message.includes('already exists')) {
         return ctx.reply(
@@ -165,7 +200,7 @@ Note: The default fee is ${config.ESCROW_FEE_PERCENT}%, which is applied when fu
         : "N/A";
 
     const depositText = `
-📍 *TRANSACTION INFORMATION [${escrow.escrowId.slice(-8)}]*
+📍 *TRANSACTION INFORMATION*
 
 ⚡️ *SELLER*
 ${sellerTag}
@@ -180,7 +215,8 @@ Seller ${sellerTag} Will Pay on the Escrow Address, And Click On Check Payment.
 
 Amount to be Received: $${amountDisplay}
 
-⏰ Trade Start Time: ${new Date().toLocaleString("en-GB", {
+⏰ Trade Start Time: ${new Date(escrow.tradeStartTime || escrow.createdAt).toLocaleString("en-IN", {
+      timeZone: "Asia/Kolkata",
       day: "2-digit",
       month: "2-digit",
       year: "2-digit",

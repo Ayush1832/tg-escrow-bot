@@ -17,7 +17,7 @@ async function adminDashboard(ctx) {
 
     const disputes = await Escrow.find({
       isDisputed: true,
-      disputeResolution: 'pending'
+      disputeResolution: { $in: ['pending', 'refund_pending_address'] }
     }).sort({ disputeRaisedAt: -1 });
 
     if (disputes.length === 0) {
@@ -83,39 +83,23 @@ async function adminResolveRelease(ctx) {
       return ctx.reply('❌ This dispute has already been resolved.');
     }
 
-      // Update escrow status
-      escrow.disputeResolution = 'release';
-      escrow.disputeResolvedBy = ctx.from.username || 'Admin';
-      escrow.disputeResolvedAt = new Date();
-      escrow.disputeResolutionReason = 'Admin resolved: Release to buyer';
-      escrow.status = 'completed';
-      await escrow.save();
-
-      // Mark trade as completed for activity monitoring
-      try {
-        const ActivityMonitoringService = require('../services/ActivityMonitoringService');
-        await ActivityMonitoringService.markTradeCompleted(escrow.escrowId);
-      } catch (activityError) {
-        console.error('Error marking trade completed:', activityError);
+      // Verify buyer address is set
+      if (!escrow.buyerAddress) {
+        return ctx.reply('❌ Buyer address is not set for this escrow. Cannot proceed with release.');
       }
 
-      // Recycle group after completion - remove users and return to pool
-      try {
-        const GroupPoolService = require('../services/GroupPoolService');
-        await GroupPoolService.recycleGroupAfterCompletion(escrow, ctx.telegram);
-      } catch (groupError) {
-        console.error('Error recycling group after completion:', groupError);
-        // Fallback to regular release if recycling fails
-        try {
-          await GroupPoolService.releaseGroup(escrow.escrowId);
-        } catch (fallbackError) {
-          console.error('Error in fallback group release:', fallbackError);
-        }
+      // Verify token and network are set
+      if (!escrow.token || !escrow.chain) {
+        return ctx.reply('❌ Token or network not set for this escrow. Cannot proceed with release.');
       }
 
-    // Execute the release
-    try {
-      const amount = escrow.confirmedAmount || escrow.depositAmount;
+      // Execute the release
+      const amount = escrow.confirmedAmount || escrow.depositAmount || 0;
+      
+      if (!amount || amount <= 0) {
+        return ctx.reply('❌ Invalid amount. Cannot proceed with release.');
+      }
+
       await BlockchainService.releaseFunds(
         escrow.token,
         escrow.chain,
@@ -123,24 +107,44 @@ async function adminResolveRelease(ctx) {
         amount
       );
 
+      // Update escrow status after successful release
+      escrow.disputeResolution = 'release';
+      escrow.disputeResolvedBy = ctx.from.username || 'Admin';
+      escrow.disputeResolvedAt = new Date();
+      escrow.disputeResolutionReason = 'Admin resolved: Release to buyer';
+      escrow.status = 'completed';
+      await escrow.save();
 
-      // Notify group
+      // Notify group of successful release
       try {
         await ctx.bot.telegram.sendMessage(
           escrow.groupId,
           `✅ *ADMIN RESOLUTION*\n\nEscrow ${escrow.escrowId} has been resolved by admin.\n\n💰 ${amount} ${escrow.token} released to buyer.\n\nResolved by: @${ctx.from.username || 'Admin'}`,
           { parse_mode: 'Markdown' }
         );
+
+        // Send trade completion message with close trade button (same as normal release flow)
+        await ctx.bot.telegram.sendMessage(
+          escrow.groupId,
+          `✅ The trade has been completed successfully!\n\nTo close this trade, click on the button below.`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: '🔒 Close Trade',
+                    callback_data: `close_trade_${escrow.escrowId}`
+                  }
+                ]
+              ]
+            }
+          }
+        );
       } catch (groupError) {
         console.error('Error notifying group:', groupError);
       }
 
       await ctx.reply(`✅ Successfully released ${amount} ${escrow.token} to buyer for escrow ${escrowId}.`);
-
-    } catch (blockchainError) {
-      console.error('Blockchain error during admin release:', blockchainError);
-      await ctx.reply('❌ Error executing release on blockchain. Please check logs.');
-    }
 
   } catch (error) {
     console.error('Error in admin resolve release:', error);
@@ -173,59 +177,65 @@ async function adminResolveRefund(ctx) {
       return ctx.reply('❌ This escrow is not under dispute.');
     }
 
-    if (escrow.disputeResolution !== 'pending') {
+    // Check if already resolved or in progress
+    if (escrow.disputeResolution && escrow.disputeResolution !== 'pending' && escrow.disputeResolution !== 'refund_pending_address') {
       return ctx.reply('❌ This dispute has already been resolved.');
     }
 
-    // Update escrow status
-    escrow.disputeResolution = 'refund';
-    escrow.disputeResolvedBy = ctx.from.username || 'Admin';
-    escrow.disputeResolvedAt = new Date();
-    escrow.disputeResolutionReason = 'Admin resolved: Refund to seller';
-    escrow.status = 'refunded';
-    await escrow.save();
-
-    // Recycle group after completion - remove users and return to pool
-    try {
-      const GroupPoolService = require('../services/GroupPoolService');
-      await GroupPoolService.recycleGroupAfterCompletion(escrow, ctx.telegram);
-    } catch (groupError) {
-      console.error('Error recycling group after completion:', groupError);
-      // Fallback to regular release if recycling fails
-      try {
-        await GroupPoolService.releaseGroup(escrow.escrowId);
-      } catch (fallbackError) {
-        console.error('Error in fallback group release:', fallbackError);
-      }
+    // If already waiting for address, inform admin
+    if (escrow.disputeResolution === 'refund_pending_address') {
+      return ctx.reply(`⚠️ Refund request already in progress. Waiting for seller to provide address for escrow ${escrowId}.`);
     }
 
-    // Execute the refund
+    // Mark escrow as pending refund - waiting for seller address
+    escrow.disputeResolution = 'refund_pending_address';
+    escrow.disputeResolvedBy = ctx.from.username || 'Admin';
+    escrow.disputeResolutionReason = 'Admin resolved: Refund to seller - waiting for seller address';
+    await escrow.save();
+
+    // Verify seller exists
+    if (!escrow.sellerId) {
+      return ctx.reply('❌ Seller ID is not set for this escrow. Cannot request refund address.');
+    }
+
+    // Verify token and network are set
+    if (!escrow.token || !escrow.chain) {
+      return ctx.reply('❌ Token or network not set for this escrow. Cannot proceed with refund.');
+    }
+
+    // Ask seller for their wallet address in the group
+    const sellerTag = escrow.sellerUsername ? `@${escrow.sellerUsername}` : `[${escrow.sellerId}]`;
+    
+    const addressRequestMessage = `🔔 *ADMIN REFUND REQUEST*
+
+Admin has approved a refund for this escrow.
+
+📋 Escrow ID: \`${escrow.escrowId}\`
+👤 Seller: ${sellerTag}
+💰 Amount: ${escrow.confirmedAmount || escrow.depositAmount || 0} ${escrow.token}
+
+💰 Please provide your wallet address where you want to receive the refund.
+
+⚠️ **IMPORTANT**: 
+• Make sure the address is correct for ${escrow.token} on ${escrow.chain}
+• Double-check the address before confirming
+• Wrong addresses cannot be reversed
+
+Please reply with your wallet address in the group.`;
+
     try {
-      const amount = escrow.confirmedAmount || escrow.depositAmount;
-      await BlockchainService.refundFunds(
-        escrow.token,
-        escrow.chain,
-        escrow.sellerAddress,
-        amount
+      // Send address request to the group
+      await ctx.telegram.sendMessage(
+        escrow.groupId,
+        addressRequestMessage,
+        { parse_mode: 'Markdown' }
       );
 
+      await ctx.reply(`✅ Refund request sent to group. Waiting for seller to provide wallet address for escrow ${escrowId}.`);
 
-      // Notify group
-      try {
-        await ctx.bot.telegram.sendMessage(
-          escrow.groupId,
-          `✅ *ADMIN RESOLUTION*\n\nEscrow ${escrow.escrowId} has been resolved by admin.\n\n💰 ${amount} ${escrow.token} refunded to seller.\n\nResolved by: @${ctx.from.username || 'Admin'}`,
-          { parse_mode: 'Markdown' }
-        );
-      } catch (groupError) {
-        console.error('Error notifying group:', groupError);
-      }
-
-      await ctx.reply(`✅ Successfully refunded ${amount} ${escrow.token} to seller for escrow ${escrowId}.`);
-
-    } catch (blockchainError) {
-      console.error('Blockchain error during admin refund:', blockchainError);
-      await ctx.reply('❌ Error executing refund on blockchain. Please check logs.');
+    } catch (groupError) {
+      console.error('Error sending address request to group:', groupError);
+      await ctx.reply('❌ Error sending address request to group. Please check if the group still exists.');
     }
 
   } catch (error) {
@@ -667,6 +677,7 @@ async function adminHelp(ctx) {
 • \`/admin_pool\` - View group pool status and statistics
 • \`/admin_pool_add <groupId>\` - Add group to pool
 • \`/admin_pool_list\` - List all groups in pool
+• \`/admin_recycle_groups\` - Manually recycle groups for completed/refunded escrows
 • \`/admin_pool_delete <groupId>\` - Delete specific group from pool
 • \`/admin_pool_delete_all\` - Delete ALL groups from pool (dangerous)
 
@@ -1043,23 +1054,8 @@ The partial payment dispute has been resolved by admin intervention. All parties
 
 Thank you for using our escrow service!`;
 
-    // Send to buyer
-    if (escrow.buyerId) {
-      try {
-        await ctx.telegram.sendMessage(escrow.buyerId, completionMessage);
-      } catch (error) {
-        console.log(`Could not send completion message to buyer ${escrow.buyerId}:`, error.message);
-      }
-    }
-
-    // Send to seller
-    if (escrow.sellerId) {
-      try {
-        await ctx.telegram.sendMessage(escrow.sellerId, completionMessage);
-      } catch (error) {
-        console.log(`Could not send completion message to seller ${escrow.sellerId}:`, error.message);
-      }
-    }
+    // REMOVED: No longer sending DM messages to users, only in-group messages
+    // Messages should only be sent within the group chat
 
     // Send to group if exists
     if (escrow.groupId) {
@@ -1086,6 +1082,61 @@ Thank you for using our escrow service!`;
   }
 }
 
+/**
+ * Admin command to manually recycle groups that meet criteria
+ * Recycles groups for escrows that are completed, refunded, or disputed (resolved)
+ */
+async function adminRecycleGroups(ctx) {
+  try {
+    if (!isAdmin(ctx)) {
+      return ctx.reply('❌ Access denied. Admin privileges required.');
+    }
+
+    // Find escrows that should have their groups recycled
+    const escrowsToRecycle = await Escrow.find({
+      status: { $in: ['completed', 'refunded'] },
+      assignedFromPool: true, // Only pool groups
+      groupId: { $ne: null }
+    });
+
+    if (escrowsToRecycle.length === 0) {
+      return ctx.reply('✅ No groups eligible for recycling found.');
+    }
+
+    let recycledCount = 0;
+    let failedCount = 0;
+
+    for (const escrow of escrowsToRecycle) {
+      try {
+        // Release deposit address first
+        await AddressAssignmentService.releaseDepositAddress(escrow.escrowId);
+
+        // Recycle the group
+        await GroupPoolService.recycleGroupAfterCompletion(escrow, ctx.telegram);
+        recycledCount++;
+      } catch (error) {
+        console.error(`Error recycling group for escrow ${escrow.escrowId}:`, error);
+        failedCount++;
+      }
+    }
+
+    const message = `✅ Group Recycling Complete
+
+📊 Statistics:
+• Eligible groups: ${escrowsToRecycle.length}
+• Successfully recycled: ${recycledCount}
+• Failed: ${failedCount}
+
+${recycledCount > 0 ? '✅ Groups have been recycled and addresses released back to pool.' : ''}`;
+
+    await ctx.reply(message);
+
+  } catch (error) {
+    console.error('Error in admin recycle groups:', error);
+    ctx.reply('❌ Error recycling groups.');
+  }
+}
+
 module.exports = {
   adminDashboard,
   adminResolveRelease,
@@ -1106,5 +1157,6 @@ module.exports = {
   adminTradeStats,
   adminExportTrades,
   adminRecentTrades,
-  adminSettlePartial
+  adminSettlePartial,
+  adminRecycleGroups
 };

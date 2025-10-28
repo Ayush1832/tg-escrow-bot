@@ -435,38 +435,12 @@ class GroupPoolService {
 
   /**
    * Send completion notification to users before removal
+   * REMOVED: No longer sending DM messages to users, only in-group messages
    */
   async sendCompletionNotification(escrow, telegram) {
-    try {
-      const message = `🎉 *TRADE COMPLETED SUCCESSFULLY!*
-
-✅ Your escrow has been completed
-✅ Funds have been released
-⏰ This group will be recycled in 15 minutes for future trades
-
-Thank you for using our escrow service!`;
-
-      // Send to buyer if they exist
-      if (escrow.buyerId) {
-        try {
-          await telegram.sendMessage(escrow.buyerId, message);
-        } catch (error) {
-          console.log(`Could not send completion message to buyer ${escrow.buyerId}:`, error.message);
-        }
-      }
-
-      // Send to seller if they exist
-      if (escrow.sellerId) {
-        try {
-          await telegram.sendMessage(escrow.sellerId, message);
-        } catch (error) {
-          console.log(`Could not send completion message to seller ${escrow.sellerId}:`, error.message);
-        }
-      }
-
-    } catch (error) {
-      console.error('Error sending completion notification:', error);
-    }
+    // Function kept for backward compatibility but no longer sends DM messages
+    // Messages are now only sent within the group
+    return;
   }
 
   /**

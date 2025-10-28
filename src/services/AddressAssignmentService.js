@@ -25,38 +25,109 @@ class AddressAssignmentService {
         feePercent = Number(config.ESCROW_FEE_PERCENT || 0);
       }
 
-      // First, check if any address is already assigned to this exact amount for a DIFFERENT escrow
-      const existingSameAmount = await AddressPool.findOne({
-        token,
-        network,
-        assignedAmount: amount,
-        assignedEscrowId: { $ne: escrowId }, // Different escrow
+      // Normalize inputs first
+      const normalizedToken = token.toUpperCase();
+      const normalizedNetwork = network.toUpperCase();
+      const normalizedAmount = Number(amount);
+      
+      // Check if this escrow already has an address assigned
+      const existingAssignment = await AddressPool.findOne({
+        assignedEscrowId: escrowId,
         status: { $in: ['assigned', 'busy'] }
       });
 
-      if (existingSameAmount) {
-        throw new Error(`Address with amount ${amount} ${token} already exists. Please enter a different amount.`);
+      // If escrow already has an address assigned, check if it's for the same token/network
+      if (existingAssignment) {
+        // Normalize existing assignment values for comparison
+        const existingToken = (existingAssignment.token || '').toUpperCase();
+        const existingNetwork = (existingAssignment.network || '').toUpperCase();
+        const existingAmount = existingAssignment.assignedAmount !== null ? Number(existingAssignment.assignedAmount) : null;
+        
+        if (existingToken === normalizedToken && existingNetwork === normalizedNetwork) {
+          // Same token/network - allow if amount changed (will reassign)
+          if (existingAmount !== null && existingAmount === normalizedAmount) {
+            // Same address, token, network, and amount - just return the existing assignment
+            return {
+              address: existingAssignment.address,
+              contractAddress: existingAssignment.contractAddress,
+              sharedWithAmount: null
+            };
+          }
+          // Different amount - release old assignment and get new one
+          existingAssignment.status = 'available';
+          existingAssignment.assignedEscrowId = null;
+          existingAssignment.assignedAmount = null;
+          existingAssignment.assignedAt = null;
+          await existingAssignment.save();
+        } else {
+          // Different token/network - release old assignment immediately
+          // This handles cases where user changes token selection
+          existingAssignment.status = 'available';
+          existingAssignment.assignedEscrowId = null;
+          existingAssignment.assignedAmount = null;
+          existingAssignment.assignedAt = null;
+          await existingAssignment.save();
+        }
       }
-
-      // Find available address or one with different amount (with correct fee percentage)
+      
+      // Find available address - try multiple strategies:
+      // 1. Completely available address
+      // 2. Address with different amount (can share)
+      // 3. Address with same amount but different escrow (rotate addresses)
       let assignedAddress = await this.findAvailableAddress(token, network, amount, feePercent);
 
       if (!assignedAddress) {
+        // Check if ALL addresses are busy with the same amount
+        const allAddressesForToken = await AddressPool.find({
+          token: normalizedToken,
+          network: normalizedNetwork,
+          feePercent: Number(feePercent)
+        });
+
+        if (allAddressesForToken.length === 0) {
+          throw new Error(`No addresses available for ${normalizedToken} on ${normalizedNetwork}. Please contact admin to deploy contracts.`);
+        }
+
+        // Check if all addresses are busy with the same amount
+        const allBusyWithSameAmount = allAddressesForToken.every(addr => {
+          if (addr.status === 'available') return false; // Available addresses don't count as busy
+          const addrAmount = addr.assignedAmount !== null ? Number(addr.assignedAmount) : null;
+          return addrAmount === normalizedAmount;
+        });
+
+        if (allBusyWithSameAmount) {
+          throw new Error(`All addresses for ${normalizedAmount} ${normalizedToken} are currently in use. Please try a different amount.`);
+        }
+
         throw new Error(`No available addresses for ${token} on ${network}. Please try again later.`);
       }
 
+      // Verify the assigned address matches the requested token/network before finalizing
+      if (assignedAddress.token.toUpperCase() !== token.toUpperCase() || 
+          assignedAddress.network.toUpperCase() !== network.toUpperCase()) {
+        throw new Error(`Address mismatch: Found address for ${assignedAddress.token}/${assignedAddress.network}, but requested ${token}/${network}`);
+      }
+      
+      // IMPORTANT: Store old assignedAmount BEFORE updating (for sharedWithAmount calculation)
+      const oldAssignedAmount = assignedAddress.assignedAmount ? Number(assignedAddress.assignedAmount) : null;
+      
       // Update address status
       assignedAddress.status = 'assigned';
       assignedAddress.assignedEscrowId = escrowId;
-      assignedAddress.assignedAmount = amount;
+      assignedAddress.assignedAmount = Number(amount); // Ensure it's a number
       assignedAddress.assignedAt = new Date();
       await assignedAddress.save();
 
+      // Calculate sharedWithAmount based on OLD assignedAmount, not the new one
+      // If address was previously assigned to a different amount, it's being shared
+      const sharedWithAmount = (oldAssignedAmount !== null && oldAssignedAmount !== Number(amount)) 
+        ? oldAssignedAmount 
+        : null;
 
       return {
         address: assignedAddress.address,
         contractAddress: assignedAddress.contractAddress,
-        sharedWithAmount: assignedAddress.assignedAmount !== amount ? assignedAddress.assignedAmount : null
+        sharedWithAmount: sharedWithAmount
       };
 
     } catch (error) {
@@ -66,33 +137,138 @@ class AddressAssignmentService {
   }
 
   /**
-   * Find available address or one with different amount
+   * Find available address - tries multiple strategies:
+   * 1. Completely available address
+   * 2. Address with different amount (can share)
+   * 3. Address with same amount but different escrow (rotate addresses)
    */
   async findAvailableAddress(token, network, amount, feePercent) {
     try {
-      // First, try to find a completely available address with correct fee percentage
+      // Normalize inputs for consistency
+      const normalizedToken = token.toUpperCase();
+      const normalizedNetwork = network.toUpperCase();
+      const normalizedFeePercent = Number(feePercent);
+      const normalizedAmount = Number(amount);
+      
+      // Strategy 1: Find a completely available address
       let address = await AddressPool.findOne({
-        token,
-        network,
-        feePercent,
+        token: normalizedToken,
+        network: normalizedNetwork,
+        feePercent: normalizedFeePercent,
         status: 'available'
       });
 
       if (address) {
-        return address;
+        // Verify token/network match to prevent false matches
+        if (address.token.toUpperCase() === normalizedToken && 
+            address.network.toUpperCase() === normalizedNetwork) {
+          return address;
+        }
       }
 
-      // If no available address, find one with different amount and correct fee percentage
+      // Strategy 2: Find address with different amount (can share)
+      // Different amounts CAN share same address
       address = await AddressPool.findOne({
-        token,
-        network,
-        feePercent,
+        token: normalizedToken,
+        network: normalizedNetwork,
+        feePercent: normalizedFeePercent,
         status: { $in: ['assigned', 'busy'] },
-        assignedAmount: { $ne: amount }
+        assignedAmount: { $ne: normalizedAmount } // Must be different amount
       });
 
       if (address) {
-        return address;
+        // Verify token/network/amount match requirements
+        if (address.token.toUpperCase() === normalizedToken && 
+            address.network.toUpperCase() === normalizedNetwork &&
+            Number(address.assignedAmount) !== normalizedAmount) {
+          return address;
+        }
+      }
+
+      // Strategy 3: Find an available address even if some addresses have same amount (rotate addresses)
+      // This allows multiple escrows with same amount to use different addresses
+      // Get all addresses for this token/network
+      const allAddressesForToken = await AddressPool.find({
+        token: normalizedToken,
+        network: normalizedNetwork,
+        feePercent: normalizedFeePercent
+      });
+
+      if (allAddressesForToken.length > 0) {
+        // Priority order:
+        // 1. Available address (not assigned)
+        // 2. Address with different amount (can share)
+        // 3. Address with same amount but different escrow (rotate - use another address)
+        
+        // First, try to find an available address
+        const availableAddr = allAddressesForToken.find(addr => 
+          addr.status === 'available' &&
+          addr.token.toUpperCase() === normalizedToken &&
+          addr.network.toUpperCase() === normalizedNetwork
+        );
+
+        if (availableAddr) {
+          return availableAddr;
+        }
+
+        // Second, try to find address with different amount (can share)
+        const differentAmountAddr = allAddressesForToken.find(addr => 
+          addr.status !== 'available' &&
+          Number(addr.assignedAmount) !== normalizedAmount &&
+          addr.token.toUpperCase() === normalizedToken &&
+          addr.network.toUpperCase() === normalizedNetwork
+        );
+
+        if (differentAmountAddr) {
+          return differentAmountAddr;
+        }
+
+        // Third, try to find ANY address for rotation (same amounts can use different addresses)
+        // Business rule: Same amounts CANNOT share same address, but CAN use different addresses
+        // So if Address 1 has amount 10 for ESC1, we can assign amount 10 to Address 2 for ESC2
+        
+        // Strategy 3: Address rotation - same amounts can use different addresses
+        // Find addresses that currently have this amount assigned
+        const addressesWithSameAmount = allAddressesForToken.filter(addr => 
+          addr.status !== 'available' &&
+          addr.assignedAmount !== null &&
+          Number(addr.assignedAmount) === normalizedAmount &&
+          addr.token.toUpperCase() === normalizedToken &&
+          addr.network.toUpperCase() === normalizedNetwork
+        );
+
+        // If ALL non-available addresses have the same amount, we can't assign
+        // But if there are available addresses OR addresses with different amounts, we can rotate
+        const nonAvailableAddresses = allAddressesForToken.filter(addr => addr.status !== 'available');
+        const allNonAvailableHaveSameAmount = nonAvailableAddresses.length > 0 && 
+          nonAvailableAddresses.every(addr => {
+            const addrAmount = addr.assignedAmount !== null ? Number(addr.assignedAmount) : null;
+            return addrAmount === normalizedAmount;
+          });
+
+        // If not all addresses are busy with same amount, we can find one to use
+        // CRITICAL: Never assign to an address that already has the same amount!
+        // Same amounts can use DIFFERENT addresses, but cannot SHARE the same address.
+        if (!allNonAvailableHaveSameAmount) {
+          // Find any address that:
+          // 1. Is available (not assigned) - preferred
+          // 2. Has different amount (can share)
+          // 3. NEVER an address that has the same amount (violates business rule)
+          const alternativeAddr = allAddressesForToken.find(addr => {
+            if (addr.status === 'available') return true; // Available addresses are best
+            if (addr.assignedAmount === null) return true; // Unassigned addresses (shouldn't happen but safe)
+            
+            const addrAmount = Number(addr.assignedAmount);
+            // Only use addresses with DIFFERENT amounts - same amounts cannot share!
+            return addrAmount !== normalizedAmount;
+          });
+
+          if (alternativeAddr && 
+              alternativeAddr.token.toUpperCase() === normalizedToken &&
+              alternativeAddr.network.toUpperCase() === normalizedNetwork) {
+            return alternativeAddr;
+          }
+        }
       }
 
       return null;

@@ -63,6 +63,14 @@ const escrowSchema = new mongoose.Schema({
   sellerAddress: String,
   depositAddress: String,
   uniqueDepositAddress: String,
+  tradeStartTime: {
+    type: Date,
+    default: null
+  },
+  lastCheckedBlock: {
+    type: Number,
+    default: 0
+  },
   tradeTimeout: {
     type: Date,
     default: null
@@ -121,6 +129,10 @@ const escrowSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  pendingSellerAddress: {
+    type: String,
+    default: null
+  },
   isDisputed: {
     type: Boolean,
     default: false
@@ -132,7 +144,7 @@ const escrowSchema = new mongoose.Schema({
   disputeResolvedAt: Date,
   disputeResolution: {
     type: String,
-    enum: ['release', 'refund', 'pending']
+    enum: ['release', 'refund', 'refund_pending_address', 'pending']
   },
   disputeResolutionReason: String,
   createdAt: {
