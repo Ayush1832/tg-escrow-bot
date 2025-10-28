@@ -13,7 +13,200 @@ module.exports = async (ctx) => {
     const chatId = ctx.chat.id;
 
     // Handle different callback types
-    if (callbackData === 'start_escrow') {
+    if (callbackData === 'select_role_buyer') {
+      await ctx.answerCbQuery('Confirming buyer role...');
+      const escrow = await Escrow.findOne({
+        groupId: chatId.toString(),
+        status: { $in: ['draft', 'awaiting_details'] }
+      });
+      if (!escrow) {
+        return ctx.reply('❌ No active escrow found.');
+      }
+      // Show confirmation
+      await ctx.reply('⚠️ Are you sure that you\'re the buyer?', {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '✅ Yes, I am the buyer', callback_data: 'confirm_role_buyer' },
+              { text: '❌ Cancel', callback_data: 'cancel_role_selection' }
+            ]
+          ]
+        }
+      });
+      return;
+    } else if (callbackData === 'select_role_seller') {
+      await ctx.answerCbQuery('Confirming seller role...');
+      const escrow = await Escrow.findOne({
+        groupId: chatId.toString(),
+        status: { $in: ['draft', 'awaiting_details'] }
+      });
+      if (!escrow) {
+        return ctx.reply('❌ No active escrow found.');
+      }
+      // Show confirmation
+      await ctx.reply('⚠️ Are you sure that you\'re the seller?', {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '✅ Yes, I am the seller', callback_data: 'confirm_role_seller' },
+              { text: '❌ Cancel', callback_data: 'cancel_role_selection' }
+            ]
+          ]
+        }
+      });
+      return;
+    } else if (callbackData === 'confirm_role_buyer') {
+      await ctx.answerCbQuery('Buyer role confirmed!');
+      const escrow = await Escrow.findOne({
+        groupId: chatId.toString(),
+        status: { $in: ['draft', 'awaiting_details'] }
+      });
+      if (!escrow) {
+        return ctx.reply('❌ No active escrow found.');
+      }
+      // Assign buyer role
+      if (escrow.buyerId && escrow.buyerId !== userId) {
+        return ctx.reply('❌ Buyer role is already taken by another user.');
+      }
+      escrow.buyerId = userId;
+      escrow.buyerUsername = ctx.from.username;
+      await escrow.save();
+      
+      await ctx.reply(`✅ You have been assigned as the Buyer.`);
+      
+      // Reload escrow to get latest data and check if both roles are assigned
+      const updatedEscrow = await Escrow.findOne({
+        groupId: chatId.toString(),
+        status: { $in: ['draft', 'awaiting_details'] }
+      });
+      if (updatedEscrow && updatedEscrow.buyerId && updatedEscrow.sellerId) {
+        const fs = require('fs');
+        const path = require('path');
+        const buyerImage = path.join(process.cwd(), 'public', 'images', 'buyer.png');
+        const buyerText = 'Now set /buyer address.\n\n📋 Example:\n• /buyer 0xabcdef1234567890abcdef1234567890abcdef12';
+        try {
+          if (fs.existsSync(buyerImage)) {
+            await ctx.replyWithPhoto({ source: fs.createReadStream(buyerImage) }, {
+              caption: buyerText
+            });
+          } else {
+            await ctx.reply(buyerText);
+          }
+        } catch (err) {
+          await ctx.reply(buyerText);
+        }
+      }
+      return;
+    } else if (callbackData === 'confirm_role_seller') {
+      await ctx.answerCbQuery('Seller role confirmed!');
+      const escrow = await Escrow.findOne({
+        groupId: chatId.toString(),
+        status: { $in: ['draft', 'awaiting_details'] }
+      });
+      if (!escrow) {
+        return ctx.reply('❌ No active escrow found.');
+      }
+      // Assign seller role
+      if (escrow.sellerId && escrow.sellerId !== userId) {
+        return ctx.reply('❌ Seller role is already taken by another user.');
+      }
+      escrow.sellerId = userId;
+      escrow.sellerUsername = ctx.from.username;
+      await escrow.save();
+      
+      await ctx.reply(`✅ You have been assigned as the Seller.`);
+      
+      // Reload escrow to get latest data and check if both roles are assigned
+      const updatedEscrow = await Escrow.findOne({
+        groupId: chatId.toString(),
+        status: { $in: ['draft', 'awaiting_details'] }
+      });
+      if (updatedEscrow && updatedEscrow.buyerId && updatedEscrow.sellerId) {
+        const fs = require('fs');
+        const path = require('path');
+        const buyerImage = path.join(process.cwd(), 'public', 'images', 'buyer.png');
+        const buyerText = 'Now set /buyer address.\n\n📋 Example:\n• /buyer 0xabcdef1234567890abcdef1234567890abcdef12';
+        try {
+          if (fs.existsSync(buyerImage)) {
+            await ctx.replyWithPhoto({ source: fs.createReadStream(buyerImage) }, {
+              caption: buyerText
+            });
+          } else {
+            await ctx.reply(buyerText);
+          }
+        } catch (err) {
+          await ctx.reply(buyerText);
+        }
+      }
+      return;
+    } else if (callbackData === 'cancel_role_selection') {
+      await ctx.answerCbQuery('Cancelled');
+      return;
+    } else if (callbackData.startsWith('close_trade_')) {
+      await ctx.answerCbQuery('Closing trade...');
+      const escrowId = callbackData.split('_')[2];
+      const escrow = await Escrow.findOne({ escrowId });
+      
+      if (!escrow) {
+        return ctx.reply('❌ Escrow not found.');
+      }
+
+      // Check if user is buyer or seller
+      if (escrow.buyerId !== userId && escrow.sellerId !== userId) {
+        return ctx.reply('❌ Only buyer or seller can close this trade.');
+      }
+
+      // Check if trade is completed or refunded
+      if (escrow.status !== 'completed' && escrow.status !== 'refunded') {
+        return ctx.reply('❌ Trade must be completed or refunded before closing.');
+      }
+
+      try {
+        // Release deposit address back to pool
+        const AddressAssignmentService = require('../services/AddressAssignmentService');
+        await AddressAssignmentService.releaseDepositAddress(escrow.escrowId);
+
+        // Recycle group immediately - remove users and return to pool
+        const GroupPoolService = require('../services/GroupPoolService');
+        const GroupPool = require('../models/GroupPool');
+        
+        // Find the group
+        const group = await GroupPool.findOne({ 
+          assignedEscrowId: escrow.escrowId 
+        });
+
+        if (group) {
+          // Remove ALL users from group (buyer, seller, admins, everyone)
+          const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, ctx.telegram);
+
+          if (allUsersRemoved) {
+            // Only add back to pool if ALL users were successfully removed
+            group.status = 'available';
+            group.assignedEscrowId = null;
+            group.assignedAt = null;
+            group.completedAt = null;
+            group.inviteLink = null;
+            await group.save();
+            console.log(`✅ Group ${group.groupId} recycled immediately for escrow ${escrow.escrowId}`);
+          } else {
+            // Mark as completed but don't add back to pool if users couldn't be removed
+            group.status = 'completed';
+            group.assignedEscrowId = null;
+            group.assignedAt = null;
+            group.completedAt = new Date();
+            group.inviteLink = null;
+            await group.save();
+            console.log(`⚠️ Group ${group.groupId} marked as completed but NOT added back to pool - some users couldn't be removed`);
+          }
+        }
+
+        await ctx.reply('✅ Trade closed successfully! Group has been recycled and deposit address is now reusable.');
+      } catch (error) {
+        console.error('Error closing trade:', error);
+        await ctx.reply('❌ Error closing trade. Please try again or contact support.');
+      }
+      return;
+    } else if (callbackData === 'start_escrow') {
       await ctx.answerCbQuery('Starting a new escrow...');
       // Trigger escrow creation flow
       return escrowHandler(ctx);
@@ -239,21 +432,25 @@ module.exports = async (ctx) => {
 
       // Activity tracking removed
 
-        // Recycle group after completion - remove users and return to pool
-        try {
-          const GroupPoolService = require('../services/GroupPoolService');
-          await GroupPoolService.recycleGroupAfterCompletion(escrow, ctx.telegram);
-        } catch (groupError) {
-          console.error('Error recycling group after completion:', groupError);
-          // Fallback to regular release if recycling fails
-          try {
-            await GroupPoolService.releaseGroup(escrow.escrowId);
-          } catch (fallbackError) {
-            console.error('Error in fallback group release:', fallbackError);
-          }
-        }
         await ctx.reply(
-          `${(amount - 0).toFixed(2)} ${escrow.token} has been released to the Buyer's address! 🚀\nApproved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}`
+          `${(amount - 0).toFixed(5)} ${escrow.token} has been released to the Buyer's address! 🚀\nApproved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}`
+        );
+
+        // Send trade completion message with close trade button
+        await ctx.reply(
+          `✅ The trade has been completed successfully!\n\nTo close this trade, click on the button below.`,
+          {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: '🔒 Close Trade',
+                    callback_data: `close_trade_${escrow.escrowId}`
+                  }
+                ]
+              ]
+            }
+          }
         );
       } catch (error) {
         console.error('Auto-release error:', error);
@@ -323,30 +520,30 @@ module.exports = async (ctx) => {
 
           // Activity tracking removed
 
-          // Recycle group after completion - remove users and return to pool
-          try {
-            const GroupPoolService = require('../services/GroupPoolService');
-            await GroupPoolService.recycleGroupAfterCompletion(escrow, ctx.telegram);
-          } catch (groupError) {
-            console.error('Error recycling group after completion:', groupError);
-            // Fallback to regular release if recycling fails
-            try {
-              await GroupPoolService.releaseGroup(escrow.escrowId);
-            } catch (fallbackError) {
-              console.error('Error in fallback group release:', fallbackError);
-            }
-          }
-
           const successText = `
-${netAmount.toFixed(2)} ${escrow.token} [$${netAmount.toFixed(2)}] 💸 + NETWORK FEE has been ${action === 'release' ? 'released' : 'refunded'} to the ${action === 'release' ? 'Buyer' : 'Seller'}'s address! 🚀
+${netAmount.toFixed(5)} ${escrow.token} [$${netAmount.toFixed(2)}] 💸 + NETWORK FEE has been ${action === 'release' ? 'released' : 'refunded'} to the ${action === 'release' ? 'Buyer' : 'Seller'}'s address! 🚀
 
-Approved By: @${ctx.from.username} | [${userId}]
-Thank you for using @mm_escrow_bot 🙌
-
-@${ctx.from.username}, if you liked the bot please leave a good review about the bot and use command /vouch in reply to the review, and please also mention @mm_escrow_bot in your vouch.
+Approved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}
           `;
 
           await ctx.reply(successText);
+
+          // Send trade completion message with close trade button
+          await ctx.reply(
+            `✅ The trade has been completed successfully!\n\nTo close this trade, click on the button below.`,
+            {
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    {
+                      text: '🔒 Close Trade',
+                      callback_data: `close_trade_${escrow.escrowId}`
+                    }
+                  ]
+                ]
+              }
+            }
+          );
         } catch (error) {
           console.error('Error executing transaction:', error);
           await ctx.reply('❌ Error executing transaction. Please try again or contact support.');
@@ -634,7 +831,11 @@ async function handleMyEscrows(ctx, filter = 'all') {
         myEscrowsText += `\n...and ${filteredEscrows.length - 5} more.`;
       }
     } else {
-      myEscrowsText += `No ${filterTitle.toLowerCase()} found.`;
+      if (filter === 'all') {
+        myEscrowsText += `No escrows found.`;
+      } else {
+        myEscrowsText += `No ${filterTitle.toLowerCase()} found.`;
+      }
     }
 
     const keyboard = Markup.inlineKeyboard([
@@ -651,18 +852,38 @@ async function handleMyEscrows(ctx, filter = 'all') {
       ]
     ]).reply_markup;
 
-    // Use different image based on filter
-    const imagePath = (filter === 'all') 
-      ? 'public/images/my escrow.jpg' 
-      : 'public/images/escrow.jpg';
+    const fs = require('fs');
+    const path = require('path');
+    let imagePath;
+    if (filter === 'all') {
+      imagePath = path.join(process.cwd(), 'public', 'images', 'My Escrows.png');
+    } else if (filter === 'active') {
+      imagePath = path.join(process.cwd(), 'public', 'images', 'aactive escrow.png');
+    } else if (filter === 'completed') {
+      imagePath = path.join(process.cwd(), 'public', 'images', 'completed escrows.png');
+    } else if (filter === 'pending') {
+      imagePath = path.join(process.cwd(), 'public', 'images', 'pending escrows.png');
+    } else if (filter === 'disputed') {
+      imagePath = path.join(process.cwd(), 'public', 'images', 'disputed escrows.png');
+    } else {
+      imagePath = path.join(process.cwd(), 'public', 'images', 'My Escrows.png');
+    }
 
-    await ctx.replyWithPhoto(
-      { source: imagePath },
-      {
-        caption: myEscrowsText,
-        reply_markup: keyboard
+    try {
+      if (fs.existsSync(imagePath)) {
+        await ctx.replyWithPhoto(
+          { source: fs.createReadStream(imagePath) },
+          {
+            caption: myEscrowsText,
+            reply_markup: keyboard
+          }
+        );
+      } else {
+        await ctx.reply(myEscrowsText, { reply_markup: keyboard });
       }
-    );
+    } catch (err) {
+      await ctx.reply(myEscrowsText, { reply_markup: keyboard });
+    }
   } catch (error) {
     console.error('Error in handleMyEscrows:', error);
     await ctx.reply('❌ Error loading your escrows. Please try again.');
@@ -696,13 +917,21 @@ Tips:
     [Markup.button.callback('⬅️ Back to Menu', 'back_to_start')]
   ]).reply_markup;
 
-    await ctx.replyWithPhoto(
-      { source: 'public/images/help.jpg' },
-      {
-        caption: helpText,
-        reply_markup: keyboard
+    const fs = require('fs');
+    const path = require('path');
+    const helpImage = path.join(process.cwd(), 'public', 'images', 'help and terms.png');
+    try {
+      if (fs.existsSync(helpImage)) {
+        await ctx.replyWithPhoto({ source: fs.createReadStream(helpImage) }, {
+          caption: helpText,
+          reply_markup: keyboard
+        });
+      } else {
+        await ctx.reply(helpText, { reply_markup: keyboard });
       }
-    );
+    } catch (err) {
+      await ctx.reply(helpText, { reply_markup: keyboard });
+    }
 }
 
 // Helper function to handle Terms
@@ -733,13 +962,21 @@ Important: Always verify addresses and terms before proceeding with any transact
     [Markup.button.callback('⬅️ Back to Menu', 'back_to_start')]
   ]).reply_markup;
 
-    await ctx.replyWithPhoto(
-      { source: 'public/images/terms.jpg' },
-      {
-        caption: termsText,
-        reply_markup: keyboard
+    const fs = require('fs');
+    const path = require('path');
+    const termsImage = path.join(process.cwd(), 'public', 'images', 'help and terms.png');
+    try {
+      if (fs.existsSync(termsImage)) {
+        await ctx.replyWithPhoto({ source: fs.createReadStream(termsImage) }, {
+          caption: termsText,
+          reply_markup: keyboard
+        });
+      } else {
+        await ctx.reply(termsText, { reply_markup: keyboard });
       }
-    );
+    } catch (err) {
+      await ctx.reply(termsText, { reply_markup: keyboard });
+    }
 }
 
 // Helper function to handle How Escrow Works

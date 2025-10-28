@@ -1,5 +1,7 @@
 const Escrow = require('../models/Escrow');
 const config = require('../../config');
+const fs = require('fs');
+const path = require('path');
 
 module.exports = async (ctx) => {
   try {
@@ -46,7 +48,19 @@ An administrator will join this group within 24 hours to resolve the dispute.
 Please provide details about the issue and wait for admin intervention.
     `;
 
-    await ctx.reply(disputeText, { parse_mode: 'Markdown' });
+    const disputeImage = path.join(process.cwd(), 'public', 'images', 'dispute.png');
+    try {
+      if (fs.existsSync(disputeImage)) {
+        await ctx.replyWithPhoto({ source: fs.createReadStream(disputeImage) }, {
+          caption: disputeText,
+          parse_mode: 'Markdown'
+        });
+      } else {
+        await ctx.reply(disputeText, { parse_mode: 'Markdown' });
+      }
+    } catch (err) {
+      await ctx.reply(disputeText, { parse_mode: 'Markdown' });
+    }
 
 
     // Send notification to admin

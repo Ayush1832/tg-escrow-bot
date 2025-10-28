@@ -5,6 +5,8 @@ const WalletService = require("../services/WalletService");
 const AddressAssignmentService = require("../services/AddressAssignmentService");
 const TradeTimeoutService = require("../services/TradeTimeoutService");
 const config = require("../../config");
+const fs = require('fs');
+const path = require('path');
 
 module.exports = async (ctx) => {
   try {
@@ -151,6 +153,12 @@ Note: The default fee is ${config.ESCROW_FEE_PERCENT}%, which is applied when fu
       ? `[${escrow.buyerId}]`
       : "N/A";
 
+    const sellerTag = escrow.sellerUsername
+      ? `@${escrow.sellerUsername}`
+      : escrow.sellerId
+      ? `[${escrow.sellerId}]`
+      : "N/A";
+
     const amountDisplay =
       typeof escrow.quantity === "number" && isFinite(escrow.quantity)
         ? escrow.quantity.toFixed(2)
@@ -159,16 +167,18 @@ Note: The default fee is ${config.ESCROW_FEE_PERCENT}%, which is applied when fu
     const depositText = `
 📍 *TRANSACTION INFORMATION [${escrow.escrowId.slice(-8)}]*
 
+⚡️ *SELLER*
+${sellerTag}
+
 ⚡️ *BUYER*
-${buyerTag} | [${escrow.buyerId || "N/A"}]
-${escrow.buyerAddress || ""}
+${buyerTag}
 
 🟢 *ESCROW ADDRESS*
- ${address}
+${address}
 
-Deposit the required amount to the Escrow Address, And Click On Check Payment.
+Seller ${sellerTag} Will Pay on the Escrow Address, And Click On Check Payment.
 
-Amount to be Received: [$${amountDisplay}]
+Amount to be Received: $${amountDisplay}
 
 ⏰ Trade Start Time: ${new Date().toLocaleString("en-GB", {
       day: "2-digit",
@@ -178,9 +188,6 @@ Amount to be Received: [$${amountDisplay}]
       minute: "2-digit",
       second: "2-digit",
     })}
-⏰ Trade Timeout: 1 hour (automatic group recycling if abandoned)
-
-📄 Note: Trade will timeout in 1 hour if not completed. Deposit address will be released after timeout.
 ⚠️ *CRITICAL TOKEN/NETWORK WARNING*
 • Send ONLY *${escrow.token}* on *${escrow.chain}* to this address.
 • ❌ Do NOT send any other token (e.g., USDC/BNB/ETH) or from another network.
@@ -191,20 +198,71 @@ Amount to be Received: [$${amountDisplay}]
 Remember, once commands are used payment will be released, there is no revert!
     `;
 
-    await ctx.reply(depositText, {
-      parse_mode: "Markdown",
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: "✅ I have deposited to escrow address",
-              callback_data: "check_deposit",
-            },
+    const depositImage = path.join(process.cwd(), 'public', 'images', 'deposit.png');
+    try {
+      if (fs.existsSync(depositImage)) {
+        await ctx.replyWithPhoto({ source: fs.createReadStream(depositImage) }, {
+          caption: depositText,
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: `${address}`,
+                  copy_text: { text: address }
+                },
+              ],
+              [
+                {
+                  text: "✅ I have deposited to escrow address",
+                  callback_data: "check_deposit",
+                },
+              ],
+            ],
+          },
+        });
+      } else {
+        await ctx.reply(depositText, {
+          parse_mode: "Markdown",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: `${address}`,
+                  copy_text: { text: address }
+                },
+              ],
+              [
+                {
+                  text: "✅ I have deposited to escrow address",
+                  callback_data: "check_deposit",
+                },
+              ],
+            ],
+          },
+        });
+      }
+    } catch (err) {
+      await ctx.reply(depositText, {
+        parse_mode: "Markdown",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: `${address}`,
+                copy_text: { text: address }
+              },
+            ],
+            [
+              {
+                text: "✅ I have deposited to escrow address",
+                callback_data: "check_deposit",
+              },
+            ],
           ],
-          [{ text: `📋 ${address}`, copy_text: { text: address } }],
-        ],
-      },
-    });
+        },
+      });
+    }
 
   } catch (error) {
     console.error("Error in deposit handler:", error);

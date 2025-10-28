@@ -1,4 +1,6 @@
 const Escrow = require('../models/Escrow');
+const fs = require('fs');
+const path = require('path');
 
 module.exports = async (ctx) => {
   try {
@@ -29,22 +31,45 @@ Hello there,
 Kindly tell deal details i.e.
 Quantity -
 Rate -
-
-Remember without it disputes wouldn't be resolved. Once filled proceed with buyer address using /buyer [CRYPTO ADDRESS]
     `;
 
-    const templateText = `Quantity -
-Rate -`;
+    const templateText = `Copy above mentioned text`;
 
-    await ctx.reply(dealText, { 
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: 'Quantity -\nRate -', copy_text: { text: templateText } }
-          ]
-        ]
+    const dealSetupImage = path.join(process.cwd(), 'public', 'images', 'deal setup.png');
+    try {
+      if (fs.existsSync(dealSetupImage)) {
+        await ctx.replyWithPhoto({ source: fs.createReadStream(dealSetupImage) }, {
+          caption: dealText,
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: 'Quantity -\nRate -', copy_text: { text: templateText } }
+              ]
+            ]
+          }
+        });
+      } else {
+        await ctx.reply(dealText, { 
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: 'Quantity -\nRate -', copy_text: { text: templateText } }
+              ]
+            ]
+          }
+        });
       }
-    });
+    } catch (err) {
+      await ctx.reply(dealText, { 
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: 'Quantity -\nRate -', copy_text: { text: templateText } }
+            ]
+          ]
+        }
+      });
+    }
 
     // Set status to awaiting details and capture mode
     escrow.status = 'awaiting_details';

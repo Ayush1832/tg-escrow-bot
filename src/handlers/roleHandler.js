@@ -1,5 +1,6 @@
 const { Markup } = require('telegraf');
 const Escrow = require('../models/Escrow');
+const tokenHandler = require('./tokenHandler');
 
 module.exports = async (ctx) => {
   try {
@@ -54,9 +55,9 @@ module.exports = async (ctx) => {
     const roleText = `
 📍 *ESCROW-ROLE DECLARATION*
 
-⚡️ ${isBuyer ? 'BUYER' : 'SELLER'} @${ctx.from.username} | Userid: [${userId}]
+⚡️ BUYER @${ctx.from.username} | Userid: [${userId}]
 
-✅ ${isBuyer ? 'BUYER' : 'SELLER'} WALLET
+✅ BUYER WALLET
 
 Note: If you don't see any address, then your address will used from saved addresses after selecting token and chain for the current escrow.
     `;
@@ -64,9 +65,12 @@ Note: If you don't see any address, then your address will used from saved addre
     await ctx.reply(roleText, { parse_mode: 'Markdown' });
 
 
-    // Check if buyer address is set
+    // Show token selection menu automatically when buyer address is set
     if (escrow.buyerAddress) {
-      await ctx.reply('✅ Buyer address has been set. Use /token to choose crypto.');
+      await ctx.reply('✅ Buyer address has been set.');
+      await ctx.reply('Choose token from the list below');
+      // Automatically show token selection menu
+      await tokenHandler(ctx);
     }
 
   } catch (error) {

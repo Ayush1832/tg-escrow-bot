@@ -16,7 +16,6 @@ A centralized Telegram escrow bot for USDT transactions on BSC network.
 - `/start` - Start the bot and see welcome message
 - `/escrow` - Create a new escrow (group only)
 - `/dd` - Set deal details (quantity, rate, conditions)
-- `/seller <address>` - Set seller wallet address
 - `/buyer <address>` - Set buyer wallet address
 - `/token` - Select token and network (USDT/BSC only)
 - `/deposit` - Generate deposit address
@@ -96,7 +95,7 @@ A centralized Telegram escrow bot for USDT transactions on BSC network.
 1. **Create Group**: Users create a Telegram group and add the bot as admin
 2. **Start Escrow**: Use `/escrow` command in the group
 3. **Set Details**: Use `/dd` to set deal details
-4. **Assign Roles**: Use `/seller` and `/buyer` commands with wallet addresses
+4. **Assign Roles**: Use `/buyer` command with wallet addresses
 5. **Select Token**: Use `/token` to confirm USDT/BSC
 6. **Generate Deposit**: Use `/deposit` to get deposit address
 7. **Monitor Deposit**: Bot automatically detects USDT deposits

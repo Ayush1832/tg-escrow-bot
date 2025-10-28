@@ -75,7 +75,18 @@ class EscrowBot {
         escrow.status = 'draft';
         await escrow.save();
         
-        await ctx.reply('✅ Deal details saved. Now set /buyer address.\n\n📋 Example:\n• /buyer 0xabcdef1234567890abcdef1234567890abcdef12');
+        // Show role selection buttons
+        await ctx.reply('✅ Deal details saved.');
+        await ctx.reply('👤 Both users select your roles:', {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: '👤 Buyer', callback_data: 'select_role_buyer' },
+                { text: '🏪 Seller', callback_data: 'select_role_seller' }
+              ]
+            ]
+          }
+        });
         return; // Don't continue to next handlers
       } catch (e) {
         console.error('deal details parse error', e);

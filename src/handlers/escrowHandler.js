@@ -2,6 +2,8 @@ const { Markup } = require('telegraf');
 const Escrow = require('../models/Escrow');
 const User = require('../models/User');
 const GroupPoolService = require('../services/GroupPoolService');
+const fs = require('fs');
+const path = require('path');
 
 module.exports = async (ctx) => {
   try {
@@ -96,17 +98,47 @@ module.exports = async (ctx) => {
 
 ✅ Once both parties join, use /dd command in the group to set deal details.`;
 
-        await ctx.reply(dmText, { 
-          parse_mode: 'HTML',
-          disable_web_page_preview: true,
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: '📋 Copy Invite Link', copy_text: { text: inviteLink } }
-              ]
-            ]
+        const groupCreatedImage = path.join(process.cwd(), 'public', 'images', 'group created.png');
+        try {
+          if (fs.existsSync(groupCreatedImage)) {
+            await ctx.replyWithPhoto({ source: fs.createReadStream(groupCreatedImage) }, {
+              caption: dmText,
+              parse_mode: 'HTML',
+              disable_web_page_preview: true,
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    { text: '📋 Copy Invite Link', copy_text: { text: inviteLink } }
+                  ]
+                ]
+              }
+            });
+          } else {
+            await ctx.reply(dmText, { 
+              parse_mode: 'HTML',
+              disable_web_page_preview: true,
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    { text: '📋 Copy Invite Link', copy_text: { text: inviteLink } }
+                  ]
+                ]
+              }
+            });
           }
-        });
+        } catch (err) {
+          await ctx.reply(dmText, { 
+            parse_mode: 'HTML',
+            disable_web_page_preview: true,
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: '📋 Copy Invite Link', copy_text: { text: inviteLink } }
+                ]
+              ]
+            }
+          });
+        }
 
         // Send welcome message to the assigned group
         const groupText = `📍 <b>Hey there traders! Welcome to our escrow service.</b>
@@ -118,9 +150,23 @@ module.exports = async (ctx) => {
 
 ✅ Please start with /dd command and if you have any doubts please use /start command.`;
 
-        await ctx.telegram.sendMessage(assignedGroup.groupId, groupText, { 
-          parse_mode: 'HTML' 
-        });
+        const createEscrowImage = path.join(process.cwd(), 'public', 'images', 'create escrow.png');
+        try {
+          if (fs.existsSync(createEscrowImage)) {
+            await ctx.telegram.sendPhoto(assignedGroup.groupId, { source: fs.createReadStream(createEscrowImage) }, {
+              caption: groupText,
+              parse_mode: 'HTML'
+            });
+          } else {
+            await ctx.telegram.sendMessage(assignedGroup.groupId, groupText, { 
+              parse_mode: 'HTML' 
+            });
+          }
+        } catch (err) {
+          await ctx.telegram.sendMessage(assignedGroup.groupId, groupText, { 
+            parse_mode: 'HTML' 
+          });
+        }
 
         // Log event
 
@@ -208,7 +254,19 @@ Please create a group manually for now:
 
 ✅ Please start with /dd command and if you have any doubts please use /start command.`;
 
-    await ctx.reply(groupText, { parse_mode: 'HTML' });
+    const createEscrowImage = path.join(process.cwd(), 'public', 'images', 'create escrow.png');
+    try {
+      if (fs.existsSync(createEscrowImage)) {
+        await ctx.replyWithPhoto({ source: fs.createReadStream(createEscrowImage) }, {
+          caption: groupText,
+          parse_mode: 'HTML'
+        });
+      } else {
+        await ctx.reply(groupText, { parse_mode: 'HTML' });
+      }
+    } catch (err) {
+      await ctx.reply(groupText, { parse_mode: 'HTML' });
+    }
 
 
   } catch (error) {
