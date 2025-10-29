@@ -762,14 +762,20 @@ async function adminTradeStats(ctx) {
       });
 
       const totalTrades = escrowsWithFee.length;
+      // Use confirmedAmount -> depositAmount -> quantity as fallback to avoid 0 totals
       const totalAmount = escrowsWithFee.reduce((sum, escrow) => {
-        return sum + (parseFloat(escrow.confirmedAmount || escrow.depositAmount || 0));
+        const c = parseFloat(escrow.confirmedAmount);
+        const d = parseFloat(escrow.depositAmount);
+        const amt = (!isNaN(c) && c > 0) ? c : (!isNaN(d) ? d : 0);
+        return sum + amt;
       }, 0);
 
       const tokenBreakdown = {};
       escrowsWithFee.forEach(escrow => {
         const token = escrow.token || 'Unknown';
-        const amount = parseFloat(escrow.confirmedAmount || escrow.depositAmount || 0);
+        const c = parseFloat(escrow.confirmedAmount);
+        const d = parseFloat(escrow.depositAmount);
+        const amount = (!isNaN(c) && c > 0) ? c : (!isNaN(d) ? d : 0);
         
         if (!tokenBreakdown[token]) {
           tokenBreakdown[token] = { count: 0, amount: 0 };
@@ -792,7 +798,10 @@ async function adminTradeStats(ctx) {
     // Calculate overall statistics
     const totalTrades = completedEscrows.length;
     const totalAmount = completedEscrows.reduce((sum, escrow) => {
-      return sum + (parseFloat(escrow.confirmedAmount || escrow.depositAmount || 0));
+      const c = parseFloat(escrow.confirmedAmount);
+      const d = parseFloat(escrow.depositAmount);
+      const amt = (!isNaN(c) && c > 0) ? c : (!isNaN(d) ? d : 0);
+      return sum + amt;
     }, 0);
 
     const completedCount = completedEscrows.filter(e => e.status === 'completed').length;
@@ -860,13 +869,18 @@ async function adminExportTrades(ctx) {
 
     // Get all escrows with detailed information
     const allEscrows = await Escrow.find({})
-      .sort({ createdAt: -1 }) // Most recent first
-      .populate('buyerId', 'username first_name')
-      .populate('sellerId', 'username first_name');
+      .sort({ createdAt: -1 }); // Most recent first
 
     if (allEscrows.length === 0) {
       return ctx.reply('📊 No trades found in the database.');
     }
+
+    // CSV-safe helper
+    const csvSafe = (v) => {
+      const s = String(v == null ? '' : v);
+      const escaped = s.replace(/"/g, '""');
+      return `"${escaped}"`;
+    };
 
     // Create organized CSV content with clear sections
     let csvContent = `# ESCROW TRADES EXPORT
@@ -874,19 +888,14 @@ async function adminExportTrades(ctx) {
 # Total Trades: ${allEscrows.length}
 #
 # COLUMNS:
-# ID, Status, Date, Token, Network, Amount, Quantity, Rate, Buyer, Seller, Deal Details, Dispute Reason, Completed Date
+# ID, Status, Created Date, Token, Network, Quantity, Rate, Buyer, Seller, Deal Details, Dispute Reason, Completed Date
 #
 # DATA:
 `;
     
     allEscrows.forEach((escrow, index) => {
-      const buyerName = escrow.buyerId ? 
-        (escrow.buyerId.username ? `@${escrow.buyerId.username}` : escrow.buyerId.first_name || 'Unknown') : 
-        'Not Set';
-      
-      const sellerName = escrow.sellerId ? 
-        (escrow.sellerId.username ? `@${escrow.sellerId.username}` : escrow.sellerId.first_name || 'Unknown') : 
-        'Not Set';
+      const buyerName = escrow.buyerUsername ? `@${escrow.buyerUsername}` : (escrow.buyerId ? `[${escrow.buyerId}]` : 'Not Set');
+      const sellerName = escrow.sellerUsername ? `@${escrow.sellerUsername}` : (escrow.sellerId ? `[${escrow.sellerId}]` : 'Not Set');
 
       const dealDetails = escrow.dealDetails ? 
         escrow.dealDetails.replace(/\n/g, ' | ').replace(/,/g, ';') : 
@@ -901,14 +910,28 @@ async function adminExportTrades(ctx) {
         '';
 
       const createdDate = new Date(escrow.createdAt).toLocaleString();
-      const amount = escrow.confirmedAmount || escrow.depositAmount || 0;
+      const quantity = typeof escrow.quantity === 'number' ? escrow.quantity : (parseFloat(escrow.quantity) || 0);
+      const rate = (escrow.rate != null && escrow.rate !== '') ? escrow.rate : '';
 
       // Add separator for readability
       if (index > 0) {
         csvContent += `\n`;
       }
 
-      csvContent += `${escrow._id},${escrow.status},${createdDate},${escrow.token || 'N/A'},${escrow.chain || 'N/A'},${amount},${escrow.quantity || 'N/A'},${escrow.rate || 'N/A'},${buyerName},${sellerName},"${dealDetails}","${disputeReason}",${completedDate}`;
+      csvContent += [
+        csvSafe(escrow._id),
+        csvSafe(escrow.status),
+        csvSafe(createdDate),
+        csvSafe(escrow.token || 'N/A'),
+        csvSafe(escrow.chain || 'N/A'),
+        csvSafe(quantity),
+        csvSafe(rate),
+        csvSafe(buyerName),
+        csvSafe(sellerName),
+        csvSafe(dealDetails),
+        csvSafe(disputeReason),
+        csvSafe(completedDate)
+      ].join(',');
     });
 
     // Create filename with timestamp
@@ -969,18 +992,19 @@ async function adminRecentTrades(ctx) {
       return ctx.reply('📊 No trades found in the database.');
     }
 
-    let message = `📊 **RECENT TRADES (${recentTrades.length})**\n\n`;
+    // Helper to escape HTML
+    const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    let message = `📊 <b>RECENT TRADES (${recentTrades.length})</b>\n\n`;
 
     recentTrades.forEach((escrow, index) => {
-      const buyerName = escrow.buyerId ? 
-        (escrow.buyerId.username ? `@${escrow.buyerId.username}` : escrow.buyerId.first_name || 'Unknown') : 
-        'Not Set';
-      
-      const sellerName = escrow.sellerId ? 
-        (escrow.sellerId.username ? `@${escrow.sellerId.username}` : escrow.sellerId.first_name || 'Unknown') : 
-        'Not Set';
+      // Prefer stored usernames on escrow, fallback to IDs
+      const buyerName = escrow.buyerUsername ? `@${escrow.buyerUsername}` : (escrow.buyerId ? `[${escrow.buyerId}]` : 'Not Set');
+      const sellerName = escrow.sellerUsername ? `@${escrow.sellerUsername}` : (escrow.sellerId ? `[${escrow.sellerId}]` : 'Not Set');
 
-      const amount = escrow.confirmedAmount || escrow.depositAmount || 0;
+      const c = parseFloat(escrow.confirmedAmount);
+      const d = parseFloat(escrow.depositAmount);
+      const amount = (!isNaN(c) && c > 0) ? c : (!isNaN(d) ? d : 0);
       const statusEmoji = {
         'completed': '✅',
         'refunded': '🔄',
@@ -989,20 +1013,20 @@ async function adminRecentTrades(ctx) {
         'awaiting_details': '⏳'
       }[escrow.status] || '❓';
 
-      message += `${index + 1}. ${statusEmoji} **${escrow.status.toUpperCase()}**\n`;
-      message += `   💰 ${amount} ${escrow.token || 'N/A'} (${escrow.chain || 'N/A'})\n`;
-      message += `   👤 Buyer: ${buyerName}\n`;
-      message += `   🏪 Seller: ${sellerName}\n`;
-      message += `   📅 ${new Date(escrow.createdAt).toLocaleString()}\n`;
-      message += `   🆔 ID: \`${escrow._id}\`\n\n`;
+      message += `${index + 1}. ${statusEmoji} <b>${escrow.status.toUpperCase()}</b>\n`;
+      message += `   💰 ${esc(amount)} ${esc(escrow.token || 'N/A')} (${esc(escrow.chain || 'N/A')})\n`;
+      message += `   👤 Buyer: ${esc(buyerName)}\n`;
+      message += `   🏪 Seller: ${esc(sellerName)}\n`;
+      message += `   📅 ${esc(new Date(escrow.createdAt).toLocaleString())}\n`;
+      message += `   🆔 ID: <code>${esc(escrow._id)}</code>\n\n`;
     });
 
-    message += `💡 **Commands:**\n`;
-    message += `• \`/admin_recent_trades 20\` - Show 20 recent trades\n`;
-    message += `• \`/admin_export_trades\` - Export all trades to CSV\n`;
-    message += `• \`/admin_trade_stats\` - View statistics by fee percentage`;
+    message += `💡 <b>Commands:</b>\n`;
+    message += `• <code>/admin_recent_trades 20</code> - Show 20 recent trades\n`;
+    message += `• <code>/admin_export_trades</code> - Export all trades to CSV\n`;
+    message += `• <code>/admin_trade_stats</code> - View statistics by fee percentage`;
 
-    await ctx.reply(message, { parse_mode: 'Markdown' });
+    await ctx.reply(message, { parse_mode: 'HTML' });
 
   } catch (error) {
     console.error('Error in admin recent trades:', error);
