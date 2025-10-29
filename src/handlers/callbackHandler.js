@@ -65,6 +65,9 @@ module.exports = async (ctx) => {
         return ctx.reply('❌ No active escrow found.');
       }
       // Assign buyer role
+      if (escrow.sellerId && escrow.sellerId === userId) {
+        return ctx.reply('❌ Buyer and Seller cannot be the same user.');
+      }
       if (escrow.buyerId && escrow.buyerId !== userId) {
         return ctx.reply('❌ Buyer role is already taken by another user.');
       }
@@ -107,6 +110,9 @@ module.exports = async (ctx) => {
         return ctx.reply('❌ No active escrow found.');
       }
       // Assign seller role
+      if (escrow.buyerId && escrow.buyerId === userId) {
+        return ctx.reply('❌ Buyer and Seller cannot be the same user.');
+      }
       if (escrow.sellerId && escrow.sellerId !== userId) {
         return ctx.reply('❌ Seller role is already taken by another user.');
       }

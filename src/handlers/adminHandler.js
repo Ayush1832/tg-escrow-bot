@@ -1004,8 +1004,10 @@ async function adminRecentTrades(ctx) {
       return ctx.reply('❌ Maximum 50 trades per request. Use /admin_export_trades for complete data.');
     }
 
-    // Get recent trades
-    const recentTrades = await Escrow.find({})
+    // Get recent trades - only necessary statuses
+    const recentTrades = await Escrow.find({
+        status: { $in: ['completed', 'refunded', 'disputed'] }
+      })
       .sort({ createdAt: -1 })
       .limit(limit)
       .populate('buyerId', 'username first_name')
@@ -1046,8 +1048,12 @@ async function adminRecentTrades(ctx) {
         'awaiting_details': '⏳'
       }[escrow.status] || '❓';
 
+      const amountText = amount > 0
+        ? `${esc(amount)} ${esc(escrow.token || 'N/A')}`
+        : `— ${esc(escrow.token || 'N/A')} (no on-chain amount)`;
+
       message += `${index + 1}. ${statusEmoji} <b>${escrow.status.toUpperCase()}</b>\n`;
-      message += `   💰 ${esc(amount)} ${esc(escrow.token || 'N/A')} (${esc(escrow.chain || 'N/A')})\n`;
+      message += `   💰 ${amountText} (${esc(escrow.chain || 'N/A')})\n`;
       message += `   👤 Buyer: ${esc(buyerName)}\n`;
       message += `   🏪 Seller: ${esc(sellerName)}\n`;
       message += `   📅 ${esc(new Date(escrow.createdAt).toLocaleString())}\n`;
