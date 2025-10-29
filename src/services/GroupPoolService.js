@@ -375,7 +375,6 @@ class GroupPoolService {
       });
 
       if (!group) {
-        console.log(`No pool group found for escrow ${escrow.escrowId} - skipping recycling (likely manually created group)`);
         return null;
       }
 
@@ -385,7 +384,6 @@ class GroupPoolService {
       // Schedule delayed recycling (15 minutes)
       this.scheduleDelayedRecycling(escrow, group, telegram);
 
-      console.log(`⏰ Group ${group.groupId} scheduled for recycling in 15 minutes for escrow ${escrow.escrowId}`);
       return group;
 
     } catch (error) {
@@ -401,7 +399,6 @@ class GroupPoolService {
     // Set timeout for 15 minutes (15 * 60 * 1000 ms)
     setTimeout(async () => {
       try {
-        console.log(`🔄 Starting delayed recycling for group ${group.groupId} (escrow ${escrow.escrowId})`);
         
         // Remove ALL users from group (buyer, seller, admins, everyone)
         const allUsersRemoved = await this.removeUsersFromGroup(escrow, group.groupId, telegram);
@@ -415,7 +412,6 @@ class GroupPoolService {
           group.inviteLink = null;
           await group.save();
 
-          console.log(`✅ Group ${group.groupId} recycled successfully after 15-minute delay for escrow ${escrow.escrowId} - ALL users removed`);
         } else {
           // Mark as completed but don't add back to pool if users couldn't be removed
           group.status = 'completed';
@@ -425,7 +421,6 @@ class GroupPoolService {
           group.inviteLink = null;
           await group.save();
 
-          console.log(`⚠️ Group ${group.groupId} marked as completed but NOT added back to pool - some users couldn't be removed`);
         }
       } catch (error) {
         console.error('Error in delayed group recycling:', error);
@@ -455,9 +450,7 @@ class GroupPoolService {
       try {
         const chatMembers = await telegram.getChatAdministrators(chatId);
         allMembers = chatMembers.map(member => member.user.id);
-        console.log(`Found ${allMembers.length} members in group ${groupId}`);
       } catch (error) {
-        console.log(`Could not get chat members for group ${groupId}:`, error.message);
         return false; // Can't proceed without member list
       }
 
@@ -473,10 +466,8 @@ class GroupPoolService {
 
         try {
           await telegram.kickChatMember(chatId, userId);
-          console.log(`Removed user ${userId} from group ${groupId}`);
           removedCount++;
         } catch (error) {
-          console.log(`Could not remove user ${userId} from group:`, error.message);
         }
       }
 

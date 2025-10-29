@@ -187,7 +187,6 @@ module.exports = async (ctx) => {
             group.completedAt = null;
             group.inviteLink = null;
             await group.save();
-            console.log(`✅ Group ${group.groupId} recycled immediately for escrow ${escrow.escrowId}`);
           } else {
             // Mark as completed but don't add back to pool if users couldn't be removed
             group.status = 'completed';
@@ -196,7 +195,6 @@ module.exports = async (ctx) => {
             group.completedAt = new Date();
             group.inviteLink = null;
             await group.save();
-            console.log(`⚠️ Group ${group.groupId} marked as completed but NOT added back to pool - some users couldn't be removed`);
           }
         }
 
@@ -395,8 +393,6 @@ module.exports = async (ctx) => {
           // Transfer all funds to admin
           const txHash = await BlockchainService.withdrawToAdmin(contractAddress, adminAddress, escrow.token, escrow.chain, balance);
           
-          console.log(`💰 Transferred ${balance} ${escrow.token} to admin wallet: ${adminAddress}`);
-          console.log(`📝 Transaction hash: ${txHash}`);
         }
 
         // Send admin notification for partial payment dispute
@@ -933,7 +929,6 @@ ${escrow.buyerAddress}
       // Handle expired callback queries gracefully
       if (answerError.description?.includes('query is too old') || 
           answerError.description?.includes('query ID is invalid')) {
-        console.log('Callback query expired, ignoring...');
       } else {
         console.error('Error answering callback query:', answerError);
       }
@@ -1274,7 +1269,6 @@ async function sendAdminPartialPaymentNotification(ctx, escrow, transferredAmoun
       }
     }
 
-    console.log(`📢 Partial payment dispute notification sent to ${adminUserIds.length} admin(s)`);
 
   } catch (error) {
     console.error('Error sending partial payment notification:', error);

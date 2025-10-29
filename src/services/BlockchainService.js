@@ -50,7 +50,6 @@ class BlockchainService {
       // Show all available EscrowVault contracts
       const contracts = await ContractModel.find({ name: 'EscrowVault' });
       if (contracts.length === 0) {
-        console.log('No EscrowVault contracts found in database');
         throw new Error('EscrowVault not deployed / not saved');
       }
       
@@ -62,8 +61,6 @@ class BlockchainService {
       );
       
       if (!matchingContract) {
-        console.log(`❌ No contract found with ${desiredFeePercent}% fee`);
-        console.log('Available fee percentages:');
         const uniqueFees = [...new Set(contracts.map(c => c.feePercent))];
         uniqueFees.forEach(fee => console.log(`  • ${fee}%`));
         throw new Error(`No EscrowVault contract found with ${desiredFeePercent}% fee. Please deploy a contract with this fee percentage.`);
@@ -367,7 +364,6 @@ class BlockchainService {
       const decimals = this.getTokenDecimals(token, network);
       const amountWei = ethers.parseUnits(amount.toString(), decimals);
 
-      console.log(`Releasing ${amount} ${token} to ${buyerAddress} on ${network}`);
       
       const tx = await vaultContract.release(buyerAddress, amountWei);
       const receipt = await tx.wait();
@@ -375,7 +371,6 @@ class BlockchainService {
       // Get transaction hash from receipt or transaction object
       const transactionHash = receipt.transactionHash || receipt.hash || tx.hash;
       
-      console.log(`✅ Release transaction successful: ${transactionHash}`);
       return {
         success: true,
         transactionHash: transactionHash,
@@ -407,7 +402,6 @@ class BlockchainService {
       const decimals = this.getTokenDecimals(token, network);
       const amountWei = ethers.parseUnits(amount.toString(), decimals);
 
-      console.log(`Refunding ${amount} ${token} to ${sellerAddress} on ${network}`);
       
       const tx = await vaultContract.refund(sellerAddress, amountWei);
       const receipt = await tx.wait();
@@ -415,7 +409,6 @@ class BlockchainService {
       // Get transaction hash from receipt or transaction object
       const transactionHash = receipt.transactionHash || receipt.hash || tx.hash;
       
-      console.log(`✅ Refund transaction successful: ${transactionHash}`);
       return {
         success: true,
         transactionHash: transactionHash,
@@ -470,7 +463,6 @@ class BlockchainService {
       const decimals = this.getTokenDecimals(token, network);
       const amountWei = ethers.parseUnits(amount.toString(), decimals);
 
-      console.log(`Withdrawing ${amount} ${token} to admin wallet ${adminAddress} on ${network}`);
       
       // Get the token contract address
       const tokenAddress = this.getTokenAddress(token, network);
@@ -485,7 +477,6 @@ class BlockchainService {
       // Get transaction hash from receipt or transaction object
       const transactionHash = receipt.transactionHash || receipt.hash || tx.hash;
       
-      console.log(`✅ Admin withdrawal transaction successful: ${transactionHash}`);
       return transactionHash;
 
     } catch (error) {

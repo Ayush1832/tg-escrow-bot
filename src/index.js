@@ -481,7 +481,6 @@ ${escrow.status === 'draft' || escrow.status === 'awaiting_details' ?
         }
 
         if (staleDrafts.length) {
-          console.log(`🧹 Draft lock cleanup: freed ${staleDrafts.length} users (single-use groups preserved).`);
         }
       } catch (e) {
         console.error('Draft lock cleanup error:', e);
@@ -499,7 +498,6 @@ setTimeout(async () => {
   try {    
     // Ensure MongoDB is connected with timeout
     if (mongoose.connection.readyState !== 1) {
-      console.log('⏳ Waiting for MongoDB connection...');
       await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error('MongoDB connection timeout during cleanup'));

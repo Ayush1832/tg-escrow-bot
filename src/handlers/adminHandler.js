@@ -766,7 +766,14 @@ async function adminTradeStats(ctx) {
       const totalAmount = escrowsWithFee.reduce((sum, escrow) => {
         const c = parseFloat(escrow.confirmedAmount);
         const d = parseFloat(escrow.depositAmount);
-        const amt = (!isNaN(c) && c > 0) ? c : (!isNaN(d) ? d : 0);
+        const q = parseFloat(escrow.quantity);
+        const amt = (!isNaN(c) && c > 0)
+          ? c
+          : (!isNaN(d) && d > 0)
+            ? d
+            : (['completed', 'refunded'].includes(escrow.status) && !isNaN(q) && q > 0)
+              ? q
+              : 0;
         return sum + amt;
       }, 0);
 
@@ -775,7 +782,14 @@ async function adminTradeStats(ctx) {
         const token = escrow.token || 'Unknown';
         const c = parseFloat(escrow.confirmedAmount);
         const d = parseFloat(escrow.depositAmount);
-        const amount = (!isNaN(c) && c > 0) ? c : (!isNaN(d) ? d : 0);
+        const q = parseFloat(escrow.quantity);
+        const amount = (!isNaN(c) && c > 0)
+          ? c
+          : (!isNaN(d) && d > 0)
+            ? d
+            : (['completed', 'refunded'].includes(escrow.status) && !isNaN(q) && q > 0)
+              ? q
+              : 0;
         
         if (!tokenBreakdown[token]) {
           tokenBreakdown[token] = { count: 0, amount: 0 };
@@ -800,7 +814,14 @@ async function adminTradeStats(ctx) {
     const totalAmount = completedEscrows.reduce((sum, escrow) => {
       const c = parseFloat(escrow.confirmedAmount);
       const d = parseFloat(escrow.depositAmount);
-      const amt = (!isNaN(c) && c > 0) ? c : (!isNaN(d) ? d : 0);
+      const q = parseFloat(escrow.quantity);
+      const amt = (!isNaN(c) && c > 0)
+        ? c
+        : (!isNaN(d) && d > 0)
+          ? d
+          : (!isNaN(q) && q > 0)
+            ? q
+            : 0;
       return sum + amt;
     }, 0);
 
@@ -888,7 +909,7 @@ async function adminExportTrades(ctx) {
 # Total Trades: ${allEscrows.length}
 #
 # COLUMNS:
-# ID, Status, Created Date, Token, Network, Quantity, Rate, Buyer, Seller, Deal Details, Dispute Reason, Completed Date
+# ID, Status, Created Date, Token, Network, Quantity, Rate, Buyer, Seller, Dispute Reason, Completed Date
 #
 # DATA:
 `;
@@ -918,6 +939,9 @@ async function adminExportTrades(ctx) {
         csvContent += `\n`;
       }
 
+      const buyerOut = buyerName || (escrow.buyerId ? `[${escrow.buyerId}]` : 'Unknown');
+      const sellerOut = sellerName || (escrow.sellerId ? `[${escrow.sellerId}]` : 'Unknown');
+
       csvContent += [
         csvSafe(escrow._id),
         csvSafe(escrow.status),
@@ -926,9 +950,8 @@ async function adminExportTrades(ctx) {
         csvSafe(escrow.chain || 'N/A'),
         csvSafe(quantity),
         csvSafe(rate),
-        csvSafe(buyerName),
-        csvSafe(sellerName),
-        csvSafe(dealDetails),
+        csvSafe(buyerOut),
+        csvSafe(sellerOut),
         csvSafe(disputeReason),
         csvSafe(completedDate)
       ].join(',');
@@ -992,8 +1015,11 @@ async function adminRecentTrades(ctx) {
       return ctx.reply('📊 No trades found in the database.');
     }
 
-    // Helper to escape HTML
-    const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // Helper to escape HTML (preserve numeric 0)
+    const esc = (s) => {
+      const v = (s === 0) ? '0' : String(s == null ? '' : s);
+      return v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    };
 
     let message = `📊 <b>RECENT TRADES (${recentTrades.length})</b>\n\n`;
 
@@ -1004,7 +1030,14 @@ async function adminRecentTrades(ctx) {
 
       const c = parseFloat(escrow.confirmedAmount);
       const d = parseFloat(escrow.depositAmount);
-      const amount = (!isNaN(c) && c > 0) ? c : (!isNaN(d) ? d : 0);
+      const q = parseFloat(escrow.quantity);
+      const amount = (!isNaN(c) && c > 0)
+        ? c
+        : (!isNaN(d) && d > 0)
+          ? d
+          : (!isNaN(q) && q > 0)
+            ? q
+            : 0;
       const statusEmoji = {
         'completed': '✅',
         'refunded': '🔄',
@@ -1086,7 +1119,6 @@ Thank you for using our escrow service!`;
       try {
         await ctx.telegram.sendMessage(escrow.groupId, completionMessage);
       } catch (error) {
-        console.log(`Could not send completion message to group ${escrow.groupId}:`, error.message);
       }
     }
 
@@ -1095,7 +1127,6 @@ Thank you for using our escrow service!`;
       const GroupPoolService = require('../services/GroupPoolService');
       await GroupPoolService.recycleGroupAfterCompletion(escrow, ctx.telegram);
     } catch (error) {
-      console.log('Group recycling not applicable or failed:', error.message);
     }
 
     await ctx.reply(`✅ Partial payment dispute resolved successfully!\n\nEscrow ID: \`${escrow.escrowId}\`\nStatus: Completed\nResolved: ${new Date().toLocaleString()}`);

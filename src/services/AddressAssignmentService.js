@@ -366,7 +366,6 @@ class AddressAssignmentService {
         }
       }
 
-      console.log(`✅ Address pool initialized with ${addedCount} addresses`);
 
     } catch (error) {
       console.error('Error initializing address pool:', error);

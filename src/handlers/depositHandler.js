@@ -117,7 +117,6 @@ module.exports = async (ctx) => {
       const normalizedFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
       
       // Add debug logging for troubleshooting
-      console.log(`🔍 Assigning address for: Escrow ${escrow.escrowId}, ${normalizedToken} on ${normalizedNetwork}, Amount: ${normalizedQuantity}, Fee: ${normalizedFeePercent}%`);
       
       const addressInfo = await AddressAssignmentService.assignDepositAddress(
         escrow.escrowId,

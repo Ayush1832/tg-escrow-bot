@@ -8,8 +8,6 @@ class TradeTimeoutService {
    */
   async setTradeTimeout(escrowId, telegram) {
     try {
-      console.log(`⏰ Setting 1-hour trade timeout for escrow ${escrowId}`);
-
       const escrow = await Escrow.findOne({ escrowId });
       if (!escrow) {
         throw new Error(`Escrow ${escrowId} not found`);
@@ -25,7 +23,7 @@ class TradeTimeoutService {
       // Schedule timeout check
       this.scheduleTimeoutCheck(escrowId, telegram);
 
-      console.log(`✅ Trade timeout set for escrow ${escrowId} - expires at ${timeoutDate.toISOString()}`);
+      (`✅ Trade timeout set for escrow ${escrowId} - expires at ${timeoutDate.toISOString()}`);
       return timeoutDate;
 
     } catch (error) {
@@ -53,30 +51,25 @@ class TradeTimeoutService {
    */
   async handleTradeTimeout(escrowId, telegram) {
     try {
-      console.log(`⏰ Handling trade timeout for escrow ${escrowId}`);
 
       const escrow = await Escrow.findOne({ escrowId });
       if (!escrow) {
-        console.log(`⚠️ Escrow ${escrowId} not found during timeout check`);
         return;
       }
 
       // Check if escrow is still active and not disputed
       if (escrow.status === 'disputed' || escrow.isDisputed) {
-        console.log(`⚠️ Escrow ${escrowId} is disputed - skipping timeout action`);
         return;
       }
 
       // Check if escrow is completed
       if (['completed', 'refunded'].includes(escrow.status)) {
-        console.log(`✅ Escrow ${escrowId} already completed - skipping timeout action`);
         return;
       }
 
       // Check if funds have been deposited (user has already deposited)
       if (escrow.status === 'deposited' || escrow.status === 'in_fiat_transfer' || 
           escrow.status === 'ready_to_release' || escrow.depositAmount > 0) {
-        console.log(`💰 Escrow ${escrowId} has funds deposited - skipping timeout action`);
         return;
       }
 
@@ -87,12 +80,10 @@ class TradeTimeoutService {
       escrow.status = 'completed'; // Mark as completed to trigger recycling
       await escrow.save();
 
-      console.log(`🔄 Escrow ${escrowId} marked as abandoned due to timeout`);
 
       // Release deposit address
       try {
         await AddressAssignmentService.releaseDepositAddress(escrowId);
-        console.log(`✅ Deposit address released for abandoned escrow ${escrowId}`);
       } catch (error) {
         console.error('Error releasing deposit address:', error);
       }
@@ -100,7 +91,6 @@ class TradeTimeoutService {
       // Recycle group if it's from pool
       try {
         await GroupPoolService.recycleGroupAfterCompletion(escrow, telegram);
-        console.log(`✅ Group recycling scheduled for abandoned escrow ${escrowId}`);
       } catch (error) {
         console.error('Error recycling group:', error);
       }
@@ -108,7 +98,6 @@ class TradeTimeoutService {
       // Send timeout notification to users
       await this.sendTimeoutNotification(escrow, telegram);
 
-      console.log(`✅ Trade timeout handled for escrow ${escrowId}`);
 
     } catch (error) {
       console.error('Error handling trade timeout:', error);
@@ -150,18 +139,15 @@ If you want to start a new trade, please create a new escrow.`;
    */
   async cancelTradeTimeout(escrowId) {
     try {
-      console.log(`❌ Cancelling trade timeout for escrow ${escrowId}`);
 
       const escrow = await Escrow.findOne({ escrowId });
       if (!escrow) {
-        console.log(`⚠️ Escrow ${escrowId} not found`);
         return;
       }
 
       escrow.timeoutStatus = 'cancelled';
       await escrow.save();
 
-      console.log(`✅ Trade timeout cancelled for escrow ${escrowId}`);
 
     } catch (error) {
       console.error('Error cancelling trade timeout:', error);
