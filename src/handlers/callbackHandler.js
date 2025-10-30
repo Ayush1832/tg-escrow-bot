@@ -23,7 +23,9 @@ module.exports = async (ctx) => {
         return ctx.reply('❌ No active escrow found.');
       }
       // Show confirmation
-      await ctx.reply('⚠️ Are you sure that you\'re the buyer?', {
+      let buyerConfirmMsg = '⚠️ Are you sure that you\'re the buyer?';
+      if (ctx.from.username) buyerConfirmMsg = `⚠️ Are you sure that you're the buyer (@${ctx.from.username})?`;
+      await ctx.reply(buyerConfirmMsg, {
         reply_markup: {
           inline_keyboard: [
             [
@@ -44,7 +46,9 @@ module.exports = async (ctx) => {
         return ctx.reply('❌ No active escrow found.');
       }
       // Show confirmation
-      await ctx.reply('⚠️ Are you sure that you\'re the seller?', {
+      let sellerConfirmMsg = '⚠️ Are you sure that you\'re the seller?';
+      if (ctx.from.username) sellerConfirmMsg = `⚠️ Are you sure that you're the seller (@${ctx.from.username})?`;
+      await ctx.reply(sellerConfirmMsg, {
         reply_markup: {
           inline_keyboard: [
             [
