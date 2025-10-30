@@ -74,11 +74,9 @@ Please provide details about the issue and wait for admin intervention.
 
 async function sendAdminDisputeNotification(ctx, escrow) {
   try {
-    const adminIds = config.getAllAdminIds();
-    
-    if (adminIds.length === 0) {
-      return;
-    }
+    // Only notify ADMIN_USER_ID2 for disputes (require from config)
+    const adminId2 = config.ADMIN_USER_ID2;
+    if (!adminId2) return;
 
     // Create invite link for the group
     let inviteLink;
@@ -118,16 +116,13 @@ async function sendAdminDisputeNotification(ctx, escrow) {
 • \`/admin_disputes\` - View all disputes
     `;
 
-    // Send notification to all admins
-    for (const adminId of adminIds) {
-      try {
-        await ctx.telegram.sendMessage(adminId, adminMessage, {
-          parse_mode: 'Markdown',
-          disable_web_page_preview: true
-        });
-      } catch (error) {
-        console.error(`Error sending dispute notification to admin ${adminId}:`, error);
-      }
+    try {
+      await ctx.telegram.sendMessage(adminId2, adminMessage, {
+        parse_mode: 'Markdown',
+        disable_web_page_preview: true
+      });
+    } catch (error) {
+      console.error(`Error sending dispute notification to ADMIN_USER_ID2:`, error);
     }
   } catch (error) {
     console.error('Error sending admin notification:', error);

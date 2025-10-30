@@ -1033,13 +1033,16 @@ async function adminRecentTrades(ctx) {
       const c = parseFloat(escrow.confirmedAmount);
       const d = parseFloat(escrow.depositAmount);
       const q = parseFloat(escrow.quantity);
-      const amount = (!isNaN(c) && c > 0)
-        ? c
-        : (!isNaN(d) && d > 0)
-          ? d
-          : (!isNaN(q) && q > 0)
-            ? q
-            : 0;
+      let amount = 0;
+      let amountSource = 'none';
+      if (!isNaN(c) && c > 0) {
+        amount = c; amountSource = 'confirmed';
+      } else if (!isNaN(d) && d > 0) {
+        amount = d; amountSource = 'deposit';
+      } else if (!isNaN(q) && q > 0 && ['completed','refunded'].includes(escrow.status)) {
+        // Safe backfill from deal quantity for finalized trades
+        amount = q; amountSource = 'quantity';
+      }
       const statusEmoji = {
         'completed': '✅',
         'refunded': '🔄',
@@ -1048,8 +1051,9 @@ async function adminRecentTrades(ctx) {
         'awaiting_details': '⏳'
       }[escrow.status] || '❓';
 
+      const amountNote = amountSource === 'quantity' ? ' (backfilled from quantity)' : '';
       const amountText = amount > 0
-        ? `${esc(amount)} ${esc(escrow.token || 'N/A')}`
+        ? `${esc(amount)} ${esc(escrow.token || 'N/A')}${amountNote}`
         : `— ${esc(escrow.token || 'N/A')} (no on-chain amount)`;
 
       message += `${index + 1}. ${statusEmoji} <b>${escrow.status.toUpperCase()}</b>\n`;
