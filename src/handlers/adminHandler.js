@@ -943,6 +943,27 @@ async function adminGroupReset(ctx) {
         return ctx.reply('⚠️ Some users could not be removed from the group. Please check manually.');
       }
 
+      // Revoke existing invite link in Telegram before resetting
+      // Try to revoke from both GroupPool and Escrow to be safe
+      const linksToRevoke = new Set();
+      if (group.inviteLink) {
+        linksToRevoke.add(group.inviteLink);
+      }
+      // Also check if escrow has an invite link stored
+      if (escrow.inviteLink && escrow.inviteLink !== group.inviteLink) {
+        linksToRevoke.add(escrow.inviteLink);
+      }
+      
+      // Revoke all unique invite links
+      for (const link of linksToRevoke) {
+        try {
+          await ctx.telegram.revokeChatInviteLink(String(group.groupId), link);
+        } catch (revokeError) {
+          // Non-critical: continue even if revocation fails (link might already be expired/revoked)
+          console.log(`Note: Could not revoke invite link ${link.substring(0, 20)}... during group reset:`, revokeError.message);
+        }
+      }
+
       // Reset group pool entry
       group.status = 'available';
       group.assignedEscrowId = null;

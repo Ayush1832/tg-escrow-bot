@@ -75,14 +75,50 @@ class GroupPoolService {
       }
 
       // Revoke existing stored invite link to avoid "expired" state when reusing old links
+      // This is critical for recycled groups - old links must be revoked before creating new ones
+      // Collect all potential invite links from GroupPool and any active/completed Escrows
+      const linksToRevoke = new Set();
+      
+      // Add invite link from GroupPool if it exists
+      if (group.inviteLink) {
+        linksToRevoke.add(group.inviteLink);
+      }
+      
+      // Also check for any Escrows (completed or active) that might have an invite link stored
+      // This handles edge cases where Escrow has a different link than GroupPool
       try {
-        if (group.inviteLink) {
-          await telegram.revokeChatInviteLink(String(groupId), group.inviteLink);
-          group.inviteLink = null;
-          await group.save();
+        const Escrow = require('../models/Escrow');
+        const escrowsWithLinks = await Escrow.find({
+          groupId: String(groupId),
+          inviteLink: { $ne: null, $exists: true }
+        }).limit(5); // Limit to avoid too many queries
+        
+        for (const escrow of escrowsWithLinks) {
+          if (escrow.inviteLink && escrow.inviteLink !== group.inviteLink) {
+            linksToRevoke.add(escrow.inviteLink);
+          }
         }
-      } catch (_) {
-        // Non-critical: proceed to create a fresh link regardless
+      } catch (escrowCheckError) {
+        // Non-critical: continue even if escrow check fails
+        console.log('Note: Could not check escrows for invite links:', escrowCheckError.message);
+      }
+      
+      // Revoke all collected invite links
+      for (const link of linksToRevoke) {
+        try {
+          await telegram.revokeChatInviteLink(String(groupId), link);
+        } catch (revokeError) {
+          // Link might already be revoked/expired or invalid - this is okay, we'll create a new one
+          // Log for debugging but don't fail the operation
+          console.log(`Note: Could not revoke invite link ${link.substring(0, 30)}... for group ${groupId}:`, revokeError.message);
+        }
+      }
+      
+      // Clear stored invite link in database after revocation attempt
+      // This ensures we don't try to revoke the same link twice
+      if (group.inviteLink) {
+        group.inviteLink = null;
+        await group.save();
       }
 
       // Generate invite link. If creates_join_request is true, do NOT set member_limit (Telegram API restriction)
@@ -483,9 +519,29 @@ class GroupPoolService {
     // Set timeout for 15 minutes (15 * 60 * 1000 ms)
     setTimeout(async () => {
       try {
-        
         // Remove ALL users from group (buyer, seller, admins, everyone)
         const allUsersRemoved = await this.removeUsersFromGroup(escrow, group.groupId, telegram);
+
+        // Revoke existing invite link in Telegram before recycling
+        // Try to revoke from both GroupPool and Escrow to be safe
+        const linksToRevoke = new Set();
+        if (group.inviteLink) {
+          linksToRevoke.add(group.inviteLink);
+        }
+        // Also check if escrow has an invite link stored
+        if (escrow.inviteLink && escrow.inviteLink !== group.inviteLink) {
+          linksToRevoke.add(escrow.inviteLink);
+        }
+        
+        // Revoke all unique invite links
+        for (const link of linksToRevoke) {
+          try {
+            await telegram.revokeChatInviteLink(String(group.groupId), link);
+          } catch (revokeError) {
+            // Non-critical: continue even if revocation fails (link might already be expired/revoked)
+            console.log(`Note: Could not revoke invite link ${link.substring(0, 20)}... during delayed recycling:`, revokeError.message);
+          }
+        }
 
         if (allUsersRemoved) {
           // Only add back to pool if ALL users were successfully removed

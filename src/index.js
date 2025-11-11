@@ -771,6 +771,27 @@ Waiting for @${buyerUsername} to confirm...`;
           const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, telegram);
           
           if (allUsersRemoved) {
+            // Revoke existing invite link in Telegram before recycling
+            // Try to revoke from both GroupPool and Escrow to be safe
+            const linksToRevoke = new Set();
+            if (group.inviteLink) {
+              linksToRevoke.add(group.inviteLink);
+            }
+            // Also check if escrow has an invite link stored
+            if (escrow.inviteLink && escrow.inviteLink !== group.inviteLink) {
+              linksToRevoke.add(escrow.inviteLink);
+            }
+            
+            // Revoke all unique invite links
+            for (const link of linksToRevoke) {
+              try {
+                await telegram.revokeChatInviteLink(String(group.groupId), link);
+              } catch (revokeError) {
+                // Non-critical: continue even if revocation fails (link might already be expired/revoked)
+                console.log(`Note: Could not revoke invite link ${link.substring(0, 20)}... during recycling:`, revokeError.message);
+              }
+            }
+            
             // Recycle group back to pool
             group.status = 'available';
             group.assignedEscrowId = null;
