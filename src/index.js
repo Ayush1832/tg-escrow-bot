@@ -792,6 +792,13 @@ Waiting for @${buyerUsername} to confirm...`;
               }
             }
             
+            // Clear escrow invite link
+            const freshEscrow = await Escrow.findOne({ escrowId: escrow.escrowId });
+            if (freshEscrow && freshEscrow.inviteLink) {
+              freshEscrow.inviteLink = null;
+              await freshEscrow.save();
+            }
+            
             // Recycle group back to pool
             group.status = 'available';
             group.assignedEscrowId = null;

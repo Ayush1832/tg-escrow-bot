@@ -900,19 +900,41 @@ async function adminGroupReset(ctx) {
       return ctx.reply('❌ This command can only be used in a group chat.');
     }
 
+    // Delete command message after 1 minute
+    const commandMsgId = ctx.message.message_id;
+    setTimeout(async () => {
+      try {
+        await ctx.telegram.deleteMessage(chatId, commandMsgId);
+      } catch (e) {
+        // Ignore errors (message may already be deleted)
+      }
+    }, 60 * 1000);
+
     // Find active escrow for this group
     const escrow = await Escrow.findOne({
       groupId: chatId.toString()
     });
 
     if (!escrow) {
-      return ctx.reply('❌ No escrow found for this group.');
+      const errorMsg = await ctx.reply('❌ No escrow found for this group.');
+      setTimeout(async () => {
+        try {
+          await ctx.telegram.deleteMessage(chatId, errorMsg.message_id);
+        } catch (e) {}
+      }, 60 * 1000);
+      return;
     }
 
     // Verify status is in allowed states (must be before deposit check)
     const allowedStatuses = ['draft', 'awaiting_details', 'awaiting_deposit'];
     if (!allowedStatuses.includes(escrow.status)) {
-      return ctx.reply(`❌ Cannot reset group: Escrow status is "${escrow.status}". Only groups with status: ${allowedStatuses.join(', ')} can be reset.`);
+      const errorMsg = await ctx.reply('❌ Cannot reset: Trade has already started. Only reset before deposits.');
+      setTimeout(async () => {
+        try {
+          await ctx.telegram.deleteMessage(chatId, errorMsg.message_id);
+        } catch (e) {}
+      }, 60 * 1000);
+      return;
     }
 
     // Check if deposits were made (amount-based check, since status is already validated)
@@ -921,7 +943,13 @@ async function adminGroupReset(ctx) {
     const hasDeposit = depositAmount > 0 || confirmedAmount > 0;
 
     if (hasDeposit) {
-      return ctx.reply('❌ Cannot reset group: Deposits have already been made to this escrow. Use /release or /refund to settle the trade first.');
+      const errorMsg = await ctx.reply('❌ Cannot reset: Deposits were made. Use /release or /refund to settle.');
+      setTimeout(async () => {
+        try {
+          await ctx.telegram.deleteMessage(chatId, errorMsg.message_id);
+        } catch (e) {}
+      }, 60 * 1000);
+      return;
     }
 
     // Find the group in pool
@@ -930,17 +958,38 @@ async function adminGroupReset(ctx) {
     });
 
     if (!group) {
-      return ctx.reply('❌ Group not found in pool. This group may not be from the pool.');
+      const errorMsg = await ctx.reply('❌ Group not found in pool.');
+      setTimeout(async () => {
+        try {
+          await ctx.telegram.deleteMessage(chatId, errorMsg.message_id);
+        } catch (e) {}
+      }, 60 * 1000);
+      return;
     }
 
-    await ctx.reply('🔄 Resetting group...');
+    const processingMsg = await ctx.reply('🔄 Resetting group...');
+    // Delete processing message after 1 minute
+    setTimeout(async () => {
+      try {
+        await ctx.telegram.deleteMessage(chatId, processingMsg.message_id);
+      } catch (e) {
+        // Ignore errors (message may already be deleted)
+      }
+    }, 60 * 1000);
 
     try {
       // Remove buyer and seller from group
       const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, ctx.telegram);
 
       if (!allUsersRemoved) {
-        return ctx.reply('⚠️ Some users could not be removed from the group. Please check manually.');
+        const errorMsg = await ctx.reply('⚠️ Some users could not be removed from the group. Please check manually.');
+        // Delete error message after 1 minute
+        setTimeout(async () => {
+          try {
+            await ctx.telegram.deleteMessage(chatId, errorMsg.message_id);
+          } catch (e) {}
+        }, 60 * 1000);
+        return;
       }
 
       // Revoke existing invite link in Telegram before resetting
@@ -982,16 +1031,33 @@ async function adminGroupReset(ctx) {
         // Continue anyway - group is already reset and available
       }
 
-      await ctx.reply('✅ Group has been reset successfully!\n\n• Buyer and seller have been removed\n• Group has been added back to the pool\n• Escrow has been deleted\n• Group is ready for a new deal');
+      const successMsg = await ctx.reply('✅ Group reset successfully. Ready for new deals.');
+      // Delete success message after 1 minute
+      setTimeout(async () => {
+        try {
+          await ctx.telegram.deleteMessage(chatId, successMsg.message_id);
+        } catch (e) {}
+      }, 60 * 1000);
 
     } catch (error) {
       console.error('Error resetting group:', error);
-      await ctx.reply('❌ Error resetting group. Please check the logs.');
+      const errorMsg = await ctx.reply('❌ Error resetting group. Please check the logs.');
+      // Delete error message after 1 minute
+      setTimeout(async () => {
+        try {
+          await ctx.telegram.deleteMessage(chatId, errorMsg.message_id);
+        } catch (e) {}
+      }, 60 * 1000);
     }
 
   } catch (error) {
     console.error('Error in admin group reset:', error);
-    ctx.reply('❌ Error resetting group.');
+    const errorMsg = await ctx.reply('❌ Error resetting group.');
+    setTimeout(async () => {
+      try {
+        await ctx.telegram.deleteMessage(ctx.chat.id, errorMsg.message_id);
+      } catch (e) {}
+    }, 60 * 1000);
   }
 }
 

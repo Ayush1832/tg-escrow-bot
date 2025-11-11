@@ -784,7 +784,7 @@ ${closeStatus}`;
         `💸 Buyer ${escrow.buyerUsername ? '@' + escrow.buyerUsername : '[' + escrow.buyerId + ']'}: Please send the agreed fiat amount to the seller via your agreed method and confirm below.`,
         {
           reply_markup: Markup.inlineKeyboard([
-            [Markup.button.callback('✅ I sent the fiat payment', `buyer_sent_fiat_${escrow.escrowId}`)]
+            [Markup.button.callback('✅ I sent the fiat payment', `fiat_sent_buyer_${escrow.escrowId}`)]
           ]).reply_markup
         }
       );
@@ -939,7 +939,7 @@ ${closeStatus}`;
       await ctx.answerCbQuery('✅ Full amount selected');
       try {
         await ctx.editMessageText(
-          '✅ Seller reported full amount received. Confirm to complete the trade and release funds to the seller.',
+          '✅ Seller reported full amount received. Confirm to complete the trade and release funds to the buyer.',
           {
             reply_markup: Markup.inlineKeyboard([
               [
@@ -951,7 +951,7 @@ ${closeStatus}`;
         );
       } catch (e) {
         const confirmMsg = await ctx.reply(
-          '✅ Seller reported full amount received. Confirm to complete the trade and release funds to the seller.',
+          '✅ Seller reported full amount received. Confirm to complete the trade and release funds to the buyer.',
           {
             reply_markup: Markup.inlineKeyboard([
               [
@@ -980,16 +980,16 @@ ${closeStatus}`;
       if (!escrow) return ctx.answerCbQuery('❌ No active escrow found.');
       if (escrow.sellerId !== userId) return ctx.answerCbQuery('❌ Only the seller can confirm release.');
       const amount = Number(escrow.confirmedAmount || escrow.depositAmount || 0);
-      if (!escrow.sellerAddress || amount <= 0) {
-        return ctx.reply('⚠️ Cannot proceed: missing seller address or zero amount.');
+      if (!escrow.buyerAddress || amount <= 0) {
+        return ctx.reply('⚠️ Cannot proceed: missing buyer address or zero amount.');
       }
       await ctx.answerCbQuery('🚀 Releasing...');
-      try { await ctx.editMessageText('🚀 Releasing funds to the seller...'); } catch (e) {}
+      try { await ctx.editMessageText('🚀 Releasing funds to the buyer...'); } catch (e) {}
       try {
         const releaseResult = await BlockchainService.releaseFunds(
           escrow.token,
           escrow.chain,
-          escrow.sellerAddress,
+          escrow.buyerAddress,
           amount
         );
         escrow.status = 'completed';
@@ -997,13 +997,60 @@ ${closeStatus}`;
           escrow.releaseTransactionHash = releaseResult.transactionHash;
         }
         await escrow.save();
-        await ctx.reply(`✅ ${(amount - 0).toFixed(5)} ${escrow.token} released to seller's address. Trade completed.`);
-        escrow.buyerClosedTrade = false;
-        escrow.sellerClosedTrade = false;
-        await escrow.save();
+        await ctx.reply(`✅ ${(amount - 0).toFixed(5)} ${escrow.token} released to buyer's address. Trade completed.`);
+        
+        // Remove users and recycle group after successful release
+        try {
+          const group = await GroupPool.findOne({ 
+            assignedEscrowId: escrow.escrowId 
+          });
+          
+          if (group) {
+            // Revoke invite links
+            const linksToRevoke = new Set();
+            if (group.inviteLink) {
+              linksToRevoke.add(group.inviteLink);
+            }
+            if (escrow.inviteLink && escrow.inviteLink !== group.inviteLink) {
+              linksToRevoke.add(escrow.inviteLink);
+            }
+            
+            for (const link of linksToRevoke) {
+              try {
+                await ctx.telegram.revokeChatInviteLink(String(group.groupId), link);
+              } catch (revokeError) {
+                console.log(`Could not revoke invite link during release:`, revokeError.message);
+              }
+            }
+            
+            // Remove users from group
+            try {
+              await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, ctx.telegram);
+            } catch (removeError) {
+              console.log('Could not remove users during release:', removeError.message);
+            }
+            
+            // Clear escrow invite link
+            escrow.inviteLink = null;
+            await escrow.save();
+            
+            // Recycle group back to pool
+            group.status = 'available';
+            group.assignedEscrowId = null;
+            group.assignedAt = null;
+            group.completedAt = null;
+            group.inviteLink = null;
+            await group.save();
+          }
+        } catch (recycleError) {
+          console.error('Error recycling group after release:', recycleError);
+          // Non-critical: trade is already completed, just log the error
+        }
       } catch (error) {
         console.error('Auto-release error:', error);
         await ctx.reply('❌ Error releasing funds. Please contact admin.');
+        // Don't recycle group if release failed
+        return;
       }
       return;
     } else if (callbackData.startsWith('confirm_')) {
