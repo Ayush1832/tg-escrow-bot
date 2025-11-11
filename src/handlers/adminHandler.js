@@ -1,4 +1,6 @@
 const Escrow = require('../models/Escrow');
+const GroupPool = require('../models/GroupPool');
+const Contract = require('../models/Contract');
 const BlockchainService = require('../services/BlockchainService');
 const GroupPoolService = require('../services/GroupPoolService');
 const AddressAssignmentService = require('../services/AddressAssignmentService');
@@ -237,7 +239,8 @@ async function adminAddressPool(ctx) {
 }
 
 /**
- * Admin command to initialize address pool
+ * Admin command to verify deployed contracts
+ * (Previously: initialize address pool - now obsolete, replaced by contract verification)
  */
 async function adminInitAddresses(ctx) {
   try {
@@ -245,11 +248,78 @@ async function adminInitAddresses(ctx) {
       return ctx.reply('❌ Access denied. Admin privileges required.');
     }
 
-    await ctx.reply('ℹ️ Address pool initialization is no longer needed. Addresses are managed via EscrowVault contracts in the Contract model.');
+    const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
+    
+    // Find all deployed EscrowVault contracts
+    const contracts = await Contract.find({ 
+      name: 'EscrowVault',
+      status: 'deployed'
+    }).sort({ network: 1, token: 1 });
+
+    if (contracts.length === 0) {
+      return ctx.reply(
+        `❌ No EscrowVault contracts found in database.\n\n` +
+        `⚠️ Please deploy contracts using:\n` +
+        `\`npm run deploy\`\n\n` +
+        `This will deploy USDT and USDC contracts on BSC with ${desiredFeePercent}% fee.`
+      );
+    }
+
+    // Group contracts by network and filter by fee
+    const contractsByNetwork = {};
+    const requiredTokens = ['USDT', 'USDC'];
+    
+    contracts.forEach(contract => {
+      if (!contractsByNetwork[contract.network]) {
+        contractsByNetwork[contract.network] = [];
+      }
+      contractsByNetwork[contract.network].push(contract);
+    });
+
+    let message = `📋 **CONTRACT VERIFICATION**\n\n`;
+    message += `💰 Fee Percent: ${desiredFeePercent}%\n\n`;
+    
+    // Check BSC contracts specifically
+    const bscContracts = contracts.filter(c => c.network === 'BSC' && c.feePercent === desiredFeePercent);
+    const bscTokens = bscContracts.map(c => c.token);
+    
+    message += `🔗 **BSC Contracts:**\n`;
+    if (bscContracts.length === 0) {
+      message += `❌ No BSC contracts found with ${desiredFeePercent}% fee\n`;
+    } else {
+      bscContracts.forEach(contract => {
+        const deployedDate = contract.deployedAt ? new Date(contract.deployedAt).toLocaleString() : 'Unknown';
+        message += `✅ ${contract.token}: \`${contract.address}\`\n`;
+        message += `   📅 Deployed: ${deployedDate}\n`;
+      });
+    }
+    
+    // Check for missing required tokens
+    const missingTokens = requiredTokens.filter(token => !bscTokens.includes(token));
+    if (missingTokens.length > 0) {
+      message += `\n⚠️ **Missing Tokens:** ${missingTokens.join(', ')}\n`;
+      message += `Please deploy missing contracts.\n`;
+    } else {
+      message += `\n✅ All required tokens (${requiredTokens.join(', ')}) are deployed.\n`;
+    }
+
+    // Show contracts for other networks if any
+    const otherNetworks = Object.keys(contractsByNetwork).filter(n => n !== 'BSC');
+    if (otherNetworks.length > 0) {
+      message += `\n📡 **Other Networks:**\n`;
+      otherNetworks.forEach(network => {
+        const networkContracts = contractsByNetwork[network];
+        message += `• ${network}: ${networkContracts.length} contract(s)\n`;
+      });
+    }
+
+    message += `\n💡 **Note:** Address pool initialization is no longer needed. The system uses EscrowVault contracts directly.`;
+
+    await ctx.reply(message, { parse_mode: 'Markdown' });
 
   } catch (error) {
-    console.error('Error initializing address pool:', error);
-    ctx.reply('❌ Error initializing address pool.');
+    console.error('Error verifying contracts:', error);
+    ctx.reply('❌ Error verifying contracts. Please check the logs.');
   }
 }
 
@@ -362,6 +432,7 @@ async function adminHelp(ctx) {
 • \`/admin_pool_add <groupId>\` - Add group to pool
 • \`/admin_pool_list\` - List all groups in pool
 • \`/admin_recycle_groups\` - Manually recycle groups for completed/refunded escrows
+• \`/admin_group_reset\` - Reset group when no deposits were made (removes users, recycles group)
 • \`/admin_pool_delete <groupId>\` - Delete specific group from pool
 • \`/admin_pool_delete_all\` - Delete ALL groups from pool (dangerous)
 
@@ -370,7 +441,7 @@ async function adminHelp(ctx) {
 
 🧹 **MAINTENANCE:**
 • \`/admin_address_pool\` - View address pool status
-• \`/admin_init_addresses\` - Initialize addresses
+• \`/admin_init_addresses\` - Verify deployed EscrowVault contracts
 • \`/admin_cleanup_addresses\` - Cleanup abandoned addresses
 • \`/admin_timeout_stats\` - View timeout statistics
 
@@ -811,6 +882,98 @@ ${recycledCount > 0 ? '✅ Groups have been recycled and addresses released back
   }
 }
 
+/**
+ * Admin group reset - Reset a group when no deposits were made
+ * Only works if escrow has no deposits (status: draft, awaiting_details, or awaiting_deposit)
+ * and depositAmount/confirmedAmount are 0
+ */
+async function adminGroupReset(ctx) {
+  try {
+    if (!isAdmin(ctx)) {
+      return ctx.reply('❌ Access denied. Admin privileges required.');
+    }
+
+    const chatId = ctx.chat.id;
+
+    // Must be in a group
+    if (chatId > 0) {
+      return ctx.reply('❌ This command can only be used in a group chat.');
+    }
+
+    // Find active escrow for this group
+    const escrow = await Escrow.findOne({
+      groupId: chatId.toString()
+    });
+
+    if (!escrow) {
+      return ctx.reply('❌ No escrow found for this group.');
+    }
+
+    // Verify status is in allowed states (must be before deposit check)
+    const allowedStatuses = ['draft', 'awaiting_details', 'awaiting_deposit'];
+    if (!allowedStatuses.includes(escrow.status)) {
+      return ctx.reply(`❌ Cannot reset group: Escrow status is "${escrow.status}". Only groups with status: ${allowedStatuses.join(', ')} can be reset.`);
+    }
+
+    // Check if deposits were made (amount-based check, since status is already validated)
+    const depositAmount = Number(escrow.depositAmount || 0);
+    const confirmedAmount = Number(escrow.confirmedAmount || 0);
+    const hasDeposit = depositAmount > 0 || confirmedAmount > 0;
+
+    if (hasDeposit) {
+      return ctx.reply('❌ Cannot reset group: Deposits have already been made to this escrow. Use /release or /refund to settle the trade first.');
+    }
+
+    // Find the group in pool
+    const group = await GroupPool.findOne({ 
+      assignedEscrowId: escrow.escrowId 
+    });
+
+    if (!group) {
+      return ctx.reply('❌ Group not found in pool. This group may not be from the pool.');
+    }
+
+    await ctx.reply('🔄 Resetting group...');
+
+    try {
+      // Remove buyer and seller from group
+      const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, ctx.telegram);
+
+      if (!allUsersRemoved) {
+        return ctx.reply('⚠️ Some users could not be removed from the group. Please check manually.');
+      }
+
+      // Reset group pool entry
+      group.status = 'available';
+      group.assignedEscrowId = null;
+      group.assignedAt = null;
+      group.completedAt = null;
+      group.inviteLink = null;
+      await group.save();
+
+      // Delete the escrow since no deposits were made
+      // Note: If deletion fails, the group is already reset and available.
+      // The old escrow won't cause issues since it has no deposits and the group is available.
+      try {
+        await Escrow.deleteOne({ escrowId: escrow.escrowId });
+      } catch (deleteError) {
+        console.error('Error deleting escrow after group reset:', deleteError);
+        // Continue anyway - group is already reset and available
+      }
+
+      await ctx.reply('✅ Group has been reset successfully!\n\n• Buyer and seller have been removed\n• Group has been added back to the pool\n• Escrow has been deleted\n• Group is ready for a new deal');
+
+    } catch (error) {
+      console.error('Error resetting group:', error);
+      await ctx.reply('❌ Error resetting group. Please check the logs.');
+    }
+
+  } catch (error) {
+    console.error('Error in admin group reset:', error);
+    ctx.reply('❌ Error resetting group.');
+  }
+}
+
 module.exports = {
   adminStats,
   adminGroupPool,
@@ -826,5 +989,6 @@ module.exports = {
   adminInitAddresses,
   adminTimeoutStats,
   adminCleanupAddresses,
-  adminRecycleGroups
+  adminRecycleGroups,
+  adminGroupReset
 };

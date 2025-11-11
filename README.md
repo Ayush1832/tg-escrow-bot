@@ -58,7 +58,6 @@ A centralized Telegram escrow bot for USDT transactions on BSC network.
    ESCROW_FEE_BPS=100
    MIN_TRADE_AMOUNT=1
    MAX_TRADE_AMOUNT=10000
-   DEPOSIT_ADDRESS_TTL_MINUTES=20
    FEE_WALLET_1=YOUR_FEE_WALLET_1  # 70% of escrow fees
    FEE_WALLET_2=YOUR_FEE_WALLET_2  # 30% of escrow fees
    ```

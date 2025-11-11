@@ -50,7 +50,6 @@ module.exports = {
 
   MIN_TRADE_AMOUNT: Number(process.env.MIN_TRADE_AMOUNT || 1),
   MAX_TRADE_AMOUNT: Number(process.env.MAX_TRADE_AMOUNT || 10000),
-  DEPOSIT_ADDRESS_TTL_MINUTES: Number(process.env.DEPOSIT_ADDRESS_TTL_MINUTES || 20),
 
   // Fee wallets (Distribution: 70% - 30%)
   FEE_WALLET_1: process.env.FEE_WALLET_1, // 70% of total fees
