@@ -849,7 +849,8 @@ ${closeStatus}`;
         // Begin fiat transfer handshake
         // Ask buyer to confirm they've sent the fiat payment
         if (escrow.buyerId) {
-          await ctx.reply(
+          await ctx.telegram.sendMessage(
+            escrow.groupId,
             `💸 Buyer ${escrow.buyerUsername ? '@' + escrow.buyerUsername : '[' + escrow.buyerId + ']'}: Please send the agreed fiat amount to the seller via your agreed method and confirm below.`,
             {
               reply_markup: Markup.inlineKeyboard([
@@ -862,60 +863,106 @@ ${closeStatus}`;
         await ctx.reply('❌ No new deposit found yet. Please try again in a moment.');
       }
     } else if (callbackData.startsWith('fiat_sent_buyer_')) {
-      const escrowId = callbackData.split('_')[3];
-      // Only buyer can click
-      const escrow = await Escrow.findOne({
-        escrowId: escrowId,
-        status: { $in: ['deposited', 'in_fiat_transfer'] }
-      });
-      if (!escrow) return ctx.answerCbQuery('❌ No active escrow found.');
-      if (escrow.buyerId !== userId) return ctx.answerCbQuery('❌ Only the buyer can confirm this.');
-
-      escrow.buyerSentFiat = true;
-      escrow.status = 'in_fiat_transfer';
-      await escrow.save();
-      
-
-      await ctx.answerCbQuery('✅ Noted.');
-      // Ask seller to confirm receipt
-      const sellerPrompt = await ctx.reply(
-        `🏦 Seller ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}: Did you receive the fiat payment?`,
-        {
-          reply_markup: Markup.inlineKeyboard([
-            [
-              Markup.button.callback('✅ Yes, I received', `fiat_received_seller_yes_${escrow.escrowId}`),
-              Markup.button.callback('❌ No, not received', `fiat_received_seller_no_${escrow.escrowId}`)
-            ],
-            [
-              Markup.button.callback('⚠️ Received less money', `fiat_received_seller_partial_${escrow.escrowId}`)
-            ]
-          ]).reply_markup
+      try {
+        // Extract escrowId - handle cases where escrowId might have underscores
+        const escrowId = callbackData.replace('fiat_sent_buyer_', '');
+        console.log('🔵 fiat_sent_buyer callback:', { escrowId, userId, callbackData });
+        
+        // Only buyer can click
+        const escrow = await Escrow.findOne({
+          escrowId: escrowId,
+          status: { $in: ['deposited', 'in_fiat_transfer'] }
+        });
+        
+        console.log('🔵 Escrow found:', escrow ? { escrowId: escrow.escrowId, status: escrow.status, buyerId: escrow.buyerId } : 'NOT FOUND');
+        
+        if (!escrow) {
+          await ctx.answerCbQuery('❌ No active escrow found.');
+          console.log('❌ Escrow not found for:', escrowId);
+          return;
         }
-      );
-      // Auto-delete seller prompt after 5 minutes
-      setTimeout(async () => {
-        try { await ctx.telegram.deleteMessage(escrow.groupId, sellerPrompt.message_id); } catch (_) {}
-      }, 5 * 60 * 1000);
+        
+        if (escrow.buyerId !== userId) {
+          await ctx.answerCbQuery('❌ Only the buyer can confirm this.');
+          console.log('❌ User mismatch:', { buyerId: escrow.buyerId, userId });
+          return;
+        }
+
+        escrow.buyerSentFiat = true;
+        escrow.status = 'in_fiat_transfer';
+        await escrow.save();
+
+        await ctx.answerCbQuery('✅ Noted.');
+        
+        // Ask seller to confirm receipt - send to the group using groupId
+        const sellerPrompt = await ctx.telegram.sendMessage(
+          escrow.groupId,
+          `🏦 Seller ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}: Did you receive the fiat payment?`,
+          {
+            reply_markup: Markup.inlineKeyboard([
+              [
+                Markup.button.callback('✅ Yes, I received', `fiat_received_seller_yes_${escrow.escrowId}`),
+                Markup.button.callback('❌ No, not received', `fiat_received_seller_no_${escrow.escrowId}`)
+              ],
+              [
+                Markup.button.callback('⚠️ Received less money', `fiat_received_seller_partial_${escrow.escrowId}`)
+              ]
+            ]).reply_markup
+          }
+        );
+        console.log('✅ Seller prompt sent:', sellerPrompt.message_id);
+        
+        // Auto-delete seller prompt after 5 minutes
+        setTimeout(async () => {
+          try { await ctx.telegram.deleteMessage(escrow.groupId, sellerPrompt.message_id); } catch (_) {}
+        }, 5 * 60 * 1000);
+      } catch (error) {
+        console.error('❌ Error in fiat_sent_buyer handler:', error);
+        await ctx.answerCbQuery('❌ An error occurred. Please try again.');
+      }
 
     } else if (callbackData.startsWith('fiat_received_seller_partial_')) {
-      const escrowId = callbackData.split('_')[4];
+      const escrowId = callbackData.replace('fiat_received_seller_partial_', '');
       await ctx.answerCbQuery('⚠️ Partial payment noted');
-      try {
-        const admins = (config.getAllAdminUsernames?.() || []).filter(Boolean);
-        const adminMentions = admins.length ? admins.map(u => `@${u}`).join(' ') : 'Admin';
-        await ctx.reply(`⚠️ Seller reported partial fiat payment for escrow ${escrowId}. ${adminMentions} please review and resolve.`);
-      } catch (e) {}
+      
+      const escrow = await Escrow.findOne({
+        escrowId: escrowId,
+        status: { $in: ['in_fiat_transfer', 'deposited'] }
+      });
+      
+      if (escrow) {
+        try {
+          const admins = (config.getAllAdminUsernames?.() || []).filter(Boolean);
+          const adminMentions = admins.length ? admins.map(u => `@${u}`).join(' ') : 'Admin';
+          await ctx.telegram.sendMessage(
+            escrow.groupId,
+            `⚠️ Seller reported partial fiat payment for escrow ${escrowId}. ${adminMentions} please review and resolve.`
+          );
+        } catch (e) {
+          console.error('Error sending admin notification:', e);
+        }
+      }
       return;
 
     } else if (callbackData.startsWith('fiat_received_seller_yes_') || callbackData.startsWith('fiat_received_seller_no_')) {
-      const escrowId = callbackData.split('_')[4];
+      // Extract escrowId - handle both yes and no cases
+      const escrowId = callbackData.includes('_yes_') 
+        ? callbackData.replace('fiat_received_seller_yes_', '')
+        : callbackData.replace('fiat_received_seller_no_', '');
       // Only seller can click
       const escrow = await Escrow.findOne({
         escrowId: escrowId,
         status: { $in: ['in_fiat_transfer', 'deposited'] }
       });
-      if (!escrow) return ctx.answerCbQuery('❌ No active escrow found.');
-      if (escrow.sellerId !== userId) return ctx.answerCbQuery('❌ Only the seller can confirm this.');
+      if (!escrow) {
+        await ctx.answerCbQuery('❌ No active escrow found.');
+        return;
+      }
+      
+      if (escrow.sellerId !== userId) {
+        await ctx.answerCbQuery('❌ Only the seller can confirm this.');
+        return;
+      }
 
       const isYes = callbackData.includes('_yes_');
       if (!isYes) {
@@ -928,8 +975,13 @@ ${closeStatus}`;
         try {
           const admins = (config.getAllAdminUsernames?.() || []).filter(Boolean);
           const adminMentions = admins.length ? admins.map(u => `@${u}`).join(' ') : 'Admin';
-          await ctx.reply(`🚨 Seller reported no fiat received for escrow ${escrowId}. ${adminMentions} please review and resolve.`);
-        } catch (e) {}
+          await ctx.telegram.sendMessage(
+            escrow.groupId,
+            `🚨 Seller reported no fiat received for escrow ${escrowId}. ${adminMentions} please review and resolve.`
+          );
+        } catch (e) {
+          console.error('Error sending admin notification:', e);
+        }
         return;
       }
 
