@@ -854,7 +854,6 @@ ${closeStatus}`;
       try {
         // Extract escrowId - handle cases where escrowId might have underscores
         const escrowId = callbackData.replace('fiat_sent_buyer_', '');
-        console.log('🔵 fiat_sent_buyer callback:', { escrowId, userId, callbackData });
         
         // Only buyer can click
         const escrow = await Escrow.findOne({
@@ -862,7 +861,6 @@ ${closeStatus}`;
           status: { $in: ['deposited', 'in_fiat_transfer'] }
         });
         
-        console.log('🔵 Escrow found:', escrow ? { escrowId: escrow.escrowId, status: escrow.status, buyerId: escrow.buyerId } : 'NOT FOUND');
         
         if (!escrow) {
           await ctx.answerCbQuery('❌ No active escrow found.');
@@ -872,7 +870,6 @@ ${closeStatus}`;
         
         if (escrow.buyerId !== userId) {
           await ctx.answerCbQuery('❌ Only the buyer can confirm this.');
-          console.log('❌ User mismatch:', { buyerId: escrow.buyerId, userId });
           return;
         }
 
@@ -898,7 +895,6 @@ ${closeStatus}`;
             ]).reply_markup
           }
         );
-        console.log('✅ Seller prompt sent:', sellerPrompt.message_id);
         
         // Auto-delete seller prompt after 5 minutes
         setTimeout(async () => {

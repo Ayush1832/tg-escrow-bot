@@ -19,11 +19,18 @@ const ERC20_ABI = [
 class BlockchainService {
   constructor() {
     // Initialize providers for different networks
+    // Configure providers to use 'latest' instead of 'pending' for nonce queries
+    // Some RPC providers don't support 'pending' tag
+    const providerOptions = {
+      staticNetwork: null, // Will be auto-detected
+      batchMaxCount: 1, // Disable batching to avoid issues
+    };
+    
     this.providers = {
-      BSC: new ethers.JsonRpcProvider(config.BSC_RPC_URL),
-      SEPOLIA: new ethers.JsonRpcProvider(config.SEPOLIA_RPC_URL),
-      ETH: new ethers.JsonRpcProvider(config.ETH_RPC_URL || 'https://eth.llamarpc.com'),
-      LTC: new ethers.JsonRpcProvider(config.LTC_RPC_URL || 'https://ltc.llamarpc.com')
+      BSC: new ethers.JsonRpcProvider(config.BSC_RPC_URL, null, providerOptions),
+      SEPOLIA: new ethers.JsonRpcProvider(config.SEPOLIA_RPC_URL, null, providerOptions),
+      ETH: new ethers.JsonRpcProvider(config.ETH_RPC_URL || 'https://eth.llamarpc.com', null, providerOptions),
+      LTC: new ethers.JsonRpcProvider(config.LTC_RPC_URL || 'https://ltc.llamarpc.com', null, providerOptions)
     };
     
     // Ensure private key has 0x prefix
@@ -141,17 +148,51 @@ class BlockchainService {
 
   async release(to, amountUSDT, token = 'USDT', network = 'SEPOLIA') {
     const vault = await this.getVaultForNetwork(network);
+    const wallet = this.wallets[network.toUpperCase()];
+    const provider = this.providers[network.toUpperCase()];
     const decimals = this.getTokenDecimals(token, network);
     const amount = ethers.parseUnits(String(amountUSDT), decimals);
-    const tx = await vault.release(to, amount);
+    
+    // Get nonce manually using 'latest' instead of 'pending' to avoid RPC errors
+    // Some RPC providers don't support 'pending' tag
+    let nonce;
+    try {
+      nonce = await provider.getTransactionCount(wallet.address, 'latest');
+    } catch (nonceError) {
+      // Fallback: try without tag (defaults to 'latest')
+      try {
+        nonce = await provider.getTransactionCount(wallet.address);
+      } catch (fallbackError) {
+        throw new Error(`Failed to get transaction nonce: ${fallbackError.message}`);
+      }
+    }
+    
+    const tx = await vault.release(to, amount, { nonce: nonce });
     return await tx.wait();
   }
 
   async refund(to, amountUSDT, token = 'USDT', network = 'SEPOLIA') {
     const vault = await this.getVaultForNetwork(network);
+    const wallet = this.wallets[network.toUpperCase()];
+    const provider = this.providers[network.toUpperCase()];
     const decimals = this.getTokenDecimals(token, network);
     const amount = ethers.parseUnits(String(amountUSDT), decimals);
-    const tx = await vault.refund(to, amount);
+    
+    // Get nonce manually using 'latest' instead of 'pending' to avoid RPC errors
+    // Some RPC providers don't support 'pending' tag
+    let nonce;
+    try {
+      nonce = await provider.getTransactionCount(wallet.address, 'latest');
+    } catch (nonceError) {
+      // Fallback: try without tag (defaults to 'latest')
+      try {
+        nonce = await provider.getTransactionCount(wallet.address);
+      } catch (fallbackError) {
+        throw new Error(`Failed to get transaction nonce: ${fallbackError.message}`);
+      }
+    }
+    
+    const tx = await vault.refund(to, amount, { nonce: nonce });
     return await tx.wait();
   }
 
@@ -364,12 +405,29 @@ class BlockchainService {
         throw new Error(`Wallet not configured for network: ${network}`);
       }
 
+      const provider = this.providers[network.toUpperCase()];
       const vaultContract = new ethers.Contract(contractAddress, ESCROW_VAULT_ABI, wallet);
       const decimals = this.getTokenDecimals(token, network);
       const amountWei = ethers.parseUnits(amount.toString(), decimals);
 
-      
-      const tx = await vaultContract.release(buyerAddress, amountWei);
+      // Get nonce manually using 'latest' instead of 'pending' to avoid RPC errors
+      // Some RPC providers don't support 'pending' tag
+      let nonce;
+      try {
+        nonce = await provider.getTransactionCount(wallet.address, 'latest');
+      } catch (nonceError) {
+        // Fallback: try without tag (defaults to 'latest')
+        try {
+          nonce = await provider.getTransactionCount(wallet.address);
+        } catch (fallbackError) {
+          throw new Error(`Failed to get transaction nonce: ${fallbackError.message}`);
+        }
+      }
+
+      // Build transaction with explicit nonce
+      const tx = await vaultContract.release(buyerAddress, amountWei, {
+        nonce: nonce
+      });
       const receipt = await tx.wait();
 
       // Get transaction hash from receipt or transaction object
@@ -402,12 +460,29 @@ class BlockchainService {
         throw new Error(`Wallet not configured for network: ${network}`);
       }
 
+      const provider = this.providers[network.toUpperCase()];
       const vaultContract = new ethers.Contract(contractAddress, ESCROW_VAULT_ABI, wallet);
       const decimals = this.getTokenDecimals(token, network);
       const amountWei = ethers.parseUnits(amount.toString(), decimals);
 
-      
-      const tx = await vaultContract.refund(sellerAddress, amountWei);
+      // Get nonce manually using 'latest' instead of 'pending' to avoid RPC errors
+      // Some RPC providers don't support 'pending' tag
+      let nonce;
+      try {
+        nonce = await provider.getTransactionCount(wallet.address, 'latest');
+      } catch (nonceError) {
+        // Fallback: try without tag (defaults to 'latest')
+        try {
+          nonce = await provider.getTransactionCount(wallet.address);
+        } catch (fallbackError) {
+          throw new Error(`Failed to get transaction nonce: ${fallbackError.message}`);
+        }
+      }
+
+      // Build transaction with explicit nonce
+      const tx = await vaultContract.refund(sellerAddress, amountWei, {
+        nonce: nonce
+      });
       const receipt = await tx.wait();
 
       // Get transaction hash from receipt or transaction object
@@ -463,6 +538,7 @@ class BlockchainService {
         throw new Error(`Wallet not configured for network: ${network}`);
       }
 
+      const provider = this.providers[network.toUpperCase()];
       const vaultContract = new ethers.Contract(contractAddress, ESCROW_VAULT_ABI, wallet);
       const decimals = this.getTokenDecimals(token, network);
       const amountWei = ethers.parseUnits(amount.toString(), decimals);
@@ -474,8 +550,24 @@ class BlockchainService {
         throw new Error(`Token address not found for ${token} on ${network}`);
       }
       
+      // Get nonce manually using 'latest' instead of 'pending' to avoid RPC errors
+      // Some RPC providers don't support 'pending' tag
+      let nonce;
+      try {
+        nonce = await provider.getTransactionCount(wallet.address, 'latest');
+      } catch (nonceError) {
+        // Fallback: try without tag (defaults to 'latest')
+        try {
+          nonce = await provider.getTransactionCount(wallet.address);
+        } catch (fallbackError) {
+          throw new Error(`Failed to get transaction nonce: ${fallbackError.message}`);
+        }
+      }
+      
       // Use the withdrawToken function from the contract
-      const tx = await vaultContract.withdrawToken(tokenAddress, adminAddress);
+      const tx = await vaultContract.withdrawToken(tokenAddress, adminAddress, {
+        nonce: nonce
+      });
       const receipt = await tx.wait();
 
       // Get transaction hash from receipt or transaction object

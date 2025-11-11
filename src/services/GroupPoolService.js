@@ -91,7 +91,6 @@ class GroupPoolService {
           await telegram.getChat(chatId);
           
           // Link exists and chat is accessible - reuse it
-          console.log(`✅ Reusing existing invite link for group ${groupId}`);
           return group.inviteLink;
         } catch (verifyError) {
           // Link might be invalid or chat might have issues
@@ -157,7 +156,6 @@ class GroupPoolService {
       group.inviteLink = inviteLinkData.invite_link;
       await group.save();
 
-      console.log(`✅ Created new permanent invite link for group ${groupId}`);
       return inviteLinkData.invite_link;
 
     } catch (error) {
