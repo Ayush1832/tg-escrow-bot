@@ -2,7 +2,7 @@ const Escrow = require('../models/Escrow');
 const BlockchainService = require('../services/BlockchainService');
 const GroupPoolService = require('../services/GroupPoolService');
 const AddressAssignmentService = require('../services/AddressAssignmentService');
-const TradeTimeoutService = require('../services/TradeTimeoutService');
+// TradeTimeoutService removed - no longer needed
 const { isAdmin } = require('../middleware/adminAuth');
 const config = require('../../config');
 
@@ -100,7 +100,7 @@ async function adminResolveRelease(ctx) {
         return ctx.reply('❌ Invalid amount. Cannot proceed with release.');
       }
 
-      await BlockchainService.releaseFunds(
+      const releaseResult = await BlockchainService.releaseFunds(
         escrow.token,
         escrow.chain,
         escrow.buyerAddress,
@@ -113,6 +113,11 @@ async function adminResolveRelease(ctx) {
       escrow.disputeResolvedAt = new Date();
       escrow.disputeResolutionReason = 'Admin resolved: Release to buyer';
       escrow.status = 'completed';
+      // Save the release transaction hash (if returned)
+      if (releaseResult && releaseResult.transactionHash) {
+        escrow.releaseTransactionHash = releaseResult.transactionHash;
+      }
+      // Transaction hash is already saved when seller submitted it
       await escrow.save();
 
       // Notify group of successful release
@@ -123,10 +128,23 @@ async function adminResolveRelease(ctx) {
           { parse_mode: 'Markdown' }
         );
 
-        // Send trade completion message with close trade button (same as normal release flow)
-        await ctx.bot.telegram.sendMessage(
+        // Send trade completion message with close trade button
+        // Initialize close trade tracking
+        escrow.buyerClosedTrade = false;
+        escrow.sellerClosedTrade = false;
+        await escrow.save();
+        
+        const buyerUsername = escrow.buyerUsername || 'Buyer';
+        const sellerUsername = escrow.sellerUsername || 'Seller';
+        
+        const closeTradeText = `✅ The trade has been completed successfully!
+
+⏳ Waiting for @${buyerUsername} to confirm.
+⏳ Waiting for @${sellerUsername} to confirm.`;
+        
+        const closeMsg = await ctx.bot.telegram.sendMessage(
           escrow.groupId,
-          `✅ The trade has been completed successfully!\n\nTo close this trade, click on the button below.`,
+          closeTradeText,
           {
             reply_markup: {
               inline_keyboard: [
@@ -140,6 +158,9 @@ async function adminResolveRelease(ctx) {
             }
           }
         );
+        
+        escrow.closeTradeMessageId = closeMsg.message_id;
+        await escrow.save();
       } catch (groupError) {
         console.error('Error notifying group:', groupError);
       }
@@ -336,7 +357,7 @@ async function adminPoolAdd(ctx) {
       });
     }
 
-    await GroupPoolService.addGroup(groupId);
+    await GroupPoolService.addGroup(groupId, null, ctx.telegram);
     await ctx.reply(`✅ Added group ${groupId} to pool.`);
 
   } catch (error) {
