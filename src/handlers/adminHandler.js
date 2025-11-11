@@ -433,6 +433,7 @@ async function adminHelp(ctx) {
 • \`/admin_pool_list\` - List all groups in pool
 • \`/admin_recycle_groups\` - Manually recycle groups for completed/refunded escrows
 • \`/admin_group_reset\` - Reset group when no deposits were made (removes users, recycles group)
+• \`/admin_reset_force\` - Force reset group regardless of status (removes users, recycles group)
 • \`/admin_pool_delete <groupId>\` - Delete specific group from pool
 • \`/admin_pool_delete_all\` - Delete ALL groups from pool (dangerous)
 
@@ -1061,6 +1062,153 @@ async function adminGroupReset(ctx) {
   }
 }
 
+/**
+ * Force reset group - resets group regardless of trade status or deposits
+ * Removes buyer and seller, recycles group back to pool
+ */
+async function adminResetForce(ctx) {
+  try {
+    if (!isAdmin(ctx)) {
+      return ctx.reply('❌ Access denied. Admin privileges required.');
+    }
+
+    const chatId = ctx.chat.id;
+
+    // Must be in a group
+    if (chatId > 0) {
+      return ctx.reply('❌ This command can only be used in a group chat.');
+    }
+
+    // Delete command message after 1 minute
+    const commandMsgId = ctx.message.message_id;
+    setTimeout(async () => {
+      try {
+        await ctx.telegram.deleteMessage(chatId, commandMsgId);
+      } catch (e) {
+        // Ignore errors (message may already be deleted)
+      }
+    }, 60 * 1000);
+
+    // Find active escrow for this group
+    const escrow = await Escrow.findOne({
+      groupId: chatId.toString()
+    });
+
+    if (!escrow) {
+      const errorMsg = await ctx.reply('❌ No escrow found for this group.');
+      setTimeout(async () => {
+        try {
+          await ctx.telegram.deleteMessage(chatId, errorMsg.message_id);
+        } catch (e) {}
+      }, 60 * 1000);
+      return;
+    }
+
+    // Find the group in pool
+    const group = await GroupPool.findOne({ 
+      assignedEscrowId: escrow.escrowId 
+    });
+
+    if (!group) {
+      const errorMsg = await ctx.reply('❌ Group not found in pool.');
+      setTimeout(async () => {
+        try {
+          await ctx.telegram.deleteMessage(chatId, errorMsg.message_id);
+        } catch (e) {}
+      }, 60 * 1000);
+      return;
+    }
+
+    const processingMsg = await ctx.reply('🔄 Force resetting group...');
+    // Delete processing message after 1 minute
+    setTimeout(async () => {
+      try {
+        await ctx.telegram.deleteMessage(chatId, processingMsg.message_id);
+      } catch (e) {
+        // Ignore errors (message may already be deleted)
+      }
+    }, 60 * 1000);
+
+    try {
+      // Remove buyer and seller from group (not admin)
+      const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, ctx.telegram);
+
+      if (!allUsersRemoved) {
+        console.log('⚠️ Some users could not be removed during force reset, continuing anyway...');
+      }
+
+      // Revoke existing invite link in Telegram before resetting
+      // Try to revoke from both GroupPool and Escrow to be safe
+      const linksToRevoke = new Set();
+      if (group.inviteLink) {
+        linksToRevoke.add(group.inviteLink);
+      }
+      // Also check if escrow has an invite link stored
+      if (escrow.inviteLink && escrow.inviteLink !== group.inviteLink) {
+        linksToRevoke.add(escrow.inviteLink);
+      }
+      
+      // Revoke all unique invite links
+      for (const link of linksToRevoke) {
+        try {
+          await ctx.telegram.revokeChatInviteLink(String(group.groupId), link);
+        } catch (revokeError) {
+          // Non-critical: continue even if revocation fails (link might already be expired/revoked)
+          console.log(`Note: Could not revoke invite link ${link.substring(0, 20)}... during force reset:`, revokeError.message);
+        }
+      }
+
+      // Clear escrow invite link
+      escrow.inviteLink = null;
+      await escrow.save();
+
+      // Reset group pool entry
+      group.status = 'available';
+      group.assignedEscrowId = null;
+      group.assignedAt = null;
+      group.completedAt = null;
+      group.inviteLink = null;
+      await group.save();
+
+      // Delete the escrow (force reset - regardless of status or deposits)
+      try {
+        await Escrow.deleteOne({ escrowId: escrow.escrowId });
+        console.log(`✅ Force reset: Deleted escrow ${escrow.escrowId}`);
+      } catch (deleteError) {
+        console.error('Error deleting escrow during force reset:', deleteError);
+        // Continue anyway - group is already reset and available
+      }
+
+      const successMsg = await ctx.reply('✅ Group force reset successfully. Ready for new deals.');
+      // Delete success message after 1 minute
+      setTimeout(async () => {
+        try {
+          await ctx.telegram.deleteMessage(chatId, successMsg.message_id);
+        } catch (e) {}
+      }, 60 * 1000);
+
+    } catch (error) {
+      console.error('Error force resetting group:', error);
+      const errorMsg = await ctx.reply('❌ Error force resetting group. Please check the logs.');
+      // Delete error message after 1 minute
+      setTimeout(async () => {
+        try {
+          await ctx.telegram.deleteMessage(chatId, errorMsg.message_id);
+        } catch (e) {}
+      }, 60 * 1000);
+    }
+
+  } catch (error) {
+    console.error('Error in admin force reset:', error);
+    const errorMsg = await ctx.reply('❌ Error force resetting group.');
+    setTimeout(async () => {
+      try {
+        await ctx.telegram.deleteMessage(ctx.chat.id, errorMsg.message_id);
+      } catch (e) {}
+    }, 60 * 1000);
+  }
+}
+
 module.exports = {
   adminStats,
   adminGroupPool,
@@ -1077,5 +1225,6 @@ module.exports = {
   adminTimeoutStats,
   adminCleanupAddresses,
   adminRecycleGroups,
-  adminGroupReset
+  adminGroupReset,
+  adminResetForce
 };

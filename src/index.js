@@ -976,7 +976,8 @@ Waiting for @${buyerUsername} to confirm...`;
       adminTimeoutStats,
       adminCleanupAddresses,
       adminRecycleGroups,
-      adminGroupReset
+      adminGroupReset,
+      adminResetForce
     } = adminHandler;
     this.bot.command('admin_stats', adminStats);
     this.bot.command('admin_pool', adminGroupPool);
@@ -994,6 +995,7 @@ Waiting for @${buyerUsername} to confirm...`;
     this.bot.command('admin_cleanup_addresses', adminCleanupAddresses);
     this.bot.command('admin_recycle_groups', adminRecycleGroups);
     this.bot.command('admin_group_reset', adminGroupReset);
+    this.bot.command('admin_reset_force', adminResetForce);
 
     this.bot.on('callback_query', callbackHandler);
     this.bot.on('chat_join_request', joinRequestHandler);
