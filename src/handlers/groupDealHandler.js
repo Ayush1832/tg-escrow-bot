@@ -175,21 +175,10 @@ module.exports = async (ctx) => {
         });
 
         if (group) {
-          // Revoke invite link
-          const linksToRevoke = new Set();
-          if (group.inviteLink) {
-            linksToRevoke.add(group.inviteLink);
-          }
-          if (currentEscrow.inviteLink && currentEscrow.inviteLink !== group.inviteLink) {
-            linksToRevoke.add(currentEscrow.inviteLink);
-          }
-
-          for (const link of linksToRevoke) {
-            try {
-              await telegram.revokeChatInviteLink(String(group.groupId), link);
-            } catch (revokeError) {
-              console.log(`Could not revoke invite link during timeout cancellation:`, revokeError.message);
-            }
+          // Clear escrow invite link (but keep group invite link - it's permanent)
+          if (currentEscrow.inviteLink) {
+            currentEscrow.inviteLink = null;
+            await currentEscrow.save();
           }
 
           // Remove users from group
@@ -200,11 +189,12 @@ module.exports = async (ctx) => {
           }
 
           // Reset group pool entry
+          // IMPORTANT: Do NOT clear group.inviteLink - we keep the permanent link for reuse
           group.status = 'available';
           group.assignedEscrowId = null;
           group.assignedAt = null;
           group.completedAt = null;
-          group.inviteLink = null;
+          // Keep inviteLink - it's permanent and will be reused
           await group.save();
         }
 

@@ -771,40 +771,27 @@ Waiting for @${buyerUsername} to confirm...`;
           const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, telegram);
           
           if (allUsersRemoved) {
-            // Revoke existing invite link in Telegram before recycling
-            // Try to revoke from both GroupPool and Escrow to be safe
-            const linksToRevoke = new Set();
-            if (group.inviteLink) {
-              linksToRevoke.add(group.inviteLink);
-            }
-            // Also check if escrow has an invite link stored
-            if (escrow.inviteLink && escrow.inviteLink !== group.inviteLink) {
-              linksToRevoke.add(escrow.inviteLink);
-            }
-            
-            // Revoke all unique invite links
-            for (const link of linksToRevoke) {
-              try {
-                await telegram.revokeChatInviteLink(String(group.groupId), link);
-              } catch (revokeError) {
-                // Non-critical: continue even if revocation fails (link might already be expired/revoked)
-                console.log(`Note: Could not revoke invite link ${link.substring(0, 20)}... during recycling:`, revokeError.message);
-              }
-            }
-            
-            // Clear escrow invite link
+            // Clear escrow invite link (but keep group invite link - it's permanent)
             const freshEscrow = await Escrow.findOne({ escrowId: escrow.escrowId });
             if (freshEscrow && freshEscrow.inviteLink) {
               freshEscrow.inviteLink = null;
               await freshEscrow.save();
             }
             
+            // Delete all messages and unpin pinned messages before recycling
+            try {
+              await GroupPoolService.deleteAllGroupMessages(group.groupId, telegram, freshEscrow);
+            } catch (deleteError) {
+              console.log('Note: Could not delete all messages during recycling:', deleteError.message);
+            }
+            
             // Recycle group back to pool
+            // IMPORTANT: Do NOT clear group.inviteLink - we keep the permanent link for reuse
             group.status = 'available';
             group.assignedEscrowId = null;
             group.assignedAt = null;
             group.completedAt = null;
-            group.inviteLink = null;
+            // Keep inviteLink - it's permanent and will be reused
             await group.save();
             
             await telegram.sendMessage(

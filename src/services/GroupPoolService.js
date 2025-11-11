@@ -61,6 +61,10 @@ class GroupPoolService {
 
   /**
    * Generate invite link for assigned group
+   * IMPORTANT: This function uses a permanent invite link strategy
+   * - Reuses existing invite link if it exists and is valid
+   * - Only creates a new link if one doesn't exist
+   * - Never revokes links (links are permanent and never expire)
    */
   async generateInviteLink(groupId, telegram, options = {}) {
     try {
@@ -74,56 +78,33 @@ class GroupPoolService {
         throw new Error('Group not found in pool');
       }
 
-      // Revoke existing stored invite link to avoid "expired" state when reusing old links
-      // This is critical for recycled groups - old links must be revoked before creating new ones
-      // Collect all potential invite links from GroupPool and any active/completed Escrows
-      const linksToRevoke = new Set();
-      
-      // Add invite link from GroupPool if it exists
+      const chatId = String(groupId);
+
+      // Strategy: Reuse existing invite link if it exists
+      // Only create a new link if the group doesn't have one
       if (group.inviteLink) {
-        linksToRevoke.add(group.inviteLink);
-      }
-      
-      // Also check for any Escrows (completed or active) that might have an invite link stored
-      // This handles edge cases where Escrow has a different link than GroupPool
-      try {
-        const Escrow = require('../models/Escrow');
-        const escrowsWithLinks = await Escrow.find({
-          groupId: String(groupId),
-          inviteLink: { $ne: null, $exists: true }
-        }).limit(5); // Limit to avoid too many queries
-        
-        for (const escrow of escrowsWithLinks) {
-          if (escrow.inviteLink && escrow.inviteLink !== group.inviteLink) {
-            linksToRevoke.add(escrow.inviteLink);
-          }
-        }
-      } catch (escrowCheckError) {
-        // Non-critical: continue even if escrow check fails
-        console.log('Note: Could not check escrows for invite links:', escrowCheckError.message);
-      }
-      
-      // Revoke all collected invite links
-      for (const link of linksToRevoke) {
+        // Verify the existing link is still valid by trying to export it
+        // If it fails, we'll create a new one
         try {
-          await telegram.revokeChatInviteLink(String(groupId), link);
-        } catch (revokeError) {
-          // Link might already be revoked/expired or invalid - this is okay, we'll create a new one
-          // Log for debugging but don't fail the operation
-          console.log(`Note: Could not revoke invite link ${link.substring(0, 30)}... for group ${groupId}:`, revokeError.message);
+          // Test if the link is still valid by checking chat info
+          // We can't directly verify a link, but we can check if the chat exists
+          await telegram.getChat(chatId);
+          
+          // Link exists and chat is accessible - reuse it
+          console.log(`✅ Reusing existing invite link for group ${groupId}`);
+          return group.inviteLink;
+        } catch (verifyError) {
+          // Link might be invalid or chat might have issues
+          // Clear it and create a new one
+          console.log(`⚠️ Existing invite link may be invalid, creating new one for group ${groupId}`);
+          group.inviteLink = null;
+          await group.save();
         }
-      }
-      
-      // Clear stored invite link in database after revocation attempt
-      // This ensures we don't try to revoke the same link twice
-      if (group.inviteLink) {
-        group.inviteLink = null;
-        await group.save();
       }
 
+      // No existing link or link is invalid - create a new permanent link
       // Generate invite link. If creates_join_request is true, do NOT set member_limit (Telegram API restriction)
       let inviteLinkData;
-      const chatId = String(groupId);
       try {
         const params = {};
         if (options.creates_join_request === true) {
@@ -131,7 +112,8 @@ class GroupPoolService {
         } else {
           params.member_limit = options.member_limit ?? 2;
         }
-        // Only set expiry if explicitly provided; otherwise let Telegram manage validity
+        // DO NOT set expire_date - this makes the link permanent (never expires)
+        // Only set expiry if explicitly provided in options (which should be rare)
         if (typeof options.expire_date === 'number') {
           params.expire_date = options.expire_date;
         }
@@ -153,6 +135,7 @@ class GroupPoolService {
             } else {
               retryParams.member_limit = options.member_limit ?? 2;
             }
+            // DO NOT set expire_date - permanent link
             if (typeof options.expire_date === 'number') {
               retryParams.expire_date = options.expire_date;
             }
@@ -170,10 +153,11 @@ class GroupPoolService {
         throw chatError;
       }
 
-      // Update group with invite link
+      // Update group with the new permanent invite link
       group.inviteLink = inviteLinkData.invite_link;
       await group.save();
 
+      console.log(`✅ Created new permanent invite link for group ${groupId}`);
       return inviteLinkData.invite_link;
 
     } catch (error) {
@@ -196,9 +180,10 @@ class GroupPoolService {
       }
 
       // Mark group as completed
+      // IMPORTANT: Do NOT clear group.inviteLink - we keep the permanent link for reuse
       group.status = 'completed';
       group.completedAt = new Date();
-      group.inviteLink = null; // Clear invite link
+      // Keep inviteLink - it's permanent
       group.assignedEscrowId = null; // Clear assignment
       group.assignedAt = null;
       await group.save();
@@ -270,6 +255,21 @@ class GroupPoolService {
         // Verify admin is present if telegram is provided
         if (telegram) {
           await this.ensureAdminInGroup(groupId, telegram);
+          
+          // If group doesn't have an invite link, create one
+          if (!existingGroup.inviteLink) {
+            try {
+              await this.generateInviteLink(groupId, telegram, { creates_join_request: true });
+              // Link is already saved in generateInviteLink
+              // Reload to get the updated group with link
+              const refreshed = await GroupPool.findOne({ groupId });
+              if (refreshed) {
+                return refreshed;
+              }
+            } catch (linkError) {
+              console.log(`Note: Could not create invite link for existing group ${groupId}:`, linkError.message);
+            }
+          }
         }
         return existingGroup;
       }
@@ -285,6 +285,20 @@ class GroupPoolService {
       // Verify admin is in group if telegram is provided
       if (telegram) {
         await this.ensureAdminInGroup(groupId, telegram);
+        
+        // Create a permanent invite link when adding group to pool
+        try {
+          await this.generateInviteLink(groupId, telegram, { creates_join_request: true });
+          // Link is already saved in generateInviteLink
+          // Reload to get the updated group with link
+          const refreshed = await GroupPool.findOne({ groupId });
+          if (refreshed) {
+            return refreshed;
+          }
+        } catch (linkError) {
+          console.log(`Note: Could not create invite link for new group ${groupId}:`, linkError.message);
+          // Continue anyway - link can be created later when needed
+        }
       }
 
       return group;
@@ -463,7 +477,7 @@ class GroupPoolService {
             group.status = 'archived';
             group.assignedEscrowId = null;
             group.assignedAt = null;
-            group.inviteLink = null;
+            // Keep inviteLink even when archived - might be reused if group is restored
             await group.save();
             
             cleanedCount++;
@@ -522,43 +536,33 @@ class GroupPoolService {
         // Remove ALL users from group (buyer, seller, admins, everyone)
         const allUsersRemoved = await this.removeUsersFromGroup(escrow, group.groupId, telegram);
 
-        // Revoke existing invite link in Telegram before recycling
-        // Try to revoke from both GroupPool and Escrow to be safe
-        const linksToRevoke = new Set();
-        if (group.inviteLink) {
-          linksToRevoke.add(group.inviteLink);
-        }
-        // Also check if escrow has an invite link stored
-        if (escrow.inviteLink && escrow.inviteLink !== group.inviteLink) {
-          linksToRevoke.add(escrow.inviteLink);
-        }
-        
-        // Revoke all unique invite links
-        for (const link of linksToRevoke) {
-          try {
-            await telegram.revokeChatInviteLink(String(group.groupId), link);
-          } catch (revokeError) {
-            // Non-critical: continue even if revocation fails (link might already be expired/revoked)
-            console.log(`Note: Could not revoke invite link ${link.substring(0, 20)}... during delayed recycling:`, revokeError.message);
-          }
+        // Delete all messages and unpin pinned messages before recycling
+        try {
+          // Reload escrow to get latest message IDs
+          const freshEscrow = await Escrow.findOne({ escrowId: escrow.escrowId });
+          await this.deleteAllGroupMessages(group.groupId, telegram, freshEscrow);
+        } catch (deleteError) {
+          console.log('Note: Could not delete all messages during delayed recycling:', deleteError.message);
         }
 
         if (allUsersRemoved) {
           // Only add back to pool if ALL users were successfully removed
+          // IMPORTANT: Do NOT clear group.inviteLink - we keep the permanent link for reuse
           group.status = 'available';
           group.assignedEscrowId = null;
           group.assignedAt = null;
           group.completedAt = null;
-          group.inviteLink = null;
+          // Keep inviteLink - it's permanent and will be reused
           await group.save();
 
         } else {
           // Mark as completed but don't add back to pool if users couldn't be removed
+          // IMPORTANT: Do NOT clear group.inviteLink even here - link stays valid
           group.status = 'completed';
           group.assignedEscrowId = null;
           group.assignedAt = null;
           group.completedAt = new Date();
-          group.inviteLink = null;
+          // Keep inviteLink - it's permanent
           await group.save();
 
         }
@@ -667,6 +671,121 @@ class GroupPoolService {
     } catch (error) {
       console.error('Error removing users from group:', error);
       return false;
+    }
+  }
+
+  /**
+   * Delete all messages in a group and unpin all pinned messages
+   * Note: Telegram only allows deleting messages less than 48 hours old
+   * This function uses tracked message IDs from escrow and tries to delete messages around them
+   */
+  async deleteAllGroupMessages(groupId, telegram, escrow = null) {
+    try {
+      const chatId = String(groupId);
+      
+      // Unpin all pinned messages first
+      try {
+        await telegram.unpinAllChatMessages(chatId);
+        console.log(`✅ Unpinned all messages in group ${chatId}`);
+      } catch (unpinError) {
+        console.log(`Note: Could not unpin messages in group ${chatId}:`, unpinError?.message || 'Unknown error');
+      }
+
+      let deletedCount = 0;
+      const messageIdsToDelete = new Set();
+
+      // Collect all known message IDs from escrow
+      if (escrow) {
+        // Add all tracked message IDs from escrow
+        if (escrow.step1MessageId) messageIdsToDelete.add(escrow.step1MessageId);
+        if (escrow.step2MessageId) messageIdsToDelete.add(escrow.step2MessageId);
+        if (escrow.step3MessageId) messageIdsToDelete.add(escrow.step3MessageId);
+        if (escrow.step5BuyerAddressMessageId) messageIdsToDelete.add(escrow.step5BuyerAddressMessageId);
+        if (escrow.step6SellerAddressMessageId) messageIdsToDelete.add(escrow.step6SellerAddressMessageId);
+        if (escrow.dealSummaryMessageId) messageIdsToDelete.add(escrow.dealSummaryMessageId);
+        if (escrow.transactionHashMessageId) messageIdsToDelete.add(escrow.transactionHashMessageId);
+        if (escrow.closeTradeMessageId) messageIdsToDelete.add(escrow.closeTradeMessageId);
+        if (escrow.originInviteMessageId) messageIdsToDelete.add(escrow.originInviteMessageId);
+        if (escrow.roleSelectionMessageId) messageIdsToDelete.add(escrow.roleSelectionMessageId);
+      }
+
+      // Delete all known message IDs
+      for (const msgId of messageIdsToDelete) {
+        try {
+          await telegram.deleteMessage(chatId, msgId);
+          deletedCount++;
+          await new Promise(resolve => setTimeout(resolve, 50));
+        } catch (deleteError) {
+          // Message might not exist or is too old - continue
+        }
+      }
+
+      // Try to delete messages in a range around known message IDs
+      // Telegram message IDs are sequential, so we can try ranges around known IDs
+      if (messageIdsToDelete.size > 0) {
+        const knownIds = Array.from(messageIdsToDelete).sort((a, b) => a - b);
+        const minId = Math.min(...knownIds);
+        const maxId = Math.max(...knownIds);
+        
+        // Try to delete messages in a range around the known IDs (extend by 1000 messages in each direction)
+        const rangeStart = Math.max(1, minId - 1000);
+        const rangeEnd = maxId + 1000;
+        
+        // Delete messages in batches (sample every 10th message to avoid too many requests)
+        for (let msgId = rangeStart; msgId <= rangeEnd; msgId += 10) {
+          if (messageIdsToDelete.has(msgId)) continue; // Already deleted
+          
+          try {
+            await telegram.deleteMessage(chatId, msgId);
+            deletedCount++;
+            await new Promise(resolve => setTimeout(resolve, 30));
+          } catch (deleteError) {
+            // Message doesn't exist or can't be deleted - continue
+          }
+        }
+      } else {
+        // No known message IDs - try to delete recent messages
+        // Get a recent message ID by sending a test message and deleting it
+        try {
+          const testMsg = await telegram.sendMessage(chatId, '🧹 Cleaning up...');
+          const recentMsgId = testMsg.message_id;
+          
+          // Try to delete messages backwards from the recent message
+          // Telegram only allows deleting messages less than 48 hours old
+          const maxRange = 5000; // Reasonable range for a trade group
+          for (let i = 0; i < maxRange; i++) {
+            const msgIdToTry = recentMsgId - i;
+            if (msgIdToTry < 1) break;
+            
+            try {
+              await telegram.deleteMessage(chatId, msgIdToTry);
+              deletedCount++;
+              await new Promise(resolve => setTimeout(resolve, 30));
+            } catch (deleteError) {
+              // Message doesn't exist or can't be deleted
+              const errorMsg = deleteError?.response?.description || deleteError?.message || '';
+              if (errorMsg.includes('message to delete not found') || 
+                  errorMsg.includes('message can\'t be deleted')) {
+                // Stop if we hit messages that can't be deleted (likely too old)
+                break;
+              }
+            }
+          }
+          
+          // Delete the test message itself
+          try {
+            await telegram.deleteMessage(chatId, recentMsgId);
+          } catch (e) {}
+        } catch (testError) {
+          console.log('Note: Could not send test message for cleanup:', testError.message);
+        }
+      }
+
+      console.log(`✅ Deleted ${deletedCount} messages from group ${chatId}`);
+      return deletedCount;
+    } catch (error) {
+      console.error('Error deleting all group messages:', error);
+      return 0;
     }
   }
 }

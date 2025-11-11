@@ -993,33 +993,20 @@ async function adminGroupReset(ctx) {
         return;
       }
 
-      // Revoke existing invite link in Telegram before resetting
-      // Try to revoke from both GroupPool and Escrow to be safe
-      const linksToRevoke = new Set();
-      if (group.inviteLink) {
-        linksToRevoke.add(group.inviteLink);
-      }
-      // Also check if escrow has an invite link stored
-      if (escrow.inviteLink && escrow.inviteLink !== group.inviteLink) {
-        linksToRevoke.add(escrow.inviteLink);
-      }
-      
-      // Revoke all unique invite links
-      for (const link of linksToRevoke) {
-        try {
-          await ctx.telegram.revokeChatInviteLink(String(group.groupId), link);
-        } catch (revokeError) {
-          // Non-critical: continue even if revocation fails (link might already be expired/revoked)
-          console.log(`Note: Could not revoke invite link ${link.substring(0, 20)}... during group reset:`, revokeError.message);
-        }
+      // Delete all messages and unpin pinned messages before recycling
+      try {
+        await GroupPoolService.deleteAllGroupMessages(group.groupId, ctx.telegram, escrow);
+      } catch (deleteError) {
+        console.log('Note: Could not delete all messages during group reset:', deleteError.message);
       }
 
       // Reset group pool entry
+      // IMPORTANT: Do NOT clear group.inviteLink - we keep the permanent link for reuse
       group.status = 'available';
       group.assignedEscrowId = null;
       group.assignedAt = null;
       group.completedAt = null;
-      group.inviteLink = null;
+      // Keep inviteLink - it's permanent and will be reused
       await group.save();
 
       // Delete the escrow since no deposits were made
@@ -1137,37 +1124,24 @@ async function adminResetForce(ctx) {
         console.log('⚠️ Some users could not be removed during force reset, continuing anyway...');
       }
 
-      // Revoke existing invite link in Telegram before resetting
-      // Try to revoke from both GroupPool and Escrow to be safe
-      const linksToRevoke = new Set();
-      if (group.inviteLink) {
-        linksToRevoke.add(group.inviteLink);
-      }
-      // Also check if escrow has an invite link stored
-      if (escrow.inviteLink && escrow.inviteLink !== group.inviteLink) {
-        linksToRevoke.add(escrow.inviteLink);
-      }
-      
-      // Revoke all unique invite links
-      for (const link of linksToRevoke) {
-        try {
-          await ctx.telegram.revokeChatInviteLink(String(group.groupId), link);
-        } catch (revokeError) {
-          // Non-critical: continue even if revocation fails (link might already be expired/revoked)
-          console.log(`Note: Could not revoke invite link ${link.substring(0, 20)}... during force reset:`, revokeError.message);
-        }
-      }
-
-      // Clear escrow invite link
+      // Clear escrow invite link (but keep group invite link - it's permanent)
       escrow.inviteLink = null;
       await escrow.save();
 
+      // Delete all messages and unpin pinned messages before recycling
+      try {
+        await GroupPoolService.deleteAllGroupMessages(group.groupId, ctx.telegram, escrow);
+      } catch (deleteError) {
+        console.log('Note: Could not delete all messages during force reset:', deleteError.message);
+      }
+
       // Reset group pool entry
+      // IMPORTANT: Do NOT clear group.inviteLink - we keep the permanent link for reuse
       group.status = 'available';
       group.assignedEscrowId = null;
       group.assignedAt = null;
       group.completedAt = null;
-      group.inviteLink = null;
+      // Keep inviteLink - it's permanent and will be reused
       await group.save();
 
       // Delete the escrow (force reset - regardless of status or deposits)
