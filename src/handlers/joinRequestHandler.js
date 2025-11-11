@@ -1,6 +1,16 @@
 const Escrow = require('../models/Escrow');
 
-module.exports = async (ctx) => {
+// Import timeout map from groupDealHandler to cancel timeouts when both join
+// We'll use a shared module pattern to access the timeout map
+let inviteTimeoutMap = null;
+
+// Function to set the timeout map (called from groupDealHandler)
+function setInviteTimeoutMap(map) {
+  inviteTimeoutMap = map;
+}
+
+// Main handler function
+async function joinRequestHandler(ctx) {
   try {
     const request = ctx.update?.chat_join_request;
     if (!request) return;
@@ -79,6 +89,14 @@ module.exports = async (ctx) => {
     if (escrow.roleSelectionMessageId) {
       return;
     }
+
+    // Cancel the 5-minute timeout since both parties have joined
+    if (inviteTimeoutMap && inviteTimeoutMap.has(escrow.escrowId)) {
+      const timeoutId = inviteTimeoutMap.get(escrow.escrowId);
+      clearTimeout(timeoutId);
+      inviteTimeoutMap.delete(escrow.escrowId);
+    }
+
     // If we posted an invite in the origin chat, delete it and post a started message
     if (escrow.originChatId && escrow.originInviteMessageId) {
       try {
@@ -129,4 +147,8 @@ module.exports = async (ctx) => {
     console.error('joinRequestHandler error:', error);
     // Silently ignore to avoid spamming
   }
-};
+}
+
+// Export both the handler and the setter function
+module.exports = joinRequestHandler;
+module.exports.setInviteTimeoutMap = setInviteTimeoutMap;
