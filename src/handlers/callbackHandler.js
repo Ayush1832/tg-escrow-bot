@@ -2,9 +2,86 @@ const { Markup } = require('telegraf');
 const { ethers } = require('ethers');
 const Escrow = require('../models/Escrow');
 const BlockchainService = require('../services/BlockchainService');
+const AddressAssignmentService = require('../services/AddressAssignmentService');
+const GroupPoolService = require('../services/GroupPoolService');
+const GroupPool = require('../models/GroupPool');
+const Contract = require('../models/Contract');
 const config = require('../../config');
 const escrowHandler = require('./escrowHandler');
-const DepositAddress = require('../models/DepositAddress');
+
+/**
+ * Update the role selection message with current status
+ */
+async function updateRoleSelectionMessage(ctx, escrow) {
+  if (!escrow.roleSelectionMessageId) {
+    return; // No message to update
+  }
+  
+  try {
+    // Get participant usernames (from allowedUsernames or from escrow)
+    let participants = [];
+    if (escrow.allowedUsernames && escrow.allowedUsernames.length > 0) {
+      participants = escrow.allowedUsernames;
+    } else if (escrow.buyerUsername || escrow.sellerUsername) {
+      if (escrow.buyerUsername) participants.push(escrow.buyerUsername);
+      if (escrow.sellerUsername && escrow.sellerUsername !== escrow.buyerUsername) {
+        participants.push(escrow.sellerUsername);
+      }
+    }
+    
+    // Build status lines
+    const statusLines = [];
+    for (const username of participants) {
+      const isBuyer = escrow.buyerUsername && escrow.buyerUsername.toLowerCase() === username.toLowerCase();
+      const isSeller = escrow.sellerUsername && escrow.sellerUsername.toLowerCase() === username.toLowerCase();
+      
+      if (isBuyer) {
+        statusLines.push(`✅ @${username} - BUYER`);
+      } else if (isSeller) {
+        statusLines.push(`✅ @${username} - SELLER`);
+      } else {
+        statusLines.push(`⏳ @${username} - Waiting...`);
+      }
+    }
+    
+    // If no participants list, use buyer/seller info directly
+    if (statusLines.length === 0) {
+      if (escrow.buyerUsername) {
+        statusLines.push(`✅ @${escrow.buyerUsername} - BUYER`);
+      } else {
+        statusLines.push(`⏳ Buyer - Waiting...`);
+      }
+      if (escrow.sellerUsername) {
+        statusLines.push(`✅ @${escrow.sellerUsername} - SELLER`);
+      } else {
+        statusLines.push(`⏳ Seller - Waiting...`);
+      }
+    }
+    
+    const messageText = statusLines.join('\n');
+    
+    // Update the message (remove buttons if both roles are set)
+    const replyMarkup = (escrow.buyerId && escrow.sellerId) ? undefined : {
+      inline_keyboard: [
+        [
+          { text: '💰 I am Buyer', callback_data: 'select_role_buyer' },
+          { text: '💵 I am Seller', callback_data: 'select_role_seller' }
+        ]
+      ]
+    };
+    
+    await ctx.telegram.editMessageText(
+      escrow.groupId,
+      escrow.roleSelectionMessageId,
+      null,
+      messageText,
+      { reply_markup: replyMarkup }
+    );
+  } catch (error) {
+    console.error('Error updating role selection message:', error);
+    // Non-critical - continue execution
+  }
+}
 
 module.exports = async (ctx) => {
   try {
@@ -13,144 +90,430 @@ module.exports = async (ctx) => {
     const chatId = ctx.chat.id;
 
     // Handle different callback types
-    if (callbackData === 'select_role_buyer') {
-      await ctx.answerCbQuery('Confirming buyer role...');
+    if (callbackData === 'select_role_buyer' || callbackData === 'select_role_seller') {
+      const isBuyer = callbackData === 'select_role_buyer';
+      await ctx.answerCbQuery(isBuyer ? 'Buyer role selected' : 'Seller role selected');
+      
       const escrow = await Escrow.findOne({
         groupId: chatId.toString(),
         status: { $in: ['draft', 'awaiting_details'] }
       });
+      
       if (!escrow) {
         return ctx.reply('❌ No active escrow found.');
       }
-      // Show confirmation
-      let buyerConfirmMsg = '⚠️ Are you sure that you\'re the buyer?';
-      if (ctx.from.username) buyerConfirmMsg = `⚠️ Are you sure that you're the buyer (@${ctx.from.username})?`;
-      await ctx.reply(buyerConfirmMsg, {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '✅ Yes, I am the buyer', callback_data: 'confirm_role_buyer' },
-              { text: '❌ Cancel', callback_data: 'cancel_role_selection' }
-            ]
-          ]
+      
+      // Prevent same user from being both buyer and seller
+      if (isBuyer && escrow.sellerId && escrow.sellerId === userId) {
+        return ctx.answerCbQuery('❌ You cannot be both buyer and seller.');
+      }
+      if (!isBuyer && escrow.buyerId && escrow.buyerId === userId) {
+        return ctx.answerCbQuery('❌ You cannot be both buyer and seller.');
+      }
+      
+      // Assign role
+      if (isBuyer) {
+        if (escrow.buyerId && escrow.buyerId !== userId) {
+          return ctx.answerCbQuery('❌ Buyer role already taken.');
         }
-      });
-      return;
-    } else if (callbackData === 'select_role_seller') {
-      await ctx.answerCbQuery('Confirming seller role...');
-      const escrow = await Escrow.findOne({
-        groupId: chatId.toString(),
-        status: { $in: ['draft', 'awaiting_details'] }
-      });
-      if (!escrow) {
-        return ctx.reply('❌ No active escrow found.');
-      }
-      // Show confirmation
-      let sellerConfirmMsg = '⚠️ Are you sure that you\'re the seller?';
-      if (ctx.from.username) sellerConfirmMsg = `⚠️ Are you sure that you're the seller (@${ctx.from.username})?`;
-      await ctx.reply(sellerConfirmMsg, {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '✅ Yes, I am the seller', callback_data: 'confirm_role_seller' },
-              { text: '❌ Cancel', callback_data: 'cancel_role_selection' }
-            ]
-          ]
+        escrow.buyerId = userId;
+        escrow.buyerUsername = ctx.from.username;
+      } else {
+        if (escrow.sellerId && escrow.sellerId !== userId) {
+          return ctx.answerCbQuery('❌ Seller role already taken.');
         }
-      });
-      return;
-    } else if (callbackData === 'confirm_role_buyer') {
-      await ctx.answerCbQuery('Buyer role confirmed!');
-      const escrow = await Escrow.findOne({
-        groupId: chatId.toString(),
-        status: { $in: ['draft', 'awaiting_details'] }
-      });
-      if (!escrow) {
-        return ctx.reply('❌ No active escrow found.');
+        escrow.sellerId = userId;
+        escrow.sellerUsername = ctx.from.username;
       }
-      // Assign buyer role
-      if (escrow.sellerId && escrow.sellerId === userId) {
-        return ctx.reply('❌ Buyer and Seller cannot be the same user.');
-      }
-      if (escrow.buyerId && escrow.buyerId !== userId) {
-        return ctx.reply('❌ Buyer role is already taken by another user.');
-      }
-      escrow.buyerId = userId;
-      escrow.buyerUsername = ctx.from.username;
+      
       await escrow.save();
       
-      await ctx.reply(`✅ You have been assigned as the Buyer.`);
+      // Update role selection message
+      await updateRoleSelectionMessage(ctx, escrow);
       
-      // Reload escrow to get latest data and check if both roles are assigned
-      const updatedEscrow = await Escrow.findOne({
-        groupId: chatId.toString(),
-        status: { $in: ['draft', 'awaiting_details'] }
-      });
-      if (updatedEscrow && updatedEscrow.buyerId && updatedEscrow.sellerId) {
-        const fs = require('fs');
-        const path = require('path');
-        const buyerImage = path.join(process.cwd(), 'public', 'images', 'buyer.png');
-        const buyerText = 'Now set /buyer address.\n\n📋 Example:\n• /buyer 0xabcdef1234567890abcdef1234567890abcdef12';
-        try {
-          if (fs.existsSync(buyerImage)) {
-            await ctx.replyWithPhoto({ source: fs.createReadStream(buyerImage) }, {
-              caption: buyerText
-            });
-          } else {
-            await ctx.reply(buyerText);
+      // If both roles are set, start step-by-step trade details process (if not already completed)
+      if (escrow.buyerId && escrow.sellerId && escrow.roleSelectionMessageId) {
+        // Note: Role selection message is kept permanently (not deleted)
+        // Only Step 1-3 messages will be deleted after 5 minutes
+        
+        // Start step-by-step trade details process if not already completed
+        if (!escrow.tradeDetailsStep || escrow.tradeDetailsStep !== 'completed') {
+          escrow.tradeDetailsStep = 'step1_amount';
+          const step1Msg = await ctx.telegram.sendMessage(escrow.groupId, '💰 Step 1 - Enter USDT amount including fee → Example: 1000');
+          escrow.step1MessageId = step1Msg.message_id;
+          await escrow.save();
+          
+          // Schedule deletion of Step 1 message after 5 minutes (backup)
+          const telegram = ctx.telegram;
+          const groupId = escrow.groupId;
+          setTimeout(async () => {
+            try {
+              await telegram.deleteMessage(groupId, step1Msg.message_id);
+            } catch (deleteErr) {
+              // Message might already be deleted
+            }
+          }, 5 * 60 * 1000); // 5 minutes
+        } else {
+          // Trade details already set, show next instructions
+          const fs = require('fs');
+          const path = require('path');
+          const buyerImage = path.join(process.cwd(), 'public', 'images', 'buyer.png');
+          const buyerText = 'Now set /buyer address.\n\n📋 Example:\n• /buyer 0xabcdef1234567890abcdef1234567890abcdef12';
+          try {
+            if (fs.existsSync(buyerImage)) {
+              await ctx.telegram.sendPhoto(escrow.groupId, { source: fs.createReadStream(buyerImage) }, {
+                caption: buyerText
+              });
+            } else {
+              await ctx.telegram.sendMessage(escrow.groupId, buyerText);
+        }
+          } catch (err) {
+            await ctx.telegram.sendMessage(escrow.groupId, buyerText);
           }
-        } catch (err) {
-          await ctx.reply(buyerText);
         }
       }
-      return;
-    } else if (callbackData === 'confirm_role_seller') {
-      await ctx.answerCbQuery('Seller role confirmed!');
-      const escrow = await Escrow.findOne({
-        groupId: chatId.toString(),
-        status: { $in: ['draft', 'awaiting_details'] }
-      });
-      if (!escrow) {
-        return ctx.reply('❌ No active escrow found.');
-      }
-      // Assign seller role
-      if (escrow.buyerId && escrow.buyerId === userId) {
-        return ctx.reply('❌ Buyer and Seller cannot be the same user.');
-      }
-      if (escrow.sellerId && escrow.sellerId !== userId) {
-        return ctx.reply('❌ Seller role is already taken by another user.');
-      }
-      escrow.sellerId = userId;
-      escrow.sellerUsername = ctx.from.username;
-      await escrow.save();
       
-      await ctx.reply(`✅ You have been assigned as the Seller.`);
-      
-      // Reload escrow to get latest data and check if both roles are assigned
-      const updatedEscrow = await Escrow.findOne({
-        groupId: chatId.toString(),
-        status: { $in: ['draft', 'awaiting_details'] }
-      });
-      if (updatedEscrow && updatedEscrow.buyerId && updatedEscrow.sellerId) {
-        const fs = require('fs');
-        const path = require('path');
-        const buyerImage = path.join(process.cwd(), 'public', 'images', 'buyer.png');
-        const buyerText = 'Now set /buyer address.\n\n📋 Example:\n• /buyer 0xabcdef1234567890abcdef1234567890abcdef12';
-        try {
-          if (fs.existsSync(buyerImage)) {
-            await ctx.replyWithPhoto({ source: fs.createReadStream(buyerImage) }, {
-              caption: buyerText
-            });
-          } else {
-            await ctx.reply(buyerText);
-          }
-        } catch (err) {
-          await ctx.reply(buyerText);
-        }
-      }
       return;
     } else if (callbackData === 'cancel_role_selection') {
       await ctx.answerCbQuery('Cancelled');
+      return;
+    } else if (callbackData === 'approve_deal_summary') {
+      await ctx.answerCbQuery('Approving deal...');
+      
+      const escrow = await Escrow.findOne({
+        groupId: chatId.toString(),
+        status: { $in: ['draft', 'awaiting_details'] },
+        dealSummaryMessageId: { $exists: true }
+      });
+      
+      if (!escrow) {
+        return ctx.reply('❌ No active deal summary found.');
+      }
+      
+      const userId = ctx.from.id;
+      const isBuyer = escrow.buyerId === userId;
+      const isSeller = escrow.sellerId === userId;
+      
+      if (!isBuyer && !isSeller) {
+        return ctx.answerCbQuery('❌ Only buyer or seller can approve.');
+      }
+      
+      // Update approval status
+      if (isBuyer) {
+        escrow.buyerApproved = true;
+      } else {
+        escrow.sellerApproved = true;
+      }
+      await escrow.save();
+      
+      // Reload escrow to get latest state
+      const updatedEscrow = await Escrow.findById(escrow._id);
+      
+      // Update deal summary message with approval status
+      const buildDealSummary = async (escrow) => {
+        const amount = escrow.quantity || 0;
+        const rate = escrow.rate || 0;
+        const paymentMethod = escrow.paymentMethod || 'N/A';
+        const chain = escrow.chain || 'BSC';
+        const buyerAddress = escrow.buyerAddress || 'Not set';
+        const sellerAddress = escrow.sellerAddress || 'Not set';
+        
+        const buyerUsername = escrow.buyerUsername || 'Buyer';
+        const sellerUsername = escrow.sellerUsername || 'Seller';
+        
+        let approvalStatus = '';
+        if (escrow.buyerApproved && escrow.sellerApproved) {
+          approvalStatus = '✅ Both parties have approved.';
+        } else {
+          const approvals = [];
+          if (escrow.buyerApproved) {
+            approvals.push(`✅ @${buyerUsername} has approved.`);
+          } else {
+            approvals.push(`⏳ Waiting for @${buyerUsername} to approve.`);
+          }
+          if (escrow.sellerApproved) {
+            approvals.push(`✅ @${sellerUsername} has approved.`);
+          } else {
+            approvals.push(`⏳ Waiting for @${sellerUsername} to approve.`);
+          }
+          approvalStatus = approvals.join('\n');
+        }
+        
+        return `📋 <b>OTC Deal Summary</b>
+
+• <b>Amount:</b> ${amount} ${escrow.token || 'USDT'}
+• <b>Rate:</b> ₹${rate.toFixed(1)}
+• <b>Payment:</b> ${paymentMethod}
+• <b>Chain:</b> ${chain}
+• <b>Buyer Address:</b> <code>${buyerAddress}</code>
+• <b>Seller Address:</b> <code>${sellerAddress}</code>
+
+🛑 <b>Do not send funds here</b> 🛑
+
+${approvalStatus}`;
+      };
+      
+      const summaryText = await buildDealSummary(updatedEscrow);
+      const replyMarkup = (updatedEscrow.buyerApproved && updatedEscrow.sellerApproved) ? undefined : {
+        inline_keyboard: [
+          [{ text: 'Approve', callback_data: 'approve_deal_summary' }]
+        ]
+      };
+      
+      try {
+        await ctx.telegram.editMessageText(
+          updatedEscrow.groupId,
+          updatedEscrow.dealSummaryMessageId,
+          null,
+          summaryText,
+          { parse_mode: 'HTML', reply_markup: replyMarkup }
+        );
+      } catch (err) {
+        console.error('Error updating deal summary:', err);
+      }
+      
+      // Check if both have approved
+      if (updatedEscrow.buyerApproved && updatedEscrow.sellerApproved) {
+        // Both approved - send DEAL CONFIRMED message
+        const buyerTag = updatedEscrow.buyerUsername ? `@${updatedEscrow.buyerUsername}` : `[${updatedEscrow.buyerId}]`;
+        const sellerTag = updatedEscrow.sellerUsername ? `@${updatedEscrow.sellerUsername}` : `[${updatedEscrow.sellerId}]`;
+        const amount = updatedEscrow.quantity || 0;
+        const rate = updatedEscrow.rate || 0;
+        const paymentMethod = updatedEscrow.paymentMethod || 'N/A';
+        const chain = updatedEscrow.chain || 'BSC';
+        
+        // Calculate fees
+        const escrowFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
+        const escrowFee = (amount * escrowFeePercent) / 100;
+        const releaseAmount = amount - escrowFee;
+        
+        const confirmedText = `<b>OG OTC Bot 🤖</b>
+
+<b>DEAL CONFIRMED</b>
+================
+
+<b>Buyer:</b> ${buyerTag}
+<b>Seller:</b> ${sellerTag}
+
+<b>Deal Amount:</b> ${amount.toFixed(1)} ${updatedEscrow.token || 'USDT'}
+<b>OTC Fees:</b> ${escrowFee.toFixed(2)} ${updatedEscrow.token || 'USDT'}
+<b>Release Amount:</b> ${releaseAmount.toFixed(2)} ${updatedEscrow.token || 'USDT'}
+<b>Rate:</b> ₹${rate.toFixed(1)}
+<b>Payment:</b> ${paymentMethod}
+<b>Chain:</b> ${chain}
+
+<b>Buyer Address:</b> <code>${updatedEscrow.buyerAddress}</code>
+<b>Seller Address:</b> <code>${updatedEscrow.sellerAddress}</code>
+
+🛑 <b>Do not send funds here</b> 🛑`;
+        
+        const confirmedMsg = await ctx.telegram.sendMessage(updatedEscrow.groupId, confirmedText, {
+          parse_mode: 'HTML'
+        });
+        
+        // Pin the DEAL CONFIRMED message
+        try {
+          await ctx.telegram.pinChatMessage(updatedEscrow.groupId, confirmedMsg.message_id);
+        } catch (pinErr) {
+          console.error('Failed to pin message:', pinErr);
+        }
+        
+        // Generate deposit address and send deposit instructions
+        try {
+          const addressInfo = await AddressAssignmentService.assignDepositAddress(
+            updatedEscrow.escrowId,
+            updatedEscrow.token,
+            updatedEscrow.chain,
+            updatedEscrow.quantity,
+            Number(config.ESCROW_FEE_PERCENT || 0)
+          );
+          
+          updatedEscrow.depositAddress = addressInfo.address;
+          updatedEscrow.uniqueDepositAddress = addressInfo.address;
+          updatedEscrow.status = 'awaiting_deposit';
+          await updatedEscrow.save();
+          
+          // Send deposit address message with SENT button
+          // Use code tag to make address copyable (not clickable link)
+          const depositAddressText = `Send USDT & tap on <b>SENT</b> button.
+
+📮 ${updatedEscrow.chain || 'BSC'} (BEP20):
+<code>${addressInfo.address}</code>
+
+🧾 Useful filters /pic /proof`;
+          
+          await ctx.telegram.sendMessage(updatedEscrow.groupId, depositAddressText, {
+            parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+                [{ text: '✅ SENT', callback_data: 'confirm_sent_deposit' }]
+          ]
+        }
+      });
+          
+        } catch (depositErr) {
+          console.error('Error generating deposit address:', depositErr);
+          await ctx.telegram.sendMessage(updatedEscrow.groupId, '❌ Error generating deposit address. Please contact admin.');
+        }
+      }
+      
+      return;
+    } else if (callbackData.startsWith('step4_select_chain_')) {
+      // Step 4: Blockchain selection
+      const chain = callbackData.replace('step4_select_chain_', '').toUpperCase();
+      await ctx.answerCbQuery(`Selected ${chain}`);
+      
+      const escrow = await Escrow.findOne({
+        groupId: chatId.toString(),
+        status: { $in: ['draft', 'awaiting_details'] },
+        tradeDetailsStep: 'step4_chain_coin'
+      });
+      
+      if (!escrow) {
+        return ctx.reply('❌ No active escrow found.');
+      }
+      
+      // Only buyer or seller can select
+      if (escrow.buyerId !== userId && escrow.sellerId !== userId) {
+        return ctx.answerCbQuery('❌ Only buyer or seller can select.');
+      }
+      
+      escrow.chain = chain;
+      await escrow.save();
+      
+      // Update blockchain selection message with tick mark
+      if (escrow.step4ChainMessageId) {
+        const chains = ['BSC'];
+        const buttons = chains.map(c => ({ text: c === chain ? `✔ ${c}` : c, callback_data: `step4_select_chain_${c}` }));
+        
+        try {
+          await ctx.telegram.editMessageReplyMarkup(
+            escrow.groupId,
+            escrow.step4ChainMessageId,
+            null,
+            {
+              inline_keyboard: [buttons]
+            }
+          );
+        } catch (err) {
+          console.error('Error updating chain selection:', err);
+        }
+      }
+      
+      // Immediately show coin selection after chain is chosen
+      const coins = ['USDT', 'USDC'];
+      try {
+        const coinMsg = await ctx.telegram.sendMessage(escrow.groupId, '⚪ Select Coin', {
+          reply_markup: {
+            inline_keyboard: [coins.map(c => ({ text: c, callback_data: `step4_select_coin_${c}` }))]
+          }
+        });
+        escrow.step4CoinMessageId = coinMsg.message_id;
+        await escrow.save();
+        
+        // Schedule deletion of coin selection message after 5 minutes
+        setTimeout(async () => {
+          try {
+            await ctx.telegram.deleteMessage(escrow.groupId, coinMsg.message_id);
+          } catch (deleteErr) {
+            // Message might already be deleted
+          }
+        }, 5 * 60 * 1000);
+      } catch (err) {
+        console.error('Error sending coin selection:', err);
+      }
+
+      // Do not proceed to Step 5 until coin is selected
+      
+      return;
+    } else if (callbackData.startsWith('step4_select_coin_')) {
+      // Step 4: Coin selection
+      const coin = callbackData.replace('step4_select_coin_', '').toUpperCase();
+      await ctx.answerCbQuery(`Selected ${coin}`);
+      
+      const escrow = await Escrow.findOne({
+        groupId: chatId.toString(),
+        status: { $in: ['draft', 'awaiting_details'] },
+        tradeDetailsStep: 'step4_chain_coin'
+      });
+      
+      if (!escrow) {
+        return ctx.reply('❌ No active escrow found.');
+      }
+      
+      // Only buyer or seller can select
+      if (escrow.buyerId !== userId && escrow.sellerId !== userId) {
+        return ctx.answerCbQuery('❌ Only buyer or seller can select.');
+      }
+      
+      escrow.token = coin;
+      await escrow.save();
+      
+      // Update coin selection message with tick mark
+      if (escrow.step4CoinMessageId) {
+        const coins = ['USDT', 'USDC'];
+        const buttons = coins.map(c => {
+          const text = c === coin ? `✔ ${c}` : c;
+          return { text, callback_data: `step4_select_coin_${c}` };
+        });
+        
+        try {
+          await ctx.telegram.editMessageReplyMarkup(
+            escrow.groupId,
+            escrow.step4CoinMessageId,
+            null,
+            {
+              inline_keyboard: [buttons]
+            }
+          );
+        } catch (err) {
+          console.error('Error updating coin selection:', err);
+        }
+      }
+      
+      // Check if both chain and coin are selected (only show Step 5 once)
+      // Reload escrow to get latest state (in case chain was just selected)
+      const updatedEscrow = await Escrow.findById(escrow._id);
+      if (updatedEscrow.chain && updatedEscrow.token && updatedEscrow.tradeDetailsStep === 'step4_chain_coin') {
+        // Delete Step 4 messages when moving to Step 5
+        try {
+          if (updatedEscrow.step4ChainMessageId) {
+            await ctx.telegram.deleteMessage(updatedEscrow.groupId, updatedEscrow.step4ChainMessageId);
+          }
+          if (updatedEscrow.step4CoinMessageId) {
+            await ctx.telegram.deleteMessage(updatedEscrow.groupId, updatedEscrow.step4CoinMessageId);
+          }
+        } catch (deleteErr) {
+          // Messages might already be deleted
+        }
+        
+        updatedEscrow.tradeDetailsStep = 'step5_buyer_address';
+        updatedEscrow.status = 'draft';
+        await updatedEscrow.save();
+        
+        // Step 5: Ask buyer for their wallet address
+        const buyerUsername = updatedEscrow.buyerUsername ? `@${updatedEscrow.buyerUsername}` : 'Buyer';
+        const chainName = updatedEscrow.chain || 'BSC';
+        const telegram = ctx.telegram;
+        const groupId = updatedEscrow.groupId;
+        
+        const step5Msg = await telegram.sendMessage(
+          groupId,
+          `💰 Step 5 - ${buyerUsername}, enter your ${chainName} wallet address starts with 0x and is 42 chars (0x + 40 hex).`
+        );
+        updatedEscrow.step5BuyerAddressMessageId = step5Msg.message_id;
+        await updatedEscrow.save();
+        
+        // Schedule deletion of Step 5 message after 5 minutes
+        setTimeout(async () => {
+          try {
+            await telegram.deleteMessage(groupId, step5Msg.message_id);
+          } catch (deleteErr) {
+            // Message might already be deleted
+          }
+        }, 5 * 60 * 1000); // 5 minutes
+      }
+      
       return;
     } else if (callbackData.startsWith('close_trade_')) {
       await ctx.answerCbQuery('Closing trade...');
@@ -158,36 +521,112 @@ module.exports = async (ctx) => {
       const escrow = await Escrow.findOne({ escrowId });
       
       if (!escrow) {
-        return ctx.reply('❌ Escrow not found.');
+        return ctx.answerCbQuery('❌ Escrow not found.');
       }
 
       // Check if user is buyer or seller
-      if (escrow.buyerId !== userId && escrow.sellerId !== userId) {
-        return ctx.reply('❌ Only buyer or seller can close this trade.');
+      const isBuyer = escrow.buyerId === userId;
+      const isSeller = escrow.sellerId === userId;
+      
+      if (!isBuyer && !isSeller) {
+        return ctx.answerCbQuery('❌ Only buyer or seller can close this trade.');
       }
 
       // Check if trade is completed or refunded
       if (escrow.status !== 'completed' && escrow.status !== 'refunded') {
-        return ctx.reply('❌ Trade must be completed or refunded before closing.');
+        return ctx.answerCbQuery('❌ Trade must be completed or refunded before closing.');
       }
 
-      try {
-        // Release deposit address back to pool
-        const AddressAssignmentService = require('../services/AddressAssignmentService');
-        await AddressAssignmentService.releaseDepositAddress(escrow.escrowId);
+      // Update close trade confirmation
+      if (isBuyer) {
+        escrow.buyerClosedTrade = true;
+      } else {
+        escrow.sellerClosedTrade = true;
+      }
+      await escrow.save();
 
-        // Recycle group immediately - remove users and return to pool
-        const GroupPoolService = require('../services/GroupPoolService');
-        const GroupPool = require('../models/GroupPool');
+      // Reload to get latest state
+      const updatedEscrow = await Escrow.findById(escrow._id);
+      
+      // Update close trade message
+      const buyerUsername = updatedEscrow.buyerUsername || 'Buyer';
+      const sellerUsername = updatedEscrow.sellerUsername || 'Seller';
+      
+      let closeStatus = '';
+      if (updatedEscrow.buyerClosedTrade && updatedEscrow.sellerClosedTrade) {
+        closeStatus = '✅ Both parties have confirmed closing.';
+      } else {
+        const statuses = [];
+        if (updatedEscrow.buyerClosedTrade) {
+          statuses.push(`✅ @${buyerUsername} has confirmed.`);
+        } else {
+          statuses.push(`⏳ Waiting for @${buyerUsername} to confirm.`);
+        }
+        if (updatedEscrow.sellerClosedTrade) {
+          statuses.push(`✅ @${sellerUsername} has confirmed.`);
+        } else {
+          statuses.push(`⏳ Waiting for @${sellerUsername} to confirm.`);
+        }
+        closeStatus = statuses.join('\n');
+      }
+
+      const closeTradeText = `✅ The trade has been completed successfully!
+
+${closeStatus}`;
+
+      const replyMarkup = (updatedEscrow.buyerClosedTrade && updatedEscrow.sellerClosedTrade) ? undefined : {
+        inline_keyboard: [
+          [
+            {
+              text: '🔒 Close Trade',
+              callback_data: `close_trade_${updatedEscrow.escrowId}`
+            }
+          ]
+        ]
+      };
+
+      // Update or send close trade message
+      if (updatedEscrow.closeTradeMessageId) {
+        try {
+          await ctx.telegram.editMessageText(
+            updatedEscrow.groupId,
+            updatedEscrow.closeTradeMessageId,
+            null,
+            closeTradeText,
+            { reply_markup: replyMarkup }
+          );
+        } catch (e) {
+          console.error('Failed to update close trade message:', e);
+      }
+      } else {
+        // First time - send the message
+        try {
+          const closeMsg = await ctx.telegram.sendMessage(
+            updatedEscrow.groupId,
+            closeTradeText,
+            { reply_markup: replyMarkup }
+          );
+          updatedEscrow.closeTradeMessageId = closeMsg.message_id;
+          await updatedEscrow.save();
+        } catch (e) {
+          console.error('Failed to send close trade message:', e);
+        }
+      }
+
+      // Check if both have confirmed
+      if (updatedEscrow.buyerClosedTrade && updatedEscrow.sellerClosedTrade) {
+        // Both confirmed - remove users and recycle group
+      try {
+        // Recycle group - remove users and return to pool
         
         // Find the group
         const group = await GroupPool.findOne({ 
-          assignedEscrowId: escrow.escrowId 
+            assignedEscrowId: updatedEscrow.escrowId 
         });
 
         if (group) {
           // Remove ALL users from group (buyer, seller, admins, everyone)
-          const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, ctx.telegram);
+            const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(updatedEscrow, group.groupId, ctx.telegram);
 
           if (allUsersRemoved) {
             // Only add back to pool if ALL users were successfully removed
@@ -197,6 +636,11 @@ module.exports = async (ctx) => {
             group.completedAt = null;
             group.inviteLink = null;
             await group.save();
+              
+              await ctx.telegram.sendMessage(
+                updatedEscrow.groupId,
+                '✅ Trade closed successfully! Both parties have confirmed. Group has been recycled and is ready for a new trade.'
+              );
           } else {
             // Mark as completed but don't add back to pool if users couldn't be removed
             group.status = 'completed';
@@ -205,38 +649,126 @@ module.exports = async (ctx) => {
             group.completedAt = new Date();
             group.inviteLink = null;
             await group.save();
+              
+              await ctx.telegram.sendMessage(
+                updatedEscrow.groupId,
+                '✅ Trade closed successfully! Both parties have confirmed. Note: Some users could not be removed from the group.'
+              );
           }
+          } else {
+            await ctx.telegram.sendMessage(
+              updatedEscrow.groupId,
+              '✅ Trade closed successfully! Both parties have confirmed.'
+            );
         }
-
-        await ctx.reply('✅ Trade closed successfully! Group has been recycled and deposit address is now reusable.');
       } catch (error) {
         console.error('Error closing trade:', error);
-        await ctx.reply('❌ Error closing trade. Please try again or contact support.');
+          await ctx.telegram.sendMessage(
+            updatedEscrow.groupId,
+            '❌ Error closing trade. Please contact support.'
+          );
       }
+      }
+      
       return;
-    } else if (callbackData === 'start_escrow') {
-      await ctx.answerCbQuery('Starting a new escrow...');
-      // Trigger escrow creation flow
-      return escrowHandler(ctx);
-    } else if (callbackData === 'show_menu') {
-      await ctx.answerCbQuery('Showing menu...');
-      const menuText = `
-🤖 *MM Escrow Bot Menu*
+    } else if (callbackData === 'confirm_sent_deposit') {
+      await ctx.answerCbQuery('Processing...');
+      
+      const escrow = await Escrow.findOne({
+        groupId: chatId.toString(),
+        status: { $in: ['awaiting_deposit', 'deposited'] }
+      });
+      
+      if (!escrow || !escrow.depositAddress) {
+        return ctx.answerCbQuery('❌ No active deposit address found.');
+      }
+      
+      // Check if seller clicked the button
+      const userId = ctx.from.id;
+      if (escrow.sellerId !== userId) {
+        return ctx.answerCbQuery('❌ Only the seller can click SENT button.');
+      }
+      
+      // Ask seller to paste transaction hash or explorer link
+      const sellerUsername = escrow.sellerUsername ? `@${escrow.sellerUsername}` : 'Seller';
+      const askTxMsg = await ctx.telegram.sendMessage(
+        escrow.groupId,
+        `✉️ ${sellerUsername} kindly paste the transaction hash or explorer link.`
+      );
+      escrow.transactionHashMessageId = askTxMsg.message_id;
+      await escrow.save();
+      
+      return;
+    } else if (callbackData.startsWith('confirm_transaction_')) {
+      await ctx.answerCbQuery('Confirming transaction...');
+      
+      const escrowId = callbackData.replace('confirm_transaction_', '');
+      const escrow = await Escrow.findOne({
+        escrowId: escrowId,
+        status: { $in: ['awaiting_deposit', 'deposited'] }
+      });
+      
+      if (!escrow) {
+        return ctx.answerCbQuery('❌ No active escrow found.');
+      }
+      
+      const userId = ctx.from.id;
+      // Only buyer can confirm
+      if (escrow.buyerId !== userId) {
+        return ctx.answerCbQuery('❌ Only the buyer can confirm this transaction.');
+      }
+      
+      if (!escrow.transactionHash) {
+        return ctx.answerCbQuery('❌ No transaction found. Please ask seller to submit transaction hash first.');
+      }
+      
+      // Update escrow status - transaction hash is already saved
+      escrow.confirmedAmount = escrow.depositAmount;
+      escrow.status = 'deposited';
+      await escrow.save();
+      
+      // Update transaction details message
+      const buyerUsername = escrow.buyerUsername || 'Buyer';
+      const txHashShort = escrow.transactionHash.substring(0, 10) + '...';
+      
+      // Use the actual transaction from address (not seller's refund address)
+      const fromAddress = escrow.depositTransactionFromAddress || escrow.sellerAddress || 'N/A';
+      
+      const confirmedTxText = `<b>OG OTC Bot 🤖</b>
 
-📋 *Available Commands:*
-/start - Start the bot
-/escrow - Create new escrow
-/dd - Set deal details
-/buyer [address] - Set buyer address
-/token - Select token and network
-/deposit - Get deposit address
+🟢 Exact ${escrow.token} found
 
-💡 *Tips:*
-- Use /dd to set deal details first
-- Make sure both parties confirm their roles
-- Always verify addresses before depositing
-      `;
-      return ctx.reply(menuText);
+<b>Amount:</b> ${escrow.depositAmount.toFixed(1)}
+<b>From:</b> <code>${fromAddress}</code>
+<b>To:</b> <code>${escrow.depositAddress}</code>
+<b>Tx:</b> <code>${txHashShort}</code>
+
+✅ Confirmed by @${buyerUsername}`;
+      
+      try {
+        await ctx.telegram.editMessageText(
+          escrow.groupId,
+          escrow.transactionHashMessageId,
+          null,
+          confirmedTxText,
+          { parse_mode: 'HTML' }
+        );
+      } catch (e) {
+        console.error('Failed to update transaction message:', e);
+      }
+      
+      // Ask buyer to confirm they've sent the fiat payment
+      await ctx.telegram.sendMessage(
+        escrow.groupId,
+        `💸 Buyer ${escrow.buyerUsername ? '@' + escrow.buyerUsername : '[' + escrow.buyerId + ']'}: Please send the agreed fiat amount to the seller via your agreed method and confirm below.`,
+        {
+          reply_markup: Markup.inlineKeyboard([
+            [Markup.button.callback('✅ I sent the fiat payment', `buyer_sent_fiat_${escrow.escrowId}`)]
+          ]).reply_markup
+        }
+      );
+      
+      return;
     } else if (callbackData === 'check_deposit') {
       await ctx.answerCbQuery('Checking for your deposit...');
       const chatId = ctx.chat.id;
@@ -248,17 +780,8 @@ module.exports = async (ctx) => {
         return ctx.reply('❌ No active deposit address found.');
       }
       
-      // Check AddressPool to verify address is still assigned (new system uses AddressPool)
-      const AddressPool = require('../models/AddressPool');
-      const activeAddr = await AddressPool.findOne({ 
-        address: escrow.depositAddress,
-        assignedEscrowId: escrow.escrowId,
-        status: { $in: ['assigned', 'busy'] }
-      });
-      
-      // Allow check if address exists in escrow (fallback for older escrows)
-      if (!activeAddr && !escrow.depositAddress) {
-        return ctx.reply('❌ Deposit address expired or missing.');
+        if (!escrow.depositAddress) {
+        return ctx.reply('❌ Deposit address missing.');
       }
       
       const checkAddress = escrow.depositAddress;
@@ -288,12 +811,6 @@ module.exports = async (ctx) => {
       const totalAmount = previousAmount + newAmount;
 
       if (newAmount > 0) {
-        // Update AddressPool status to busy
-        if (activeAddr) {
-          activeAddr.status = 'busy';
-          await activeAddr.save();
-        }
-        
         // Track last checked block from RPC
         try {
           const latest = await BlockchainService.getLatestBlockNumber(escrow.chain);
@@ -305,7 +822,6 @@ module.exports = async (ctx) => {
         escrow.status = 'deposited';
         await escrow.save();
         
-        // Activity tracking removed
         
         await ctx.reply(`✅ Deposit confirmed: ${newAmount.toFixed(2)} ${escrow.token}`);
 
@@ -338,11 +854,10 @@ module.exports = async (ctx) => {
       escrow.status = 'in_fiat_transfer';
       await escrow.save();
       
-      // Activity tracking removed
 
       await ctx.answerCbQuery('✅ Noted.');
       // Ask seller to confirm receipt
-      await ctx.reply(
+      const sellerPrompt = await ctx.reply(
         `🏦 Seller ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}: Did you receive the fiat payment?`,
         {
           reply_markup: Markup.inlineKeyboard([
@@ -356,62 +871,20 @@ module.exports = async (ctx) => {
           ]).reply_markup
         }
       );
+      // Auto-delete seller prompt after 5 minutes
+      setTimeout(async () => {
+        try { await ctx.telegram.deleteMessage(escrow.groupId, sellerPrompt.message_id); } catch (_) {}
+      }, 5 * 60 * 1000);
 
     } else if (callbackData.startsWith('fiat_received_seller_partial_')) {
       const escrowId = callbackData.split('_')[4];
-      // Only seller can click
-      const escrow = await Escrow.findOne({
-        escrowId: escrowId,
-        status: { $in: ['in_fiat_transfer', 'deposited'] }
-      });
-      if (!escrow) return ctx.answerCbQuery('❌ No active escrow found.');
-      if (escrow.sellerId !== userId) return ctx.answerCbQuery('❌ Only the seller can confirm this.');
-
-      // Mark as partial payment dispute
-      escrow.sellerReceivedFiat = false;
-      escrow.isDisputed = true;
-      escrow.status = 'disputed';
-      escrow.disputeReason = 'Seller reported receiving less money than expected';
-      escrow.disputeRaisedAt = new Date();
-      escrow.disputeRaisedBy = userId;
-      escrow.disputeResolution = 'pending';
-      await escrow.save();
-
-      await ctx.answerCbQuery('⚠️ Marked as partial payment dispute');
-
-      // Transfer all funds to admin wallet
+      await ctx.answerCbQuery('⚠️ Partial payment noted');
       try {
-        const BlockchainService = require('../services/BlockchainService');
-        const config = require('../../config');
-        
-        // Get the contract address for this escrow
-        const contractAddress = await BlockchainService.getEscrowContractAddress(escrow.token, escrow.chain);
-        if (!contractAddress) {
-          throw new Error('Contract not found for this token/network');
-        }
-
-        // Transfer all funds to admin wallet
-        const adminAddress = config.ADMIN_DEPOSIT_ADDRESS;
-        if (!adminAddress) {
-          throw new Error('Admin deposit address not configured');
-        }
-
-        // Get the current balance in the contract
-        const balance = await BlockchainService.getTokenBalance(escrow.token, escrow.chain, contractAddress);
-        
-        if (balance > 0) {
-          // Transfer all funds to admin
-          const txHash = await BlockchainService.withdrawToAdmin(contractAddress, adminAddress, escrow.token, escrow.chain, balance);
-          
-        }
-
-        // Send admin notification for partial payment dispute
-        await sendAdminPartialPaymentNotification(ctx, escrow, balance);
-
-      } catch (error) {
-        console.error('Error transferring funds to admin:', error);
-        await ctx.reply('❌ Error transferring funds to admin. Please contact support.');
-      }
+        const admins = (config.getAllAdminUsernames?.() || []).filter(Boolean);
+        const adminMentions = admins.length ? admins.map(u => `@${u}`).join(' ') : 'Admin';
+        await ctx.reply(`⚠️ Seller reported partial fiat payment for escrow ${escrowId}. ${adminMentions} please review and resolve.`);
+      } catch (e) {}
+      return;
 
     } else if (callbackData.startsWith('fiat_received_seller_yes_') || callbackData.startsWith('fiat_received_seller_no_')) {
       const escrowId = callbackData.split('_')[4];
@@ -426,74 +899,99 @@ module.exports = async (ctx) => {
       const isYes = callbackData.includes('_yes_');
       if (!isYes) {
         escrow.sellerReceivedFiat = false;
-        escrow.isDisputed = true;
-        escrow.status = 'disputed';
-        escrow.disputeReason = 'Seller reported fiat not received';
-        escrow.disputeRaisedAt = new Date();
-        escrow.disputeRaisedBy = userId;
-        escrow.disputeResolution = 'pending';
         await escrow.save();
-        
-        // Activity tracking removed
         
         await ctx.answerCbQuery('❌ Marked as not received');
         
-        // Send admin notification
-        const disputeHandler = require('./disputeHandler');
-        await disputeHandler.sendAdminDisputeNotification(ctx, escrow);
-        
-        return ctx.reply('❗ Seller reported fiat not received. Dispute raised. Admin will join within 24 hours.');
+        // Notify admins
+        try {
+          const admins = (config.getAllAdminUsernames?.() || []).filter(Boolean);
+          const adminMentions = admins.length ? admins.map(u => `@${u}`).join(' ') : 'Admin';
+          await ctx.reply(`🚨 Seller reported no fiat received for escrow ${escrowId}. ${adminMentions} please review and resolve.`);
+        } catch (e) {}
+        return;
       }
 
+      // Step 1: seller selected full amount; ask for final confirmation in the same message
       escrow.sellerReceivedFiat = true;
       await escrow.save();
-      await ctx.answerCbQuery('✅ Confirmed received');
-
-      // Auto-initiate release to buyer for full confirmed amount
-      const amount = Number(escrow.confirmedAmount || 0);
-      if (!escrow.buyerAddress || amount <= 0) {
-        return ctx.reply('⚠️ Cannot proceed with release: missing buyer address or zero amount.');
-      }
+      await ctx.answerCbQuery('✅ Full amount selected');
       try {
-        await ctx.reply('🚀 Release of payment is in progress...');
-        await BlockchainService.releaseFunds(escrow.token, escrow.chain, escrow.buyerAddress, amount);
-        escrow.status = 'completed';
-        await escrow.save();
-
-      // Activity tracking removed
-
-        await ctx.reply(
-          `${(amount - 0).toFixed(5)} ${escrow.token} has been released to the Buyer's address! 🚀\nApproved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}`
-        );
-
-        // Send trade completion message with close trade button
-        await ctx.reply(
-          `✅ The trade has been completed successfully!\n\nTo close this trade, click on the button below.`,
+        await ctx.editMessageText(
+          '✅ Seller reported full amount received. Confirm to complete the trade and release funds to the seller.',
           {
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  {
-                    text: '🔒 Close Trade',
-                    callback_data: `close_trade_${escrow.escrowId}`
-                  }
-                ]
+            reply_markup: Markup.inlineKeyboard([
+              [
+                Markup.button.callback('✅ Confirm release', `fiat_release_confirm_${escrow.escrowId}`),
+                Markup.button.callback('❌ Cancel', `fiat_release_cancel_${escrow.escrowId}`)
               ]
-            }
+            ]).reply_markup
           }
         );
-      } catch (error) {
-        console.error('Auto-release error:', error);
-        await ctx.reply('❌ Error releasing funds. Please try /release or contact support.');
+      } catch (e) {
+        const confirmMsg = await ctx.reply(
+          '✅ Seller reported full amount received. Confirm to complete the trade and release funds to the seller.',
+          {
+            reply_markup: Markup.inlineKeyboard([
+              [
+                Markup.button.callback('✅ Confirm release', `fiat_release_confirm_${escrow.escrowId}`),
+                Markup.button.callback('❌ Cancel', `fiat_release_cancel_${escrow.escrowId}`)
+              ]
+            ]).reply_markup
+          }
+        );
+        // Auto-delete confirmation prompt after 5 minutes
+        setTimeout(async () => {
+          try { await ctx.telegram.deleteMessage(escrow.groupId, confirmMsg.message_id); } catch (_) {}
+        }, 5 * 60 * 1000);
       }
 
+    } else if (callbackData.startsWith('fiat_release_cancel_')) {
+      await ctx.answerCbQuery('❎ Cancelled');
+      try { await ctx.editMessageText('❎ Release cancelled. No action taken.'); } catch (e) {}
+      return;
+    } else if (callbackData.startsWith('fiat_release_confirm_')) {
+      const escrowId = callbackData.replace('fiat_release_confirm_', '');
+      const escrow = await Escrow.findOne({
+        escrowId,
+        status: { $in: ['in_fiat_transfer', 'deposited', 'ready_to_release'] }
+      });
+      if (!escrow) return ctx.answerCbQuery('❌ No active escrow found.');
+      if (escrow.sellerId !== userId) return ctx.answerCbQuery('❌ Only the seller can confirm release.');
+      const amount = Number(escrow.confirmedAmount || escrow.depositAmount || 0);
+      if (!escrow.sellerAddress || amount <= 0) {
+        return ctx.reply('⚠️ Cannot proceed: missing seller address or zero amount.');
+      }
+      await ctx.answerCbQuery('🚀 Releasing...');
+      try { await ctx.editMessageText('🚀 Releasing funds to the seller...'); } catch (e) {}
+      try {
+        const releaseResult = await BlockchainService.releaseFunds(
+          escrow.token,
+          escrow.chain,
+          escrow.sellerAddress,
+          amount
+        );
+        escrow.status = 'completed';
+        if (releaseResult && releaseResult.transactionHash) {
+          escrow.releaseTransactionHash = releaseResult.transactionHash;
+        }
+        await escrow.save();
+        await ctx.reply(`✅ ${(amount - 0).toFixed(5)} ${escrow.token} released to seller's address. Trade completed.`);
+        escrow.buyerClosedTrade = false;
+        escrow.sellerClosedTrade = false;
+        await escrow.save();
+      } catch (error) {
+        console.error('Auto-release error:', error);
+        await ctx.reply('❌ Error releasing funds. Please contact admin.');
+      }
+      return;
     } else if (callbackData.startsWith('confirm_')) {
       const [, action, role, amount] = callbackData.split('_');
       
       // Find active escrow
       const escrow = await Escrow.findOne({
         groupId: chatId.toString(),
-        status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
+        status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release'] }
       });
 
       if (!escrow) {
@@ -541,13 +1039,16 @@ module.exports = async (ctx) => {
         }
 
         try {
-          await BlockchainService.releaseFunds(escrow.token, escrow.chain, targetAddress, amount);
+          const releaseResult = await BlockchainService.releaseFunds(escrow.token, escrow.chain, targetAddress, amount);
           
-          // Update escrow status to completed
+          // Update escrow status to completed and save transaction hash
           escrow.status = 'completed';
+          // Save the release transaction hash (if returned)
+          if (releaseResult && releaseResult.transactionHash) {
+            escrow.releaseTransactionHash = releaseResult.transactionHash;
+          }
           await escrow.save();
 
-          // Activity tracking removed
 
           const successText = `
 ${netAmount.toFixed(5)} ${escrow.token} [$${netAmount.toFixed(2)}] 💸 + NETWORK FEE has been released to the Buyer's address! 🚀
@@ -558,9 +1059,20 @@ Approved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escro
           await ctx.reply(successText);
 
           // Send trade completion message with close trade button
-          await ctx.reply(
-            `✅ The trade has been completed successfully!\n\nTo close this trade, click on the button below.`,
-            {
+          // Initialize close trade tracking
+          escrow.buyerClosedTrade = false;
+          escrow.sellerClosedTrade = false;
+          await escrow.save();
+          
+          const buyerUsername = escrow.buyerUsername || 'Buyer';
+          const sellerUsername = escrow.sellerUsername || 'Seller';
+          
+          const closeTradeText = `✅ The trade has been completed successfully!
+
+⏳ Waiting for @${buyerUsername} to confirm.
+⏳ Waiting for @${sellerUsername} to confirm.`;
+          
+          const closeMsg = await ctx.reply(closeTradeText, {
               reply_markup: {
                 inline_keyboard: [
                   [
@@ -571,8 +1083,10 @@ Approved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escro
                   ]
                 ]
               }
-            }
-          );
+          });
+          
+          escrow.closeTradeMessageId = closeMsg.message_id;
+          await escrow.save();
         } catch (error) {
           console.error('Error executing transaction:', error);
           await ctx.reply('❌ Error executing transaction. Please try again or contact support.');
@@ -594,7 +1108,7 @@ Approved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escro
       // Find active escrow and reset confirmations
       const escrow = await Escrow.findOne({
         groupId: chatId.toString(),
-        status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
+        status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release'] }
       });
       
       if (escrow) {
@@ -607,328 +1121,8 @@ Approved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escro
       
       await ctx.answerCbQuery('❌ Transaction rejected');
       await ctx.reply('❌ Transaction has been rejected by one of the parties. Please restart the process if needed.');
-    } else if (callbackData.startsWith('confirm_refund_address_')) {
-      await ctx.answerCbQuery('Processing address confirmation...');
-      const escrowId = callbackData.split('_')[3];
-      const escrow = await Escrow.findOne({ escrowId });
       
-      if (!escrow) {
-        return ctx.reply('❌ Escrow not found.');
-      }
-
-      // Verify seller exists and user is the seller
-      if (!escrow.sellerId) {
-        return ctx.reply('❌ Seller ID is not set for this escrow.');
-      }
-
-      if (escrow.sellerId !== userId) {
-        return ctx.reply('❌ Only the seller can confirm the refund address.');
-      }
-
-      // Verify escrow is in refund pending state
-      if (escrow.disputeResolution !== 'refund_pending_address') {
-        return ctx.reply('❌ This escrow is not waiting for a refund address.');
-      }
-
-      if (!escrow.pendingSellerAddress) {
-        return ctx.reply('❌ No pending address found. Please provide your address again.');
-      }
-
-      // Address confirmed - proceed with refund
-      try {
-        const sellerAddress = escrow.pendingSellerAddress;
-        const amount = escrow.confirmedAmount || escrow.depositAmount || 0;
-        
-        if (!amount || amount <= 0) {
-          return ctx.reply('❌ Invalid amount. Cannot proceed with refund.');
-        }
-
-        if (!escrow.token || !escrow.chain) {
-          return ctx.reply('❌ Token or network not set. Cannot proceed with refund.');
-        }
-        
-        // Execute refund
-        await BlockchainService.refundFunds(
-          escrow.token,
-          escrow.chain,
-          sellerAddress,
-          amount
-        );
-
-        // Update escrow status
-        escrow.sellerAddress = sellerAddress;
-        escrow.pendingSellerAddress = null;
-        escrow.disputeResolution = 'refund';
-        escrow.disputeResolvedAt = new Date();
-        escrow.status = 'refunded';
-        await escrow.save();
-
-        // Notify group of successful refund
-        const successMessage = `✅ *REFUND COMPLETED*
-
-📋 Escrow ID: \`${escrow.escrowId}\`
-💰 Amount: ${amount} ${escrow.token}
-📍 Address: \`${sellerAddress}\`
-🪙 Token: ${escrow.token}
-🌐 Network: ${escrow.chain}
-
-✅ Funds have been successfully refunded to the seller's address.
-
-Resolved by: Admin`;
-
-        await ctx.telegram.sendMessage(
-          escrow.groupId,
-          successMessage,
-          { parse_mode: 'Markdown' }
-        );
-
-        // Send trade completion message with close trade button (same as release flow)
-        await ctx.telegram.sendMessage(
-          escrow.groupId,
-          `✅ The trade has been completed successfully!\n\nTo close this trade, click on the button below.`,
-          {
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  {
-                    text: '🔒 Close Trade',
-                    callback_data: `close_trade_${escrow.escrowId}`
-                  }
-                ]
-              ]
-            }
-          }
-        );
-
-        await ctx.reply(`✅ Refund completed successfully! ${amount} ${escrow.token} has been sent to ${sellerAddress}`);
-
-      } catch (error) {
-        console.error('Error processing refund:', error);
-        await ctx.reply('❌ Error processing refund. Please contact admin.');
-      }
-
-    } else if (callbackData.startsWith('cancel_refund_address_')) {
-      await ctx.answerCbQuery('Address confirmation cancelled');
-      const escrowId = callbackData.split('_')[3];
-      const escrow = await Escrow.findOne({ escrowId });
-      
-      if (!escrow) {
-        return ctx.reply('❌ Escrow not found.');
-      }
-
-      // Verify user is the seller
-      if (!escrow.sellerId) {
-        return ctx.reply('❌ Seller ID is not set for this escrow.');
-      }
-
-      if (escrow.sellerId !== userId) {
-        return ctx.reply('❌ Only the seller can cancel the refund address confirmation.');
-      }
-
-      if (escrow.disputeResolution !== 'refund_pending_address') {
-        return ctx.reply('❌ This escrow is not waiting for a refund address.');
-      }
-
-      escrow.pendingSellerAddress = null;
-      await escrow.save();
-      await ctx.reply('❌ Address confirmation cancelled. Please provide your address again in the group.');
-    } else if (callbackData === 'my_escrows') {
-      await ctx.answerCbQuery('Loading your escrows...');
-      await handleMyEscrows(ctx);
-    } else if (callbackData === 'help') {
-      await ctx.answerCbQuery('Showing help...');
-      await handleHelp(ctx);
-    } else if (callbackData === 'terms') {
-      await ctx.answerCbQuery('Showing terms...');
-      await handleTerms(ctx);
-    } else if (callbackData === 'how_escrow_works') {
-      await ctx.answerCbQuery('Showing guide...');
-      await handleHowEscrowWorks(ctx);
-    } else if (callbackData.startsWith('filter_')) {
-      await ctx.answerCbQuery('Filtering escrows...');
-      const filter = callbackData.split('_')[1];
-      await handleMyEscrows(ctx, filter);
-    } else if (callbackData === 'back_to_start') {
-      await ctx.answerCbQuery('Returning to main menu...');
-      // Send the start message directly to avoid circular require
-      const welcomeText = `
-💫 *@mm_escrow_bot* 💫
-
-Experience the next level of secure trusted Escrow services Our system is built to protect both parties in every deal,ensuring each transaction is verified, smooth, and fully safeguarded
-
-🔐 Proceed with confidence — your trust, security, and satisfaction are our top priorities.  
-
-🌐 Please choose how you'd like to proceed below: 👇
-      `;
-
-      const keyboard = Markup.inlineKeyboard([
-        [
-          Markup.button.callback('✅ Start Escrow', 'start_escrow'),
-          Markup.button.callback('👤 My Escrows', 'my_escrows')
-        ],
-        [
-          Markup.button.callback('🤖 Help', 'help'),
-          Markup.button.callback('📜 Terms', 'terms')
-        ],
-        [
-          Markup.button.callback('❓ How Escrow Works', 'how_escrow_works')
-        ],
-        [
-          Markup.button.url('📢 Updates & Vouches ↗️', 'https://t.me/oftenly')
-        ]
-      ]).reply_markup;
-
-      await ctx.replyWithPhoto(
-        { source: 'public/images/logo.jpg' },
-        {
-          caption: welcomeText,
-          reply_markup: keyboard
-        }
-      );
-    } else if (callbackData.startsWith('select_token_')) {
-      const token = callbackData.split('_')[2];
-      await ctx.answerCbQuery(`Selected ${token}`);
-      
-      // Get available networks for this token from database
-      const Contract = require('../models/Contract');
-      const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
-      
-      const availableContracts = await Contract.find({
-        name: 'EscrowVault',
-        token: token,
-        feePercent: desiredFeePercent
-      });
-      
-      if (availableContracts.length === 0) {
-        return ctx.reply(`❌ No escrow contracts available for ${token} with ${desiredFeePercent}% fee. Please contact admin to deploy the contract.`);
-      }
-      
-      // Get unique networks from available contracts
-      const networks = [...new Set(availableContracts.map(contract => contract.network))];
-      
-      if (networks.length === 0) {
-        return ctx.reply(`❌ No networks available for ${token}. Please contact admin to deploy contracts.`);
-      }
-      
-      const networkButtons = [];
-      for (let i = 0; i < networks.length; i += 2) {
-        const row = networks.slice(i, i + 2);
-        networkButtons.push(row.map(network => Markup.button.callback(network, `select_network_${token}_${network.replace(/[\[\]]/g, '').replace('BEP20', '').replace('TRC20', 'TRON')}`)));
-      }
-      
-      // Add back button
-      networkButtons.push([Markup.button.callback('Back ⬅️', 'back_to_tokens')]);
-      
-      const networkSelectionText = `
-📌 *ESCROW-CRYPTO DECLARATION*
-
-✅ *CRYPTO*
-${token}
-
-choose network from the list below for ${token} 
-      `;
-      
-      await ctx.reply(networkSelectionText, {
-        parse_mode: 'Markdown',
-        reply_markup: Markup.inlineKeyboard(networkButtons).reply_markup
-      });
-      
-    } else if (callbackData.startsWith('select_network_')) {
-      const parts = callbackData.split('_');
-      const token = parts[2];
-      const network = parts.slice(3).join('_'); // Handle networks with underscores
-      
-      await ctx.answerCbQuery(`Selected ${token} on ${network}`);
-      
-      // Find escrow and update with selected token/network
-      const escrow = await Escrow.findOne({
-        groupId: ctx.chat.id.toString(),
-        status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit'] }
-      });
-      
-      if (!escrow) {
-        return ctx.reply('❌ No active escrow found.');
-      }
-      
-      // Check if escrow contract exists for this token-network pair with correct fee percentage
-      const Contract = require('../models/Contract');
-      const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
-      const contract = await Contract.findOne({
-        name: 'EscrowVault',
-        token: token,
-        network: network.toUpperCase(),
-        feePercent: desiredFeePercent
-      });
-      
-      if (!contract) {
-        return ctx.reply(`❌ Escrow contract not deployed for ${token} on ${network} with ${desiredFeePercent}% fee. Please contact admin to deploy the contract first.`);
-      }
-      
-      // Update escrow with selected token and network
-      escrow.token = token;
-      escrow.chain = network;
-      escrow.status = 'awaiting_deposit';
-      await escrow.save();
-      
-      const buyerTag = escrow.buyerUsername ? `@${escrow.buyerUsername}` : `[${escrow.buyerId}]`;
-      const sellerTag = escrow.sellerUsername ? `@${escrow.sellerUsername}` : `[${escrow.sellerId}]`;
-      
-      const declarationText = `
-📍 *ESCROW DECLARATION*
-
-⚡️ Buyer ${buyerTag}
-⚡️ Seller ${sellerTag}
-
-✅ ${token} CRYPTO
-✅ ${network} NETWORK
-      `;
-      
-      await ctx.reply(declarationText);
-      
-      // Calculate trade start time from escrow creation (IST timezone)
-      const tradeStartTime = escrow.tradeStartTime || escrow.createdAt;
-      const istTime = new Date(tradeStartTime).toLocaleString('en-IN', {
-        timeZone: 'Asia/Kolkata',
-        day: '2-digit',
-        month: '2-digit',
-        year: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit'
-      });
-      
-      // Store trade start time if not already stored
-      if (!escrow.tradeStartTime) {
-        escrow.tradeStartTime = escrow.createdAt;
-        await escrow.save();
-      }
-      
-      // Get transaction information
-      const transactionText = `
-📍 *TRANSACTION INFORMATION*
-
-⚡️ *SELLER*
-${sellerTag}
-
-⚡️ *BUYER*
-${buyerTag}
-${escrow.buyerAddress}
-
-⏰ Trade Start Time: ${istTime}
-
-⚠️ *IMPORTANT:* Make sure to finalise and agree each-others terms before depositing.
-
-🗒 Please use /deposit command to generate a deposit address for your trade.
-      `;
-      
-      await ctx.reply(transactionText);
-      
-      
-    } else if (callbackData === 'back_to_tokens') {
-      await ctx.answerCbQuery('Back to tokens');
-      // Re-trigger token selection
-      const tokenHandler = require('./tokenHandler');
-      return tokenHandler(ctx);
+      return;
     }
 
   } catch (error) {
@@ -946,341 +1140,4 @@ ${escrow.buyerAddress}
   }
 };
 
-// Helper function to handle My Escrows
-async function handleMyEscrows(ctx, filter = 'all') {
-  try {
-    const userId = ctx.from.id;
-    
-    // Get all escrows where user is involved (as buyer or seller)
-    const userEscrows = await Escrow.find({
-      $or: [
-        { buyerId: userId },
-        { sellerId: userId },
-        { creatorId: userId }
-      ]
-    }).sort({ createdAt: -1 });
 
-    // Apply filter
-    let filteredEscrows = userEscrows;
-    let filterTitle = 'All Escrows';
-
-    if (filter === 'active') {
-      filteredEscrows = userEscrows.filter(e => ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'].includes(e.status));
-      filterTitle = 'Active Escrows';
-    } else if (filter === 'completed') {
-      filteredEscrows = userEscrows.filter(e => e.status === 'completed');
-      filterTitle = 'Completed Escrows';
-    } else if (filter === 'pending') {
-      filteredEscrows = userEscrows.filter(e => ['draft', 'awaiting_details'].includes(e.status));
-      filterTitle = 'Pending Escrows';
-    } else if (filter === 'disputed') {
-      filteredEscrows = userEscrows.filter(e => e.status === 'disputed');
-      filterTitle = 'Disputed Escrows';
-    }
-
-    // Calculate statistics
-    const totalEscrows = userEscrows.length;
-    const totalWorth = userEscrows.reduce((sum, escrow) => {
-      // Use confirmedAmount if available, otherwise depositAmount, otherwise 0
-      const amount = escrow.confirmedAmount || escrow.depositAmount || 0;
-      return sum + (parseFloat(amount) || 0);
-    }, 0);
-
-    // Count by status
-    const activeCount = userEscrows.filter(e => ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'].includes(e.status)).length;
-    const completedCount = userEscrows.filter(e => e.status === 'completed').length;
-    const pendingCount = userEscrows.filter(e => e.status === 'draft' || e.status === 'awaiting_details').length;
-    const disputedCount = userEscrows.filter(e => e.status === 'disputed').length;
-
-    let myEscrowsText = `${filterTitle}\n\n`;
-    myEscrowsText += `Statistics:\n`;
-    myEscrowsText += `- Total Escrows: ${totalEscrows}\n`;
-    myEscrowsText += `- Total Worth: ${totalWorth.toFixed(2)} USDT\n`;
-    myEscrowsText += `- Active: ${activeCount}\n`;
-    myEscrowsText += `- Completed: ${completedCount}\n`;
-    myEscrowsText += `- Pending: ${pendingCount}\n`;
-    myEscrowsText += `- Disputed: ${disputedCount}\n\n`;
-
-    if (filteredEscrows.length > 0) {
-      myEscrowsText += `Your Escrows (${filteredEscrows.length}):\n`;
-      filteredEscrows.slice(0, 5).forEach((escrow, index) => {
-        const role = escrow.buyerId === userId ? 'Buyer' : (escrow.sellerId === userId ? 'Seller' : 'Creator');
-        myEscrowsText += `\n${index + 1}. ID: ${escrow._id.toString().substring(0, 8)}\n`;
-        myEscrowsText += `   Status: ${escrow.status.replace(/_/g, ' ').toUpperCase()}\n`;
-        myEscrowsText += `   Role: ${role}\n`;
-        myEscrowsText += `   Token: ${escrow.token} on ${escrow.chain}\n`;
-        myEscrowsText += `   Amount: ${escrow.confirmedAmount || escrow.depositAmount || 'N/A'} ${escrow.token}\n`;
-      });
-      if (filteredEscrows.length > 5) {
-        myEscrowsText += `\n...and ${filteredEscrows.length - 5} more.`;
-      }
-    } else {
-      if (filter === 'all') {
-        myEscrowsText += `No escrows found.`;
-      } else {
-        myEscrowsText += `No ${filterTitle.toLowerCase()} found.`;
-      }
-    }
-
-    const keyboard = Markup.inlineKeyboard([
-      [
-        Markup.button.callback(`🟢 Active (${activeCount})`, 'filter_active'),
-        Markup.button.callback(`✅ Completed (${completedCount})`, 'filter_completed')
-      ],
-      [
-        Markup.button.callback(`⏳ Pending (${pendingCount})`, 'filter_pending'),
-        Markup.button.callback(`⚖️ Disputed (${disputedCount})`, 'filter_disputed')
-      ],
-      [
-        Markup.button.callback('⬅️ Back', 'back_to_start')
-      ]
-    ]).reply_markup;
-
-    const fs = require('fs');
-    const path = require('path');
-    let imagePath;
-    if (filter === 'all') {
-      imagePath = path.join(process.cwd(), 'public', 'images', 'My Escrows.png');
-    } else if (filter === 'active') {
-      imagePath = path.join(process.cwd(), 'public', 'images', 'aactive escrow.png');
-    } else if (filter === 'completed') {
-      imagePath = path.join(process.cwd(), 'public', 'images', 'completed escrows.png');
-    } else if (filter === 'pending') {
-      imagePath = path.join(process.cwd(), 'public', 'images', 'pending escrows.png');
-    } else if (filter === 'disputed') {
-      imagePath = path.join(process.cwd(), 'public', 'images', 'disputed escrows.png');
-    } else {
-      imagePath = path.join(process.cwd(), 'public', 'images', 'My Escrows.png');
-    }
-
-    try {
-      if (fs.existsSync(imagePath)) {
-        await ctx.replyWithPhoto(
-          { source: fs.createReadStream(imagePath) },
-          {
-            caption: myEscrowsText,
-            reply_markup: keyboard
-          }
-        );
-      } else {
-        await ctx.reply(myEscrowsText, { reply_markup: keyboard });
-      }
-    } catch (err) {
-      await ctx.reply(myEscrowsText, { reply_markup: keyboard });
-    }
-  } catch (error) {
-    console.error('Error in handleMyEscrows:', error);
-    await ctx.reply('❌ Error loading your escrows. Please try again.');
-  }
-}
-
-// Helper function to handle Help
-async function handleHelp(ctx) {
-  const helpText = `BOT COMMANDS HELP
-
-Available Commands:
-
-In Private Chat:
-- /start - Show main menu and options
-- /escrow - Create new escrow (assigns managed group)
-- /my_escrows - View your escrow history
-
-In Group Chat:
-- /dd - Set deal details (Quantity - Rate)
-- /buyer address - Set buyer wallet address
-- /token - Select token and network
-- /deposit - Generate deposit address
-
-Tips:
-- Always verify addresses before depositing
-- Make sure both parties confirm their roles
-- Use /dd to set deal details first
-- Contact admin if you need help`;
-
-  const keyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('⬅️ Back to Menu', 'back_to_start')]
-  ]).reply_markup;
-
-    const fs = require('fs');
-    const path = require('path');
-    const helpImage = path.join(process.cwd(), 'public', 'images', 'help and terms.png');
-    try {
-      if (fs.existsSync(helpImage)) {
-        await ctx.replyWithPhoto({ source: fs.createReadStream(helpImage) }, {
-          caption: helpText,
-          reply_markup: keyboard
-        });
-      } else {
-        await ctx.reply(helpText, { reply_markup: keyboard });
-      }
-    } catch (err) {
-      await ctx.reply(helpText, { reply_markup: keyboard });
-    }
-}
-
-// Helper function to handle Terms
-async function handleTerms(ctx) {
-  const termsText = `TERMS OF USAGE
-
-Fees: ${config.ESCROW_FEE_PERCENT}% for P2P / OTC
-Transactions fee applies. Consider this when depositing.
-
-1. Record/screenshot testing of logins, data, or opening items. Delete if satisfied.
-Failure to provide evidence = loss of funds.
-
-2. Learn what you are buying. Sellers not required to explain, but guidance helps.
-
-3. Buyer releases funds ONLY after receiving what was paid.
-No responsibility for early release.
-
-4. Use trusted wallets (Electrum, Exodus).
-Online wallets may block accounts.
-
-5. Fees are deducted from wallet balance (${config.ESCROW_FEE_PERCENT}%). Keep this in mind.
-
-6. Ensure coin & network match for Buyer & Seller to avoid losses.
-
-Important: Always verify addresses and terms before proceeding with any transaction.`;
-
-  const keyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('⬅️ Back to Menu', 'back_to_start')]
-  ]).reply_markup;
-
-    const fs = require('fs');
-    const path = require('path');
-    const termsImage = path.join(process.cwd(), 'public', 'images', 'help and terms.png');
-    try {
-      if (fs.existsSync(termsImage)) {
-        await ctx.replyWithPhoto({ source: fs.createReadStream(termsImage) }, {
-          caption: termsText,
-          reply_markup: keyboard
-        });
-      } else {
-        await ctx.reply(termsText, { reply_markup: keyboard });
-      }
-    } catch (err) {
-      await ctx.reply(termsText, { reply_markup: keyboard });
-    }
-}
-
-// Helper function to handle How Escrow Works
-async function handleHowEscrowWorks(ctx) {
-  const guideText = `HOW ESCROW WORKS - STEP BY STEP GUIDE
-
-Smart Contract Protection:
-Your funds are secured by blockchain smart contracts, ensuring automatic and transparent transactions.
-
-Step-by-Step Process:
-
-Step 1: Create Escrow
-- Use /escrow command to create new escrow
-- Bot assigns a secure group for your transaction
-- Get invite link to share with trading partner
-
-Step 2: Set Deal Details
-- Use /dd command to set quantity and rate
-- Example: "100 USDT at $1.00 per unit"
-- Both parties must agree on terms
-
-Step 3: Set Roles & Addresses
-- Buyer: Use /buyer your_wallet_address
-- Ensure addresses are correct for selected token/network
-
-Step 4: Select Token & Network
-- Use /token command to choose cryptocurrency
-- Select network (BSC, ETH, etc.)
-- Bot only shows available options
-
-Step 5: Generate Deposit Address
-- Use /deposit command to get escrow address
-- Buyer sends agreed amount to this address
-- Funds are locked in smart contract
-
-Step 6: Complete Transaction
-- Buyer confirms payment received
-- Seller confirms item/service delivered
-- Smart contract automatically releases funds
-
-Security Features:
-- Smart contracts prevent fraud
-- Funds locked until both parties confirm
-- Dispute resolution available
-- Transparent blockchain records
-
-Important Notes:
-- Always verify addresses before sending
-- Use correct token and network
-- Keep transaction records
-- Contact admin for disputes`;
-
-  const keyboard = Markup.inlineKeyboard([
-    [Markup.button.callback('⬅️ Back to Menu', 'back_to_start')]
-  ]).reply_markup;
-
-  await ctx.reply(guideText, {
-    reply_markup: keyboard
-  });
-}
-
-/**
- * Send admin notification for partial payment dispute
- */
-async function sendAdminPartialPaymentNotification(ctx, escrow, transferredAmount) {
-  try {
-    const adminUserIds = config.getAllAdminIds();
-    
-    // Generate invite link for the group
-    let inviteLink = '';
-    if (escrow.groupId) {
-      try {
-        const invite = await ctx.telegram.createChatInviteLink(escrow.groupId, {
-          member_limit: 1,
-          expire_date: Math.floor(Date.now() / 1000) + (24 * 60 * 60) // 24 hours
-        });
-        inviteLink = invite.invite_link;
-      } catch (error) {
-        console.error('Error creating invite link:', error);
-        inviteLink = `Group ID: ${escrow.groupId}`;
-      }
-    }
-
-    const message = `🚨 **PARTIAL PAYMENT DISPUTE** 🚨
-
-⚠️ **Dispute Type:** Seller received less money than expected
-💰 **Amount Transferred to Admin:** ${transferredAmount} ${escrow.token}
-🆔 **Escrow ID:** \`${escrow.escrowId}\`
-👤 **Seller:** ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}
-🛒 **Buyer:** ${escrow.buyerUsername ? '@' + escrow.buyerUsername : '[' + escrow.buyerId + ']'}
-🌐 **Network:** ${escrow.chain}
-🪙 **Token:** ${escrow.token}
-📅 **Dispute Raised:** ${new Date().toLocaleString()}
-
-🔗 **Group Access:** ${inviteLink ? `[Click here to join the disputed group](${inviteLink})` : 'Group invite link unavailable'}
-
-**Action Required:**
-1. Join the group to investigate
-2. Communicate with both parties
-3. Decide on fair resolution
-4. Click the command below to copy and paste in the group:
-
-\`/admin_settle_partial ${escrow.escrowId}\`
-
-**Note:** All funds have been transferred to admin wallet for manual distribution.`;
-
-    // Send to all admins
-    for (const adminId of adminUserIds) {
-      try {
-        await ctx.telegram.sendMessage(adminId, message, { 
-          parse_mode: 'Markdown',
-          disable_web_page_preview: true 
-        });
-      } catch (error) {
-        console.error(`Error sending partial payment notification to admin ${adminId}:`, error);
-      }
-    }
-
-
-  } catch (error) {
-    console.error('Error sending partial payment notification:', error);
-  }
-}

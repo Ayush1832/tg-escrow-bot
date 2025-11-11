@@ -54,7 +54,7 @@ module.exports = async (ctx) => {
         
         while (retryCount < maxRetries) {
           try {
-            assignedGroup = await GroupPoolService.assignGroup(escrowId);
+            assignedGroup = await GroupPoolService.assignGroup(escrowId, ctx.telegram);
             break;
           } catch (assignError) {
             retryCount++;
@@ -78,14 +78,9 @@ module.exports = async (ctx) => {
           assignedFromPool: true,
           status: 'draft',
           inviteLink,
-          tradeStartTime: new Date() // Initialize trade start time when escrow is created
+          tradeStartTime: new Date()
         });
         await newEscrow.save();
-
-        // Activity tracking removed
-
-        // REMOVED: No longer sending DM messages to user after group creation
-        // Message is only sent in the group itself
 
         // Send welcome message to the assigned group
         const groupText = `📍 <b>Hey there traders! Welcome to our escrow service.</b>
@@ -173,11 +168,11 @@ Please create a group manually for now:
     // If used in a group, check for existing escrow and initialize if needed
     const existingEscrow = await Escrow.findOne({
       groupId: chatId.toString(),
-      status: { $in: ['draft', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
+      status: { $in: ['draft', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'] }
     });
 
     if (existingEscrow) {
-      return ctx.reply('⚠️ There is already an active escrow in this group. Please complete it first or use /dispute if there are issues.');
+      return ctx.reply('⚠️ There is already an active escrow in this group. Please complete it first.');
     }
 
     // Create new escrow for existing group
@@ -186,12 +181,10 @@ Please create a group manually for now:
       escrowId,
       groupId: chatId.toString(),
       status: 'draft',
-      tradeStartTime: new Date() // Initialize trade start time when escrow is created
+      tradeStartTime: new Date()
     });
 
     await newEscrow.save();
-
-    // Activity tracking removed
 
     const groupText = `📍 <b>Hey there traders! Welcome to our escrow service.</b>
 

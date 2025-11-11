@@ -48,50 +48,54 @@ class BlockchainService {
       const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
       
       // Show all available EscrowVault contracts
-      const contracts = await ContractModel.find({ name: 'EscrowVault' });
+      const contracts = await ContractModel.find({ 
+        name: 'EscrowVault',
+        feePercent: desiredFeePercent
+      });
+      
       if (contracts.length === 0) {
-        throw new Error('EscrowVault not deployed / not saved');
+        throw new Error(`No EscrowVault contracts found with ${desiredFeePercent}% fee. Please deploy contracts with this fee percentage.`);
       }
       
+      console.log(`✅ Found ${contracts.length} EscrowVault contract(s) with ${desiredFeePercent}% fee:`);
+      contracts.forEach(contract => {
+        console.log(`   • ${contract.token} on ${contract.network}: ${contract.address}`);
+      });
       
-      
-      // Find contract with matching fee percentage
-      const matchingContract = contracts.find(contract => 
-        contract.feePercent === desiredFeePercent
-      );
-      
-      if (!matchingContract) {
-        const uniqueFees = [...new Set(contracts.map(c => c.feePercent))];
-        uniqueFees.forEach(fee => console.log(`  • ${fee}%`));
-        throw new Error(`No EscrowVault contract found with ${desiredFeePercent}% fee. Please deploy a contract with this fee percentage.`);
-      }
-      
-      
-      const wallet = this.wallets[matchingContract.network.toUpperCase()];
-      this.vault = new ethers.Contract(matchingContract.address, ESCROW_VAULT_ABI, wallet);
-      return matchingContract.address;
+      // Initialize is successful if at least one contract exists
+      // The bot will use getEscrowContractAddress() which filters by token for specific operations
+      return contracts[0].address;
     } catch (error) {
       console.error('Error initializing BlockchainService:', error);
       throw error;
     }
   }
 
-  async getVaultForToken(token, network) {
+  async getVaultForNetwork(network, token = null) {
     try {
       const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
-      const entry = await ContractModel.findOne({ 
+      const query = { 
         name: 'EscrowVault',
-        token: token.toUpperCase(),
         network: network.toUpperCase(),
         feePercent: desiredFeePercent
-      });
+      };
+      
+      // If token is provided, filter by token (preferred)
+      if (token) {
+        query.token = token.toUpperCase();
+      }
+      
+      const entry = await ContractModel.findOne(query);
       if (!entry) {
-        throw new Error(`EscrowVault not found for ${token} on ${network} with ${desiredFeePercent}% fee`);
+        const errorMsg = token 
+          ? `EscrowVault not found for ${token} on ${network} with ${desiredFeePercent}% fee`
+          : `EscrowVault not found on ${network} with ${desiredFeePercent}% fee`;
+        throw new Error(errorMsg);
       }
       const wallet = this.wallets[network.toUpperCase()];
       return new ethers.Contract(entry.address, ESCROW_VAULT_ABI, wallet);
     } catch (error) {
-      console.error(`Error getting vault for ${token} on ${network}:`, error);
+      console.error(`Error getting vault on ${network}:`, error);
       throw error;
     }
   }
@@ -136,7 +140,7 @@ class BlockchainService {
   }
 
   async release(to, amountUSDT, token = 'USDT', network = 'SEPOLIA') {
-    const vault = await this.getVaultForToken(token, network);
+    const vault = await this.getVaultForNetwork(network);
     const decimals = this.getTokenDecimals(token, network);
     const amount = ethers.parseUnits(String(amountUSDT), decimals);
     const tx = await vault.release(to, amount);
@@ -144,7 +148,7 @@ class BlockchainService {
   }
 
   async refund(to, amountUSDT, token = 'USDT', network = 'SEPOLIA') {
-    const vault = await this.getVaultForToken(token, network);
+    const vault = await this.getVaultForNetwork(network);
     const decimals = this.getTokenDecimals(token, network);
     const amount = ethers.parseUnits(String(amountUSDT), decimals);
     const tx = await vault.refund(to, amount);

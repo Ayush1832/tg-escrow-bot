@@ -1,9 +1,6 @@
 const { Markup } = require("telegraf");
 const Escrow = require("../models/Escrow");
-const DepositAddress = require("../models/DepositAddress");
-const WalletService = require("../services/WalletService");
 const AddressAssignmentService = require("../services/AddressAssignmentService");
-const TradeTimeoutService = require("../services/TradeTimeoutService");
 const config = require("../../config");
 const fs = require('fs');
 const path = require('path');
@@ -28,7 +25,6 @@ module.exports = async (ctx) => {
           "deposited",
           "in_fiat_transfer",
           "ready_to_release",
-          "disputed",
         ],
       },
     });
@@ -49,74 +45,33 @@ module.exports = async (ctx) => {
     }
 
     if (escrow.status !== "draft" && escrow.status !== "awaiting_deposit") {
-      // If address was generated but quantity changed, allow regeneration
-      const AddressAssignmentService = require("../services/AddressAssignmentService");
-      const AddressPool = require("../models/AddressPool");
-      
-      // Check if current assignment matches the quantity
-      const currentAssignment = await AddressPool.findOne({
-        assignedEscrowId: escrow.escrowId,
-        status: { $in: ['assigned', 'busy'] }
-      });
-      
-      if (currentAssignment && currentAssignment.assignedAmount !== escrow.quantity) {
-        // Quantity changed - release old address and allow new assignment
-        await AddressAssignmentService.releaseDepositAddress(escrow.escrowId);
-        escrow.depositAddress = null;
-        escrow.uniqueDepositAddress = null;
-        escrow.status = 'awaiting_deposit';
-        await escrow.save();
-      } else if (currentAssignment && currentAssignment.assignedAmount === escrow.quantity) {
-        // Address already assigned for this quantity
+      if (escrow.depositAddress) {
         return ctx.reply(
           "⚠️ Deposit address has already been generated for this escrow."
         );
       }
     }
 
-    // If escrow is in draft status, we need to select token/network first
     if (escrow.status === "draft") {
-      // Check if token/network are already set
       if (!escrow.token || !escrow.chain) {
         return ctx.reply(
           "❌ Please select token and network first using /token command."
         );
       }
       
-      // Token/network are set, but we need to check if contract exists
-      const Contract = require('../models/Contract');
-      const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
-      const contract = await Contract.findOne({
-        name: 'EscrowVault',
-        token: escrow.token,
-        network: escrow.chain.toUpperCase(),
-        feePercent: desiredFeePercent
-      });
-      
-      if (!contract) {
-        return ctx.reply(
-          `❌ Escrow contract not deployed for ${escrow.token} on ${escrow.chain} with ${desiredFeePercent}% fee. Please contact admin to deploy the contract first.`
-        );
-      }
-      
-      // Update status to awaiting_deposit
       escrow.status = 'awaiting_deposit';
       await escrow.save();
     }
 
     await ctx.reply("Requesting a deposit address for you, please wait...");
 
-    // Declare variables outside try block to avoid ReferenceError
-    let address, sharedWithAmount;
+    let address;
     
     try {
-      // Normalize inputs before calling assignment service
       const normalizedToken = (escrow.token || '').toUpperCase();
       const normalizedNetwork = (escrow.chain || '').toUpperCase();
       const normalizedQuantity = Number(escrow.quantity);
       const normalizedFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
-      
-      // Add debug logging for troubleshooting
       
       const addressInfo = await AddressAssignmentService.assignDepositAddress(
         escrow.escrowId,
@@ -127,7 +82,6 @@ module.exports = async (ctx) => {
       );
 
       address = addressInfo.address;
-      sharedWithAmount = addressInfo.sharedWithAmount;
 
       // Initialize tradeStartTime if not set
       if (!escrow.tradeStartTime) {
@@ -136,19 +90,10 @@ module.exports = async (ctx) => {
       
       // Update escrow with unique deposit address
       escrow.uniqueDepositAddress = address;
-      escrow.depositAddress = address; // Keep for backward compatibility
+      escrow.depositAddress = address;
       escrow.status = "awaiting_deposit";
       await escrow.save();
 
-      // Set trade timeout (1 hour) AFTER escrow is updated
-      await TradeTimeoutService.setTradeTimeout(escrow.escrowId, ctx.telegram);
-
-      // Show sharing information if applicable
-      if (sharedWithAmount) {
-        await ctx.reply(
-          `ℹ️ This address is shared with another trade (${sharedWithAmount} ${escrow.token}). Different amounts can share the same address.`
-        );
-      }
 
     } catch (addressError) {
       console.error('Address assignment error:', addressError);

@@ -18,7 +18,7 @@ module.exports = async (ctx) => {
     // Find active escrow in this group
     const escrow = await Escrow.findOne({
       groupId: chatId.toString(),
-      status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
+      status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release'] }
     });
 
     if (!escrow) {
@@ -91,7 +91,7 @@ module.exports = async (ctx) => {
 Are you ready to proceed with this withdrawal? 
 Both the parties kindly confirm the same and note the action is irreversible.
 
-For help: Hit /dispute to call an Administrator.
+For help: Contact admin in the group.
 
 ✅ Buyer Confirmed: ${escrow.buyerConfirmedRelease ? 'Yes' : 'No'}
 ✅ Seller Confirmed: ${escrow.sellerConfirmedRelease ? 'Yes' : 'No'}

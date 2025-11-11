@@ -28,7 +28,7 @@ module.exports = async (ctx) => {
     // Find active escrow in this group
     const escrow = await Escrow.findOne({
       groupId: chatId.toString(),
-      status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
+      status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'] }
     });
 
     if (!escrow) {
@@ -65,11 +65,9 @@ Note: If you don't see any address, then your address will used from saved addre
     await ctx.reply(roleText, { parse_mode: 'Markdown' });
 
 
-    // Show token selection menu automatically when buyer address is set
+    // Note: Token selection is handled in Step 4 of the trade details flow, not here
     if (escrow.buyerAddress) {
       await ctx.reply('✅ Buyer address has been set.');
-      // Automatically show token selection menu (it already shows "choose token from the list below")
-      await tokenHandler(ctx);
     }
 
   } catch (error) {

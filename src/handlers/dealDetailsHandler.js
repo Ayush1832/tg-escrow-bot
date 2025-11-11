@@ -15,7 +15,7 @@ module.exports = async (ctx) => {
     // Find active escrow in this group
     const escrow = await Escrow.findOne({
       groupId: chatId.toString(),
-      status: { $in: ['draft', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
+      status: { $in: ['draft', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'] }
     });
 
     if (!escrow) {

@@ -7,266 +7,7 @@ const { isAdmin } = require('../middleware/adminAuth');
 const config = require('../../config');
 
 /**
- * Admin dashboard - view all active disputes
- */
-async function adminDashboard(ctx) {
-  try {
-    if (!isAdmin(ctx)) {
-      return ctx.reply('❌ Access denied. Admin privileges required.');
-    }
-
-    const disputes = await Escrow.find({
-      isDisputed: true,
-      disputeResolution: { $in: ['pending', 'refund_pending_address'] }
-    }).sort({ disputeRaisedAt: -1 });
-
-    if (disputes.length === 0) {
-      return ctx.reply('✅ No active disputes found.');
-    }
-
-    let message = `🚨 *ACTIVE DISPUTES* (${disputes.length})\n\n`;
-    
-    disputes.forEach((escrow, index) => {
-      const timeAgo = escrow.disputeRaisedAt 
-        ? Math.floor((Date.now() - escrow.disputeRaisedAt) / (1000 * 60 * 60)) 
-        : 'Unknown';
-      
-      message += `${index + 1}. **${escrow.escrowId}**\n`;
-      message += `   • ${escrow.token} on ${escrow.chain}\n`;
-      message += `   • Amount: ${escrow.confirmedAmount || escrow.depositAmount} ${escrow.token}\n`;
-      message += `   • Buyer: @${escrow.buyerUsername || 'N/A'}\n`;
-      message += `   • Seller: @${escrow.sellerUsername || 'N/A'}\n`;
-      message += `   • Reason: ${escrow.disputeReason}\n`;
-      message += `   • Time: ${timeAgo}h ago\n`;
-      message += `   • Group: \`${escrow.groupId}\`\n\n`;
-    });
-
-    message += `\n⚡ *Quick Commands:*\n`;
-    message += `• \`/admin_resolve_release <escrowId>\` - Release to buyer\n`;
-    message += `• \`/admin_resolve_refund <escrowId>\` - Refund to seller\n`;
-    // Inactivity commands removed
-
-    await ctx.reply(message);
-
-  } catch (error) {
-    console.error('Error in admin dashboard:', error);
-    ctx.reply('❌ Error loading disputes dashboard.');
-  }
-}
-
-/**
- * Admin resolve release - force release to buyer
- */
-async function adminResolveRelease(ctx) {
-  try {
-    if (!isAdmin(ctx)) {
-      return ctx.reply('❌ Access denied. Admin privileges required.');
-    }
-
-    const escrowId = ctx.message.text.split(' ')[1];
-    if (!escrowId) {
-      return ctx.reply('❌ Please provide escrow ID.\nUsage: `/admin_resolve_release <escrowId>`', {
-        parse_mode: 'Markdown'
-      });
-    }
-
-    const escrow = await Escrow.findOne({ escrowId });
-    if (!escrow) {
-      return ctx.reply('❌ Escrow not found.');
-    }
-
-    if (!escrow.isDisputed) {
-      return ctx.reply('❌ This escrow is not under dispute.');
-    }
-
-    if (escrow.disputeResolution !== 'pending') {
-      return ctx.reply('❌ This dispute has already been resolved.');
-    }
-
-      // Verify buyer address is set
-      if (!escrow.buyerAddress) {
-        return ctx.reply('❌ Buyer address is not set for this escrow. Cannot proceed with release.');
-      }
-
-      // Verify token and network are set
-      if (!escrow.token || !escrow.chain) {
-        return ctx.reply('❌ Token or network not set for this escrow. Cannot proceed with release.');
-      }
-
-      // Execute the release
-      const amount = escrow.confirmedAmount || escrow.depositAmount || 0;
-      
-      if (!amount || amount <= 0) {
-        return ctx.reply('❌ Invalid amount. Cannot proceed with release.');
-      }
-
-      const releaseResult = await BlockchainService.releaseFunds(
-        escrow.token,
-        escrow.chain,
-        escrow.buyerAddress,
-        amount
-      );
-
-      // Update escrow status after successful release
-      escrow.disputeResolution = 'release';
-      escrow.disputeResolvedBy = ctx.from.username || 'Admin';
-      escrow.disputeResolvedAt = new Date();
-      escrow.disputeResolutionReason = 'Admin resolved: Release to buyer';
-      escrow.status = 'completed';
-      // Save the release transaction hash (if returned)
-      if (releaseResult && releaseResult.transactionHash) {
-        escrow.releaseTransactionHash = releaseResult.transactionHash;
-      }
-      // Transaction hash is already saved when seller submitted it
-      await escrow.save();
-
-      // Notify group of successful release
-      try {
-        await ctx.bot.telegram.sendMessage(
-          escrow.groupId,
-          `✅ *ADMIN RESOLUTION*\n\nEscrow ${escrow.escrowId} has been resolved by admin.\n\n💰 ${amount} ${escrow.token} released to buyer.\n\nResolved by: @${ctx.from.username || 'Admin'}`,
-          { parse_mode: 'Markdown' }
-        );
-
-        // Send trade completion message with close trade button
-        // Initialize close trade tracking
-        escrow.buyerClosedTrade = false;
-        escrow.sellerClosedTrade = false;
-        await escrow.save();
-        
-        const buyerUsername = escrow.buyerUsername || 'Buyer';
-        const sellerUsername = escrow.sellerUsername || 'Seller';
-        
-        const closeTradeText = `✅ The trade has been completed successfully!
-
-⏳ Waiting for @${buyerUsername} to confirm.
-⏳ Waiting for @${sellerUsername} to confirm.`;
-        
-        const closeMsg = await ctx.bot.telegram.sendMessage(
-          escrow.groupId,
-          closeTradeText,
-          {
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  {
-                    text: '🔒 Close Trade',
-                    callback_data: `close_trade_${escrow.escrowId}`
-                  }
-                ]
-              ]
-            }
-          }
-        );
-        
-        escrow.closeTradeMessageId = closeMsg.message_id;
-        await escrow.save();
-      } catch (groupError) {
-        console.error('Error notifying group:', groupError);
-      }
-
-      await ctx.reply(`✅ Successfully released ${amount} ${escrow.token} to buyer for escrow ${escrowId}.`);
-
-  } catch (error) {
-    console.error('Error in admin resolve release:', error);
-    ctx.reply('❌ Error resolving dispute.');
-  }
-}
-
-/**
- * Admin resolve refund - force refund to seller
- */
-async function adminResolveRefund(ctx) {
-  try {
-    if (!isAdmin(ctx)) {
-      return ctx.reply('❌ Access denied. Admin privileges required.');
-    }
-
-    const escrowId = ctx.message.text.split(' ')[1];
-    if (!escrowId) {
-      return ctx.reply('❌ Please provide escrow ID.\nUsage: `/admin_resolve_refund <escrowId>`', {
-        parse_mode: 'Markdown'
-      });
-    }
-
-    const escrow = await Escrow.findOne({ escrowId });
-    if (!escrow) {
-      return ctx.reply('❌ Escrow not found.');
-    }
-
-    if (!escrow.isDisputed) {
-      return ctx.reply('❌ This escrow is not under dispute.');
-    }
-
-    // Check if already resolved or in progress
-    if (escrow.disputeResolution && escrow.disputeResolution !== 'pending' && escrow.disputeResolution !== 'refund_pending_address') {
-      return ctx.reply('❌ This dispute has already been resolved.');
-    }
-
-    // If already waiting for address, inform admin
-    if (escrow.disputeResolution === 'refund_pending_address') {
-      return ctx.reply(`⚠️ Refund request already in progress. Waiting for seller to provide address for escrow ${escrowId}.`);
-    }
-
-    // Mark escrow as pending refund - waiting for seller address
-    escrow.disputeResolution = 'refund_pending_address';
-    escrow.disputeResolvedBy = ctx.from.username || 'Admin';
-    escrow.disputeResolutionReason = 'Admin resolved: Refund to seller - waiting for seller address';
-    await escrow.save();
-
-    // Verify seller exists
-    if (!escrow.sellerId) {
-      return ctx.reply('❌ Seller ID is not set for this escrow. Cannot request refund address.');
-    }
-
-    // Verify token and network are set
-    if (!escrow.token || !escrow.chain) {
-      return ctx.reply('❌ Token or network not set for this escrow. Cannot proceed with refund.');
-    }
-
-    // Ask seller for their wallet address in the group
-    const sellerTag = escrow.sellerUsername ? `@${escrow.sellerUsername}` : `[${escrow.sellerId}]`;
-    
-    const addressRequestMessage = `🔔 *ADMIN REFUND REQUEST*
-
-Admin has approved a refund for this escrow.
-
-📋 Escrow ID: \`${escrow.escrowId}\`
-👤 Seller: ${sellerTag}
-💰 Amount: ${escrow.confirmedAmount || escrow.depositAmount || 0} ${escrow.token}
-
-💰 Please provide your wallet address where you want to receive the refund.
-
-⚠️ **IMPORTANT**: 
-• Make sure the address is correct for ${escrow.token} on ${escrow.chain}
-• Double-check the address before confirming
-• Wrong addresses cannot be reversed
-
-Please reply with your wallet address in the group.`;
-
-    try {
-      // Send address request to the group
-      await ctx.telegram.sendMessage(
-        escrow.groupId,
-        addressRequestMessage,
-        { parse_mode: 'Markdown' }
-      );
-
-      await ctx.reply(`✅ Refund request sent to group. Waiting for seller to provide wallet address for escrow ${escrowId}.`);
-
-    } catch (groupError) {
-      console.error('Error sending address request to group:', groupError);
-      await ctx.reply('❌ Error sending address request to group. Please check if the group still exists.');
-    }
-
-  } catch (error) {
-    console.error('Error in admin resolve refund:', error);
-    ctx.reply('❌ Error resolving dispute.');
-  }
-}
-
-/**
- * Admin stats - view dispute statistics
+ * Admin stats - view escrow statistics
  */
 async function adminStats(ctx) {
   try {
@@ -274,36 +15,25 @@ async function adminStats(ctx) {
       return ctx.reply('❌ Access denied. Admin privileges required.');
     }
 
-    const totalDisputes = await Escrow.countDocuments({ isDisputed: true });
-    const pendingDisputes = await Escrow.countDocuments({ 
-      isDisputed: true, 
-      disputeResolution: 'pending' 
+    const totalEscrows = await Escrow.countDocuments({});
+    const activeEscrows = await Escrow.countDocuments({ 
+      status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'] }
     });
-    const resolvedDisputes = await Escrow.countDocuments({ 
-      isDisputed: true, 
-      disputeResolution: { $ne: 'pending' } 
+    const completedEscrows = await Escrow.countDocuments({ 
+      status: 'completed' 
     });
-
-    const releaseCount = await Escrow.countDocuments({ 
-      disputeResolution: 'release' 
-    });
-    const refundCount = await Escrow.countDocuments({ 
-      disputeResolution: 'refund' 
+    const refundedEscrows = await Escrow.countDocuments({ 
+      status: 'refunded' 
     });
 
     const statsMessage = `
 📊 *ADMIN STATISTICS*
 
-🚨 *Disputes:*
-• Total: ${totalDisputes}
-• Pending: ${pendingDisputes}
-• Resolved: ${resolvedDisputes}
-
-⚖️ *Resolution Breakdown:*
-• Released to Buyer: ${releaseCount}
-• Refunded to Seller: ${refundCount}
-
-📈 *Resolution Rate:* ${resolvedDisputes > 0 ? ((resolvedDisputes / totalDisputes) * 100).toFixed(1) : 0}%
+📈 *Escrows:*
+• Total: ${totalEscrows}
+• Active: ${activeEscrows}
+• Completed: ${completedEscrows}
+• Refunded: ${refundedEscrows}
     `;
 
     await ctx.reply(statsMessage, { parse_mode: 'Markdown' });
@@ -419,11 +149,6 @@ async function adminPoolList(ctx) {
 
 
 
-// Activity monitoring stats removed
-
-// Manual inactivity check removed
-
-// Activity tracking debug removed
 
 /**
  * Manually send inactivity warnings to currently-inactive groups
@@ -438,7 +163,6 @@ async function adminWarnInactive(ctx) {
     const thresholds = ActivityMonitoringService.getThresholds();
     const cutoff = new Date(Date.now() - thresholds.inactivityMs);
 
-    // Inactivity tracking removed
     const candidates = [];
 
     let attempted = 0;
@@ -469,7 +193,6 @@ async function adminRemoveInactive(ctx) {
     const thresholds = ActivityMonitoringService.getThresholds();
     const cutoff = new Date(Date.now() - thresholds.warningDelayMs);
 
-    // Inactivity tracking removed
     const candidates = [];
 
     let removed = 0;
@@ -496,21 +219,16 @@ async function adminAddressPool(ctx) {
 
     const stats = await AddressAssignmentService.getAddressPoolStats();
     
-    if (stats.length === 0) {
-      return ctx.reply('📊 No addresses in pool. Run /admin_init_addresses to initialize.');
+    if (!stats.singleAddress) {
+      return ctx.reply('📊 No deposit address configured. Please set HOT_WALLET_PRIVATE_KEY in config.');
     }
 
-    let message = `🏦 **ADDRESS POOL STATISTICS**\n\n`;
+    let message = `🏦 **DEPOSIT ADDRESS**\n\n`;
+    message += `📍 Single Address (All Tokens):\n\`${stats.singleAddress}\`\n\n`;
+    message += `ℹ️ This address accepts deposits for all tokens and networks.\n`;
+    message += `Transaction hashes are validated to ensure unique deposits.`;
 
-    stats.forEach(stat => {
-      message += `**${stat.token} on ${stat.network}:**\n`;
-      message += `• Total: ${stat.total}\n`;
-      message += `• Available: ${stat.available}\n`;
-      message += `• Assigned: ${stat.assigned}\n`;
-      message += `• Busy: ${stat.busy}\n\n`;
-    });
-
-    await ctx.reply(message);
+    await ctx.reply(message, { parse_mode: 'Markdown' });
 
   } catch (error) {
     console.error('Error getting address pool stats:', error);
@@ -527,13 +245,7 @@ async function adminInitAddresses(ctx) {
       return ctx.reply('❌ Access denied. Admin privileges required.');
     }
 
-    await ctx.reply('🚀 Initializing address pool...');
-    
-    const config = require('../../config');
-    const feePercent = Number(config.ESCROW_FEE_PERCENT || 0);
-    await AddressAssignmentService.initializeAddressPool(feePercent);
-    
-    await ctx.reply(`✅ Address pool initialized successfully for ${feePercent}% fee!`);
+    await ctx.reply('ℹ️ Address pool initialization is no longer needed. Addresses are managed via EscrowVault contracts in the Contract model.');
 
   } catch (error) {
     console.error('Error initializing address pool:', error);
@@ -550,29 +262,7 @@ async function adminTimeoutStats(ctx) {
       return ctx.reply('❌ Access denied. Admin privileges required.');
     }
 
-    const stats = await TradeTimeoutService.getTimeoutStats();
-    const abandonedTrades = await TradeTimeoutService.getAbandonedTrades();
-
-    let message = `⏰ **TRADE TIMEOUT STATISTICS**\n\n`;
-    message += `• Active Timeouts: ${stats.active}\n`;
-    message += `• Expired Timeouts: ${stats.expired}\n`;
-    message += `• Cancelled Timeouts: ${stats.cancelled}\n`;
-    message += `• No Timeout Set: ${stats.null}\n\n`;
-    
-    if (abandonedTrades.length > 0) {
-      message += `🚫 **ABANDONED TRADES (${abandonedTrades.length}):**\n\n`;
-      abandonedTrades.slice(0, 5).forEach(trade => {
-        const timeAgo = trade.abandonedAt ? 
-          Math.floor((Date.now() - trade.abandonedAt) / (1000 * 60 * 60)) : 'Unknown';
-        message += `• ${trade.escrowId} - ${timeAgo}h ago\n`;
-      });
-      
-      if (abandonedTrades.length > 5) {
-        message += `• ... and ${abandonedTrades.length - 5} more\n`;
-      }
-    }
-
-    await ctx.reply(message);
+    return ctx.reply('❌ Trade timeout functionality has been removed. This command is no longer available.');
 
   } catch (error) {
     console.error('Error getting timeout stats:', error);
@@ -581,27 +271,6 @@ async function adminTimeoutStats(ctx) {
 }
 
 
-
-module.exports = {
-  adminDashboard,
-  adminResolveRelease,
-  adminResolveRefund,
-  adminStats,
-  adminGroupPool,
-  adminPoolAdd,
-  adminPoolList,
-  adminPoolDeleteAll,
-  adminPoolDelete,
-  adminHelp,
-  adminTradeStats,
-  adminExportTrades,
-  adminRecentTrades,
-  adminSettlePartial,
-  adminAddressPool,
-  adminInitAddresses,
-  adminTimeoutStats,
-  adminCleanupAddresses,
-};
 
 /**
  * Admin command to cleanup abandoned addresses
@@ -614,9 +283,7 @@ async function adminCleanupAddresses(ctx) {
 
     await ctx.reply('🧹 Cleaning up abandoned addresses...');
     
-    const cleanedCount = await AddressAssignmentService.cleanupAbandonedAddresses();
-    
-    await ctx.reply(`✅ Cleaned up ${cleanedCount} abandoned addresses.`);
+    await ctx.reply('ℹ️ Address cleanup is no longer needed. Addresses are managed via EscrowVault contracts.');
 
   } catch (error) {
     console.error('Error cleaning up addresses:', error);
@@ -684,15 +351,11 @@ async function adminHelp(ctx) {
 
     const helpMessage = `🤖 **ADMIN COMMANDS HELP**
 
-📊 **DISPUTE MANAGEMENT:**
-• \`/admin_disputes\` - View all active disputes
-• \`/admin_resolve_release <escrowId>\` - Release funds to buyer (resolve dispute)
-• \`/admin_resolve_refund <escrowId>\` - Refund funds to seller (resolve dispute)
-• \`/admin_stats\` - View dispute statistics
+📊 **STATISTICS:**
+• \`/admin_stats\` - View escrow statistics
 • \`/admin_trade_stats\` - View comprehensive trade statistics by fee percentage
 • \`/admin_recent_trades [limit]\` - View recent trades (max 50)
 • \`/admin_export_trades\` - Export all trades to CSV file
-• \`/admin_settle_partial <escrowId>\` - Settle partial payment disputes
 
 🏊‍♂️ **GROUP POOL MANAGEMENT:**
 • \`/admin_pool\` - View group pool status and statistics
@@ -704,13 +367,15 @@ async function adminHelp(ctx) {
 
 🔄 **AUTOMATIC GROUP RECYCLING:**
 ✅ **Automatic 15-minute delayed recycling** after trade completion
-✅ **Automatic 1-hour timeout recycling** for abandoned trades
 
 🧹 **MAINTENANCE:**
+• \`/admin_address_pool\` - View address pool status
+• \`/admin_init_addresses\` - Initialize addresses
+• \`/admin_cleanup_addresses\` - Cleanup abandoned addresses
+• \`/admin_timeout_stats\` - View timeout statistics
 
 📋 **AUTOMATIC FEATURES:**
 ✅ **Group Recycling**: Automatic 15-minute delayed recycling after trade completion
-✅ **Dispute Notifications**: Automatic notifications with clickable group links
 ✅ **User Management**: Automatic user removal after recycling delay
 ✅ **Pool Management**: Automatic group status updates
 
@@ -718,16 +383,17 @@ async function adminHelp(ctx) {
 • Most operations are automatic - no manual intervention needed
 • Use manual commands only for special cases or maintenance
 • Group recycling happens automatically with 15-minute delay
-• Dispute resolution triggers automatic group recycling
 
 🔧 **QUICK REFERENCE:**
-• View disputes: \`/admin_disputes\`
 • Pool status: \`/admin_pool\`
 • Recent trades: \`/admin_recent_trades 20\`
 • Export all trades: \`/admin_export_trades\`
 • Trade statistics: \`/admin_trade_stats\`
-• Settle partial payments: \`/admin_settle_partial <escrowId>\`
 • Address pool status: \`/admin_address_pool\`
+
+💰 **SETTLEMENT COMMANDS (in groups):**
+• \`/release\` - Release funds to buyer (admin only)
+• \`/refund\` - Refund funds to seller (admin only)
 `;
 
     await ctx.reply(helpMessage, { parse_mode: 'Markdown' });
@@ -930,7 +596,7 @@ async function adminExportTrades(ctx) {
 # Total Trades: ${allEscrows.length}
 #
 # COLUMNS:
-# ID, Status, Created Date, Token, Network, Quantity, Rate, Buyer, Seller, Dispute Reason, Completed Date
+# ID, Status, Created Date, Token, Network, Quantity, Rate, Buyer, Seller, Completed Date
 #
 # DATA:
 `;
@@ -942,10 +608,6 @@ async function adminExportTrades(ctx) {
       const dealDetails = escrow.dealDetails ? 
         escrow.dealDetails.replace(/\n/g, ' | ').replace(/,/g, ';') : 
         'Not Set';
-
-      const disputeReason = escrow.disputeReason ? 
-        escrow.disputeReason.replace(/,/g, ';') : 
-        '';
 
       const completedDate = escrow.completedAt ? 
         new Date(escrow.completedAt).toLocaleString() : 
@@ -973,7 +635,6 @@ async function adminExportTrades(ctx) {
         csvSafe(rate),
         csvSafe(buyerOut),
         csvSafe(sellerOut),
-        csvSafe(disputeReason),
         csvSafe(completedDate)
       ].join(',');
     });
@@ -1027,7 +688,7 @@ async function adminRecentTrades(ctx) {
 
     // Get recent trades - only necessary statuses
     const recentTrades = await Escrow.find({
-        status: { $in: ['completed', 'refunded', 'disputed'] }
+        status: { $in: ['completed', 'refunded'] }
       })
       .sort({ createdAt: -1 })
       .limit(limit)
@@ -1067,7 +728,6 @@ async function adminRecentTrades(ctx) {
       const statusEmoji = {
         'completed': '✅',
         'refunded': '🔄',
-        'disputed': '⚠️',
         'draft': '📝',
         'awaiting_details': '⏳'
       }[escrow.status] || '❓';
@@ -1100,77 +760,8 @@ async function adminRecentTrades(ctx) {
 
 
 /**
- * Admin command to settle partial payment disputes
- */
-async function adminSettlePartial(ctx) {
-  try {
-    if (!isAdmin(ctx)) {
-      return ctx.reply('❌ Access denied. Admin privileges required.');
-    }
-
-    const args = ctx.message.text.split(' ');
-    if (args.length < 2) {
-      return ctx.reply('❌ Usage: /admin_settle_partial <escrowId>\nExample: /admin_settle_partial 507f1f77bcf86cd799439011');
-    }
-
-    const escrowId = args[1];
-    const escrow = await Escrow.findOne({ 
-      escrowId: escrowId,
-      status: 'disputed',
-      disputeReason: 'Seller reported receiving less money than expected'
-    });
-
-    if (!escrow) {
-      return ctx.reply('❌ No partial payment dispute found with that escrow ID.');
-    }
-
-    // Mark escrow as completed
-    escrow.status = 'completed';
-    escrow.disputeResolution = 'resolved';
-    escrow.completedAt = new Date();
-    escrow.resolvedBy = ctx.from.id;
-    await escrow.save();
-
-    // Notify both parties
-    const completionMessage = `✅ **PARTIAL PAYMENT DISPUTE RESOLVED**
-
-🆔 **Escrow ID:** \`${escrow.escrowId}\`
-📅 **Resolved:** ${new Date().toLocaleString()}
-👨‍💼 **Resolved By:** Admin
-
-The partial payment dispute has been resolved by admin intervention. All parties have been notified of the resolution.
-
-Thank you for using our escrow service!`;
-
-    // REMOVED: No longer sending DM messages to users, only in-group messages
-    // Messages should only be sent within the group chat
-
-    // Send to group if exists
-    if (escrow.groupId) {
-      try {
-        await ctx.telegram.sendMessage(escrow.groupId, completionMessage);
-      } catch (error) {
-      }
-    }
-
-    // Trigger group recycling if it's a pool group
-    try {
-      const GroupPoolService = require('../services/GroupPoolService');
-      await GroupPoolService.recycleGroupAfterCompletion(escrow, ctx.telegram);
-    } catch (error) {
-    }
-
-    await ctx.reply(`✅ Partial payment dispute resolved successfully!\n\nEscrow ID: \`${escrow.escrowId}\`\nStatus: Completed\nResolved: ${new Date().toLocaleString()}`);
-
-  } catch (error) {
-    console.error('Error in admin settle partial:', error);
-    ctx.reply('❌ Error settling partial payment dispute.');
-  }
-}
-
-/**
  * Admin command to manually recycle groups that meet criteria
- * Recycles groups for escrows that are completed, refunded, or disputed (resolved)
+ * Recycles groups for escrows that are completed or refunded
  */
 async function adminRecycleGroups(ctx) {
   try {
@@ -1194,9 +785,6 @@ async function adminRecycleGroups(ctx) {
 
     for (const escrow of escrowsToRecycle) {
       try {
-        // Release deposit address first
-        await AddressAssignmentService.releaseDepositAddress(escrow.escrowId);
-
         // Recycle the group
         await GroupPoolService.recycleGroupAfterCompletion(escrow, ctx.telegram);
         recycledCount++;
@@ -1224,25 +812,19 @@ ${recycledCount > 0 ? '✅ Groups have been recycled and addresses released back
 }
 
 module.exports = {
-  adminDashboard,
-  adminResolveRelease,
-  adminResolveRefund,
   adminStats,
   adminGroupPool,
   adminPoolAdd,
   adminPoolList,
-  adminWarnInactive,
-  adminRemoveInactive,
-  adminAddressPool,
-  adminInitAddresses,
-  adminTimeoutStats,
-  adminCleanupAddresses,
   adminPoolDeleteAll,
   adminPoolDelete,
   adminHelp,
   adminTradeStats,
   adminExportTrades,
   adminRecentTrades,
-  adminSettlePartial,
+  adminAddressPool,
+  adminInitAddresses,
+  adminTimeoutStats,
+  adminCleanupAddresses,
   adminRecycleGroups
 };

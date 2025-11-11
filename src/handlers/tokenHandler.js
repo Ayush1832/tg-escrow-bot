@@ -16,7 +16,7 @@ module.exports = async (ctx) => {
     // Find active escrow in this group
     const escrow = await Escrow.findOne({
       groupId: chatId.toString(),
-      status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
+      status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'] }
     });
 
     if (!escrow) {
@@ -27,23 +27,8 @@ module.exports = async (ctx) => {
       return ctx.reply('❌ Please set buyer address first using /buyer command.');
     }
 
-    // Get available tokens from database based on current fee percentage
-    const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
-    const availableContracts = await Contract.find({
-      name: 'EscrowVault',
-      feePercent: desiredFeePercent
-    });
-    
-    if (availableContracts.length === 0) {
-      return ctx.reply(`❌ No escrow contracts available with ${desiredFeePercent}% fee. Please contact admin to deploy contracts.`);
-    }
-    
-    // Get unique tokens from available contracts
-    const availableTokens = [...new Set(availableContracts.map(contract => contract.token))];
-    
-    if (availableTokens.length === 0) {
-      return ctx.reply('❌ No tokens available. Please contact admin to deploy contracts.');
-    }
+    // Tokens no longer tied to contracts; present supported tokens
+    const availableTokens = ['USDT', 'USDC'];
     
     // Show token selection keyboard
     const tokenButtons = [];

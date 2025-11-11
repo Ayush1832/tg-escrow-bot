@@ -46,7 +46,7 @@ module.exports = {
   ADMIN_DEPOSIT_ADDRESS: process.env.ADMIN_DEPOSIT_ADDRESS,
 
   // Escrow Configuration
-  ESCROW_FEE_PERCENT: Number(process.env.ESCROW_FEE_PERCENT || 1.0),
+  ESCROW_FEE_PERCENT: Number(process.env.ESCROW_FEE_PERCENT || 0),
 
   MIN_TRADE_AMOUNT: Number(process.env.MIN_TRADE_AMOUNT || 1),
   MAX_TRADE_AMOUNT: Number(process.env.MAX_TRADE_AMOUNT || 10000),

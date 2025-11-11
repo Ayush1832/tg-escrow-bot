@@ -24,7 +24,7 @@ const escrowSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed', 'completed', 'refunded'],
+    enum: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release', 'completed', 'refunded'],
     default: 'draft'
   },
   token: {
@@ -40,6 +40,70 @@ const escrowSchema = new mongoose.Schema({
     required: false
   },
   rate: {
+    type: Number,
+    required: false
+  },
+  paymentMethod: {
+    type: String,
+    required: false
+  },
+  // Track which step in the trade details flow we're on
+  tradeDetailsStep: {
+    type: String,
+    enum: ['step1_amount', 'step2_rate', 'step3_payment', 'step4_chain_coin', 'step5_buyer_address', 'step6_seller_address', 'completed'],
+    required: false
+  },
+  // Store Step 5 message ID for deletion
+  step5BuyerAddressMessageId: {
+    type: Number,
+    required: false
+  },
+  // Store Step 6 message ID for deletion
+  step6SellerAddressMessageId: {
+    type: Number,
+    required: false
+  },
+  // Store OTC Deal Summary message ID for editing approval status
+  dealSummaryMessageId: {
+    type: Number,
+    required: false
+  },
+  // Track deal approvals
+  buyerApproved: {
+    type: Boolean,
+    default: false
+  },
+  sellerApproved: {
+    type: Boolean,
+    default: false
+  },
+  // Store transaction hash message ID for editing
+  transactionHashMessageId: {
+    type: Number,
+    required: false
+  },
+  // Store confirmed transaction hash (deposit transaction)
+  transactionHash: {
+    type: String,
+    required: false,
+    index: true // Index for faster duplicate checking
+  },
+  // Store the actual from address of the deposit transaction (can be any address)
+  depositTransactionFromAddress: {
+    type: String,
+    required: false
+  },
+  // Store release transaction hash (when funds are released)
+  releaseTransactionHash: {
+    type: String,
+    required: false
+  },
+  // Store Step 4 message IDs for deletion
+  step4ChainMessageId: {
+    type: Number,
+    required: false
+  },
+  step4CoinMessageId: {
     type: Number,
     required: false
   },
@@ -59,6 +123,35 @@ const escrowSchema = new mongoose.Schema({
     type: String,
     required: false
   },
+  // Origin message details (main group where /deal was initiated)
+  originChatId: {
+    type: String,
+    required: false
+  },
+  originInviteMessageId: {
+    type: Number,
+    required: false
+  },
+  // Allowed usernames for restricted join requests (when room is created via /deal in a group)
+  allowedUsernames: {
+    type: [String],
+    default: undefined
+  },
+  // Track which users have been approved and joined (user ids)
+  approvedUserIds: {
+    type: [Number],
+    default: undefined
+  },
+  // Allowed user ids (used when initiator has no username)
+  allowedUserIds: {
+    type: [Number],
+    default: undefined
+  },
+  // Store role selection message ID for editing
+  roleSelectionMessageId: {
+    type: Number,
+    required: false
+  },
   buyerAddress: String,
   sellerAddress: String,
   depositAddress: String,
@@ -71,22 +164,19 @@ const escrowSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
-  tradeTimeout: {
-    type: Date,
-    default: null
-  },
-  timeoutStatus: {
-    type: String,
-    enum: ['active', 'expired', 'cancelled'],
-    default: null
-  },
-  isAbandoned: {
+  // Track close trade confirmations
+  buyerClosedTrade: {
     type: Boolean,
     default: false
   },
-  abandonedAt: {
-    type: Date,
-    default: null
+  sellerClosedTrade: {
+    type: Boolean,
+    default: false
+  },
+  // Store close trade message ID for editing
+  closeTradeMessageId: {
+    type: Number,
+    required: false
   },
   inviteLink: String,
   depositAmount: {
@@ -133,20 +223,6 @@ const escrowSchema = new mongoose.Schema({
     type: String,
     default: null
   },
-  isDisputed: {
-    type: Boolean,
-    default: false
-  },
-  disputeReason: String,
-  disputeRaisedAt: Date,
-  disputeRaisedBy: Number, // User ID who raised the dispute
-  disputeResolvedBy: String, // Admin username who resolved
-  disputeResolvedAt: Date,
-  disputeResolution: {
-    type: String,
-    enum: ['release', 'refund', 'refund_pending_address', 'pending']
-  },
-  disputeResolutionReason: String,
   createdAt: {
     type: Date,
     default: Date.now

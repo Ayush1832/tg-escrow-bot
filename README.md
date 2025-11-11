@@ -70,20 +70,11 @@ A centralized Telegram escrow bot for USDT transactions on BSC network.
    ```bash
    npm run compile
 
-   # Deploy contracts for each token-network pair you want to support:
-   npm run deploy:usdt:bsc     # Deploy USDT on BSC
-   npm run deploy:usdc:bsc     # Deploy USDC on BSC
-   npm run deploy:busd:bsc     # Deploy BUSD on BSC
-   npm run deploy:eth:eth      # Deploy ETH on Ethereum
-   npm run deploy:btc:bsc      # Deploy BTC on BSC
-   npm run deploy:ltc:ltc      # Deploy LTC on Litecoin
-   npm run deploy:bnb:bsc      # Deploy BNB on BSC
-
-   # For testing on Sepolia
-   npm run deploy:sepolia      # Deploy USDT on Sepolia
+   # Deploy contracts for BSC network (USDT and USDC with 0% escrow fee):
+   npm run deploy
    ```
 
-   The deployed `EscrowVault` address will be saved in MongoDB (`contracts` collection).
+   The deployed `EscrowVault` addresses will be saved in MongoDB (`contracts` collection).
 
 4. **Start the Bot**
    ```bash
