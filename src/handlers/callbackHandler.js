@@ -338,9 +338,7 @@ ${approvalStatus}`;
           const depositAddressText = `Send USDT & tap on <b>SENT</b> button.
 
 📮 ${updatedEscrow.chain || 'BSC'} (BEP20):
-<code>${addressInfo.address}</code>
-
-🧾 Useful filters /pic /proof`;
+<code>${addressInfo.address}</code>`;
           
           await ctx.telegram.sendMessage(updatedEscrow.groupId, depositAddressText, {
             parse_mode: 'HTML',
