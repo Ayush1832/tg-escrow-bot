@@ -64,7 +64,6 @@ class BlockchainService {
         throw new Error(`No EscrowVault contracts found with ${desiredFeePercent}% fee. Please deploy contracts with this fee percentage.`);
       }
       
-      console.log(`✅ Found ${contracts.length} EscrowVault contract(s) with ${desiredFeePercent}% fee:`);
       contracts.forEach(contract => {
         console.log(`   • ${contract.token} on ${contract.network}: ${contract.address}`);
       });

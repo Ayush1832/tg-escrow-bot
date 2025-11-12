@@ -98,6 +98,19 @@ module.exports = async (ctx) => {
     // Schedule 5-minute timeout to check if both parties joined
     // If not, cancel the deal and recycle the group
     const telegram = ctx.telegram; // Store telegram instance for use in timeout
+    
+    // Delete the /deal command message after 5 minutes
+    if (ctx.message && ctx.message.message_id) {
+      const commandMessageId = ctx.message.message_id;
+      const originChatId = String(chatId); // Convert to string for consistency
+      setTimeout(async () => {
+        try {
+          await telegram.deleteMessage(originChatId, commandMessageId);
+        } catch (deleteError) {
+          // Message might already be deleted or not accessible - ignore
+        }
+      }, 5 * 60 * 1000); // 5 minutes
+    }
     const timeoutId = setTimeout(async () => {
       try {
         // Re-fetch escrow to get latest state
@@ -161,10 +174,22 @@ module.exports = async (ctx) => {
         const initiatorName = currentEscrow.allowedUsernames?.[0] || 'user';
         const counterpartyName = currentEscrow.allowedUsernames?.[1] || 'user';
         try {
-          await telegram.sendMessage(
+          const cancellationMsg = await telegram.sendMessage(
             currentEscrow.originChatId,
             `❌ Deal cancelled between @${initiatorName} and @${counterpartyName} due to inactivity. Both parties must join within 5 minutes.`
           );
+          
+          // Delete cancellation message after 5 minutes
+          setTimeout(async () => {
+            try {
+              await telegram.deleteMessage(
+                currentEscrow.originChatId,
+                cancellationMsg.message_id
+              );
+            } catch (deleteError) {
+              // Message might already be deleted or not accessible - ignore
+            }
+          }, 5 * 60 * 1000); // 5 minutes
         } catch (msgError) {
           console.log('Could not send cancellation message:', msgError.message);
         }
