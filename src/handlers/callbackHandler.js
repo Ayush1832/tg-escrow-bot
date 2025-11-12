@@ -613,69 +613,77 @@ ${closeStatus}`;
 
       // Check if both have confirmed
       if (updatedEscrow.buyerClosedTrade && updatedEscrow.sellerClosedTrade) {
-        // Both confirmed - remove users and recycle group
-      try {
-        // Recycle group - remove users and return to pool
+        // Both confirmed - send confirmation message and schedule recycling after 5 minutes
+        const confirmationMsg = await ctx.telegram.sendMessage(
+          updatedEscrow.groupId,
+          '✅ Trade closed successfully! Both parties have confirmed. Group will be recycled in 5 minutes. Proceed to exit this group'
+        );
         
-        // Find the group
-        const group = await GroupPool.findOne({ 
-            assignedEscrowId: updatedEscrow.escrowId 
-        });
-
-        if (group) {
-          // Remove ALL users from group (buyer, seller, admins, everyone)
-            const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(updatedEscrow, group.groupId, ctx.telegram);
-
-          // Delete all messages and unpin pinned messages before recycling
+        // Schedule group recycling after 5 minutes
+        setTimeout(async () => {
           try {
-            await GroupPoolService.deleteAllGroupMessages(group.groupId, ctx.telegram, updatedEscrow);
-          } catch (deleteError) {
-            // Could not delete all messages - continue with recycling
-          }
+            // Re-fetch escrow to ensure we have latest state
+            const finalEscrow = await Escrow.findOne({ escrowId: updatedEscrow.escrowId });
+            if (!finalEscrow) {
+              return; // Escrow was deleted, nothing to do
+            }
+            
+            // Recycle group - remove users and return to pool
+            const group = await GroupPool.findOne({ 
+              assignedEscrowId: finalEscrow.escrowId 
+            });
 
-          // Refresh invite link (revoke old and create new) so removed users can rejoin
-          await GroupPoolService.refreshInviteLink(group.groupId, ctx.telegram);
+            if (group) {
+              // Remove ALL users from group (buyer, seller, admins, everyone)
+              const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(finalEscrow, group.groupId, ctx.telegram);
 
-          if (allUsersRemoved) {
-            // Only add back to pool if ALL users were successfully removed
-            group.status = 'available';
-            group.assignedEscrowId = null;
-            group.assignedAt = null;
-            group.completedAt = null;
-            await group.save();
-              
+              // Delete all messages and unpin pinned messages before recycling
+              try {
+                await GroupPoolService.deleteAllGroupMessages(group.groupId, ctx.telegram, finalEscrow);
+              } catch (deleteError) {
+                // Could not delete all messages - continue with recycling
+              }
+
+              // Refresh invite link (revoke old and create new) so removed users can rejoin
+              await GroupPoolService.refreshInviteLink(group.groupId, ctx.telegram);
+
+              if (allUsersRemoved) {
+                // Only add back to pool if ALL users were successfully removed
+                group.status = 'available';
+                group.assignedEscrowId = null;
+                group.assignedAt = null;
+                group.completedAt = null;
+                await group.save();
+                
+                await ctx.telegram.sendMessage(
+                  finalEscrow.groupId,
+                  '✅ Group has been recycled and is ready for a new trade.'
+                );
+              } else {
+                // Mark as completed but don't add back to pool if users couldn't be removed
+                // IMPORTANT: Do NOT clear group.inviteLink even here - link stays valid
+                group.status = 'completed';
+                group.assignedEscrowId = null;
+                group.assignedAt = null;
+                group.completedAt = new Date();
+                // Keep inviteLink - it's permanent
+                await group.save();
+                
+                await ctx.telegram.sendMessage(
+                  finalEscrow.groupId,
+                  '✅ Trade closed successfully! Both parties have confirmed. Note: Some users could not be removed from the group.'
+                );
+              }
+            } else {
               await ctx.telegram.sendMessage(
-                updatedEscrow.groupId,
-                '✅ Trade closed successfully! Both parties have confirmed. Group has been recycled and is ready for a new trade.'
+                finalEscrow.groupId,
+                '✅ Trade closed successfully! Both parties have confirmed.'
               );
-          } else {
-            // Mark as completed but don't add back to pool if users couldn't be removed
-            // IMPORTANT: Do NOT clear group.inviteLink even here - link stays valid
-            group.status = 'completed';
-            group.assignedEscrowId = null;
-            group.assignedAt = null;
-            group.completedAt = new Date();
-            // Keep inviteLink - it's permanent
-            await group.save();
-              
-              await ctx.telegram.sendMessage(
-                updatedEscrow.groupId,
-                '✅ Trade closed successfully! Both parties have confirmed. Note: Some users could not be removed from the group.'
-              );
+            }
+          } catch (error) {
+            console.error('Error recycling group after delay:', error);
           }
-          } else {
-            await ctx.telegram.sendMessage(
-              updatedEscrow.groupId,
-              '✅ Trade closed successfully! Both parties have confirmed.'
-            );
-        }
-      } catch (error) {
-        console.error('Error closing trade:', error);
-          await ctx.telegram.sendMessage(
-            updatedEscrow.groupId,
-            '❌ Error closing trade. Please contact support.'
-          );
-      }
+        }, 5 * 60 * 1000); // 5 minutes delay
       }
       
       return;
@@ -927,6 +935,46 @@ ${closeStatus}`;
       }
       return;
 
+    } else if (callbackData.startsWith('buyer_received_tokens_yes_') || callbackData.startsWith('buyer_received_tokens_no_')) {
+      // Buyer confirmation for token receipt
+      const escrowId = callbackData.includes('_yes_') 
+        ? callbackData.replace('buyer_received_tokens_yes_', '')
+        : callbackData.replace('buyer_received_tokens_no_', '');
+      
+      const escrow = await Escrow.findOne({
+        escrowId: escrowId,
+        status: 'completed'
+      });
+      
+      if (!escrow) {
+        await ctx.answerCbQuery('❌ No active escrow found.');
+        return;
+      }
+      
+      if (escrow.buyerId !== userId) {
+        await ctx.answerCbQuery('❌ Only the buyer can confirm this.');
+        return;
+      }
+      
+      const isYes = callbackData.includes('_yes_');
+      
+      if (isYes) {
+        await ctx.answerCbQuery('✅ Confirmed receipt of tokens.');
+        await ctx.telegram.sendMessage(
+          escrow.groupId,
+          `✅ Buyer confirmed receipt of tokens. Trade completed successfully!`
+        );
+      } else {
+        await ctx.answerCbQuery('⚠️ Issue reported.');
+        const admins = (config.getAllAdminUsernames?.() || []).filter(Boolean);
+        const adminMentions = admins.length ? admins.map(u => `@${u}`).join(' ') : 'Admin';
+        await ctx.telegram.sendMessage(
+          escrow.groupId,
+          `⚠️ Buyer reported not receiving tokens for escrow ${escrowId}. Transaction hash: ${escrow.releaseTransactionHash || 'N/A'}. ${adminMentions} please review.`
+        );
+      }
+      return;
+
     } else if (callbackData.startsWith('fiat_received_seller_yes_') || callbackData.startsWith('fiat_received_seller_no_')) {
       // Extract escrowId - handle both yes and no cases
       const escrowId = callbackData.includes('_yes_') 
@@ -1032,47 +1080,48 @@ ${closeStatus}`;
           escrow.releaseTransactionHash = releaseResult.transactionHash;
         }
         await escrow.save();
+        
+        // Send release confirmation message
         await ctx.reply(`✅ ${(amount - 0).toFixed(5)} ${escrow.token} released to buyer's address. Trade completed.`);
         
-        // Remove users and recycle group after successful release
-        try {
-          const group = await GroupPool.findOne({ 
-            assignedEscrowId: escrow.escrowId 
-          });
-          
-          if (group) {
-            // Remove users from group
-            try {
-              await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, ctx.telegram);
-            } catch (removeError) {
-              console.log('Could not remove users during release:', removeError.message);
-            }
-            
-            // Clear escrow invite link (but keep group invite link - it's permanent)
-            escrow.inviteLink = null;
-            await escrow.save();
-            
-            // Delete all messages and unpin pinned messages before recycling
-            try {
-              await GroupPoolService.deleteAllGroupMessages(group.groupId, ctx.telegram, escrow);
-            } catch (deleteError) {
-              // Could not delete all messages - continue with recycling
-            }
-
-            // Refresh invite link (revoke old and create new) so removed users can rejoin
-            await GroupPoolService.refreshInviteLink(group.groupId, ctx.telegram);
-            
-            // Recycle group back to pool
-            group.status = 'available';
-            group.assignedEscrowId = null;
-            group.assignedAt = null;
-            group.completedAt = null;
-            await group.save();
+        // Send transaction explorer link if available
+        if (releaseResult && releaseResult.transactionHash) {
+          const chain = escrow.chain || 'BSC';
+          let explorerUrl = '';
+          if (chain.toUpperCase() === 'BSC' || chain.toUpperCase() === 'BNB') {
+            explorerUrl = `https://bscscan.com/tx/${releaseResult.transactionHash}`;
+          } else if (chain.toUpperCase() === 'ETH' || chain.toUpperCase() === 'ETHEREUM') {
+            explorerUrl = `https://etherscan.io/tx/${releaseResult.transactionHash}`;
+          } else if (chain.toUpperCase() === 'POLYGON' || chain.toUpperCase() === 'MATIC') {
+            explorerUrl = `https://polygonscan.com/tx/${releaseResult.transactionHash}`;
           }
-        } catch (recycleError) {
-          console.error('Error recycling group after release:', recycleError);
-          // Non-critical: trade is already completed, just log the error
+          
+          if (explorerUrl) {
+            await ctx.reply(`🔗 Transaction: ${explorerUrl}`);
+          }
         }
+        
+        // Ask buyer to confirm receipt of tokens
+        const buyerConfirmationMsg = await ctx.telegram.sendMessage(
+          escrow.groupId,
+          `👤 Buyer ${escrow.buyerUsername ? '@' + escrow.buyerUsername : '[' + escrow.buyerId + ']'}: Did you receive the tokens?`,
+          {
+            reply_markup: Markup.inlineKeyboard([
+              [
+                Markup.button.callback('✅ Yes, I received', `buyer_received_tokens_yes_${escrow.escrowId}`),
+                Markup.button.callback('❌ No, not received', `buyer_received_tokens_no_${escrow.escrowId}`)
+              ]
+            ]).reply_markup
+          }
+        );
+        
+        // Auto-delete buyer confirmation prompt after 5 minutes
+        setTimeout(async () => {
+          try { await ctx.telegram.deleteMessage(escrow.groupId, buyerConfirmationMsg.message_id); } catch (_) {}
+        }, 5 * 60 * 1000);
+        
+        // Note: Group recycling will happen after buyer confirms receipt and both parties close the trade
+        // This is handled in the close_trade callback with a 5-minute delay
       } catch (error) {
         console.error('Auto-release error:', error);
         await ctx.reply('❌ Error releasing funds. Please contact admin.');
@@ -1152,6 +1201,42 @@ Approved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escro
           `;
 
           await ctx.reply(successText);
+          
+          // Send transaction explorer link if available
+          if (releaseResult && releaseResult.transactionHash) {
+            const chain = escrow.chain || 'BSC';
+            let explorerUrl = '';
+            if (chain.toUpperCase() === 'BSC' || chain.toUpperCase() === 'BNB') {
+              explorerUrl = `https://bscscan.com/tx/${releaseResult.transactionHash}`;
+            } else if (chain.toUpperCase() === 'ETH' || chain.toUpperCase() === 'ETHEREUM') {
+              explorerUrl = `https://etherscan.io/tx/${releaseResult.transactionHash}`;
+            } else if (chain.toUpperCase() === 'POLYGON' || chain.toUpperCase() === 'MATIC') {
+              explorerUrl = `https://polygonscan.com/tx/${releaseResult.transactionHash}`;
+            }
+            
+            if (explorerUrl) {
+              await ctx.reply(`🔗 Transaction: ${explorerUrl}`);
+            }
+          }
+          
+          // Ask buyer to confirm receipt of tokens
+          const buyerConfirmationMsg = await ctx.telegram.sendMessage(
+            escrow.groupId,
+            `👤 Buyer ${escrow.buyerUsername ? '@' + escrow.buyerUsername : '[' + escrow.buyerId + ']'}: Did you receive the tokens?`,
+            {
+              reply_markup: Markup.inlineKeyboard([
+                [
+                  Markup.button.callback('✅ Yes, I received', `buyer_received_tokens_yes_${escrow.escrowId}`),
+                  Markup.button.callback('❌ No, not received', `buyer_received_tokens_no_${escrow.escrowId}`)
+                ]
+              ]).reply_markup
+            }
+          );
+          
+          // Auto-delete buyer confirmation prompt after 5 minutes
+          setTimeout(async () => {
+            try { await ctx.telegram.deleteMessage(escrow.groupId, buyerConfirmationMsg.message_id); } catch (_) {}
+          }, 5 * 60 * 1000);
 
           // Send trade completion message with close trade button
           // Initialize close trade tracking

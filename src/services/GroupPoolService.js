@@ -80,14 +80,28 @@ class GroupPoolService {
 
       const chatId = String(groupId);
 
+      // IMPORTANT: Always try to use the primary invite link first
+      // Primary invite links work for everyone, including previously removed users
+      // This is critical for groups that are recycled after users are removed
+      try {
+        const primaryLink = await telegram.exportChatInviteLink(chatId);
+        if (primaryLink) {
+          // Update group with primary invite link (this revokes any previous primary link)
+          group.inviteLink = primaryLink;
+          await group.save();
+          return primaryLink;
+        }
+      } catch (exportError) {
+        // Primary link export failed - might not have permission or group doesn't have primary link
+        // Continue to check stored link or create new one
+      }
+
+      // If primary link export failed, check if we have a stored link
       // Strategy: Reuse existing invite link if it exists
       // Only create a new link if the group doesn't have one
       if (group.inviteLink) {
-        // Verify the existing link is still valid by trying to export it
-        // If it fails, we'll create a new one
+        // Verify the existing link is still valid by checking chat info
         try {
-          // Test if the link is still valid by checking chat info
-          // We can't directly verify a link, but we can check if the chat exists
           await telegram.getChat(chatId);
           
           // Link exists and chat is accessible - reuse it
@@ -685,7 +699,22 @@ class GroupPoolService {
         return null;
       }
 
-      // Revoke the old invite link if it exists
+      // Strategy: Try to export the primary invite link first
+      // Primary invite links work for everyone, including previously removed users
+      try {
+        const primaryLink = await telegram.exportChatInviteLink(chatId);
+        if (primaryLink) {
+          // Update group with primary invite link
+          group.inviteLink = primaryLink;
+          await group.save();
+          return primaryLink;
+        }
+      } catch (exportError) {
+        // Primary link export failed - continue to create new link
+        // This might happen if bot doesn't have permission or group doesn't have primary link
+      }
+
+      // If primary link export failed, revoke old link and create new one
       if (group.inviteLink) {
         try {
           // Telegram API accepts the full invite link URL string
