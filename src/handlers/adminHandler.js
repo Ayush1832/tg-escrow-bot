@@ -997,16 +997,17 @@ async function adminGroupReset(ctx) {
       try {
         await GroupPoolService.deleteAllGroupMessages(group.groupId, ctx.telegram, escrow);
       } catch (deleteError) {
-        console.log('Note: Could not delete all messages during group reset:', deleteError.message);
+        // Could not delete all messages - continue with recycling
       }
 
+      // Refresh invite link (revoke old and create new) so removed users can rejoin
+      await GroupPoolService.refreshInviteLink(group.groupId, ctx.telegram);
+
       // Reset group pool entry
-      // IMPORTANT: Do NOT clear group.inviteLink - we keep the permanent link for reuse
       group.status = 'available';
       group.assignedEscrowId = null;
       group.assignedAt = null;
       group.completedAt = null;
-      // Keep inviteLink - it's permanent and will be reused
       await group.save();
 
       // Delete the escrow since no deposits were made
@@ -1132,22 +1133,22 @@ async function adminResetForce(ctx) {
       try {
         await GroupPoolService.deleteAllGroupMessages(group.groupId, ctx.telegram, escrow);
       } catch (deleteError) {
-        console.log('Note: Could not delete all messages during force reset:', deleteError.message);
+        // Could not delete all messages - continue with recycling
       }
 
+      // Refresh invite link (revoke old and create new) so removed users can rejoin
+      await GroupPoolService.refreshInviteLink(group.groupId, ctx.telegram);
+
       // Reset group pool entry
-      // IMPORTANT: Do NOT clear group.inviteLink - we keep the permanent link for reuse
       group.status = 'available';
       group.assignedEscrowId = null;
       group.assignedAt = null;
       group.completedAt = null;
-      // Keep inviteLink - it's permanent and will be reused
       await group.save();
 
       // Delete the escrow (force reset - regardless of status or deposits)
       try {
         await Escrow.deleteOne({ escrowId: escrow.escrowId });
-        console.log(`✅ Force reset: Deleted escrow ${escrow.escrowId}`);
       } catch (deleteError) {
         console.error('Error deleting escrow during force reset:', deleteError);
         // Continue anyway - group is already reset and available

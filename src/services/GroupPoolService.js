@@ -95,7 +95,6 @@ class GroupPoolService {
         } catch (verifyError) {
           // Link might be invalid or chat might have issues
           // Clear it and create a new one
-          console.log(`⚠️ Existing invite link may be invalid, creating new one for group ${groupId}`);
           group.inviteLink = null;
           await group.save();
         }
@@ -264,9 +263,9 @@ class GroupPoolService {
               if (refreshed) {
                 return refreshed;
               }
-            } catch (linkError) {
-              console.log(`Note: Could not create invite link for existing group ${groupId}:`, linkError.message);
-            }
+        } catch (linkError) {
+          // Could not create invite link - will be created when needed
+        }
           }
         }
         return existingGroup;
@@ -294,8 +293,7 @@ class GroupPoolService {
             return refreshed;
           }
         } catch (linkError) {
-          console.log(`Note: Could not create invite link for new group ${groupId}:`, linkError.message);
-          // Continue anyway - link can be created later when needed
+          // Could not create invite link - will be created when needed
         }
       }
 
@@ -540,17 +538,19 @@ class GroupPoolService {
           const freshEscrow = await Escrow.findOne({ escrowId: escrow.escrowId });
           await this.deleteAllGroupMessages(group.groupId, telegram, freshEscrow);
         } catch (deleteError) {
-          console.log('Note: Could not delete all messages during delayed recycling:', deleteError.message);
+          // Could not delete all messages - continue with recycling
         }
 
         if (allUsersRemoved) {
           // Only add back to pool if ALL users were successfully removed
-          // IMPORTANT: Do NOT clear group.inviteLink - we keep the permanent link for reuse
+          // IMPORTANT: Refresh invite link (revoke old and create new)
+          // This is necessary because users who were removed cannot rejoin using the same link
+          await this.refreshInviteLink(group.groupId, telegram);
+          
           group.status = 'available';
           group.assignedEscrowId = null;
           group.assignedAt = null;
           group.completedAt = null;
-          // Keep inviteLink - it's permanent and will be reused
           await group.save();
 
         } else {
@@ -673,9 +673,48 @@ class GroupPoolService {
   }
 
   /**
+   * Revoke old invite link and create a new one for a group
+   * This is necessary when users are removed, as they cannot rejoin using the same link
+   */
+  async refreshInviteLink(groupId, telegram) {
+    try {
+      const chatId = String(groupId);
+      const group = await GroupPool.findOne({ groupId });
+      
+      if (!group) {
+        return null;
+      }
+
+      // Revoke the old invite link if it exists
+      if (group.inviteLink) {
+        try {
+          // Telegram API accepts the full invite link URL string
+          await telegram.revokeChatInviteLink(chatId, group.inviteLink);
+        } catch (revokeError) {
+          // Link might already be revoked or invalid - continue to create new one
+          // Error is non-critical - we'll create a new link anyway
+        }
+        group.inviteLink = null;
+        await group.save();
+      }
+
+      // Create a new permanent invite link
+      return await this.generateInviteLink(groupId, telegram, { creates_join_request: true });
+    } catch (error) {
+      // Non-critical error - group can still be recycled, link will be created when needed
+      return null;
+    }
+  }
+
+  /**
    * Delete all messages in a group and unpin all pinned messages
    * Note: Telegram only allows deleting messages less than 48 hours old
-   * This function uses tracked message IDs from escrow and tries to delete messages around them
+   * This function aggressively tries to delete all bot messages by:
+   * 1. Deleting tracked message IDs from escrow
+   * 2. Sending a test message to get current message ID
+   * 3. Attempting to delete ALL messages from 1 to current (in batches)
+   * 
+   * IMPORTANT: Bots can only delete their own messages, not user messages
    */
   async deleteAllGroupMessages(groupId, telegram, escrow = null) {
     try {
@@ -684,13 +723,13 @@ class GroupPoolService {
       // Unpin all pinned messages first
       try {
         await telegram.unpinAllChatMessages(chatId);
-        console.log(`✅ Unpinned all messages in group ${chatId}`);
       } catch (unpinError) {
-        console.log(`Note: Could not unpin messages in group ${chatId}:`, unpinError?.message || 'Unknown error');
+        // Ignore unpin errors
       }
 
       let deletedCount = 0;
       const messageIdsToDelete = new Set();
+      const deletedSet = new Set(); // Track successfully deleted IDs to avoid re-deletion
 
       // Collect all known message IDs from escrow
       if (escrow) {
@@ -698,6 +737,8 @@ class GroupPoolService {
         if (escrow.step1MessageId) messageIdsToDelete.add(escrow.step1MessageId);
         if (escrow.step2MessageId) messageIdsToDelete.add(escrow.step2MessageId);
         if (escrow.step3MessageId) messageIdsToDelete.add(escrow.step3MessageId);
+        if (escrow.step4ChainMessageId) messageIdsToDelete.add(escrow.step4ChainMessageId);
+        if (escrow.step4CoinMessageId) messageIdsToDelete.add(escrow.step4CoinMessageId);
         if (escrow.step5BuyerAddressMessageId) messageIdsToDelete.add(escrow.step5BuyerAddressMessageId);
         if (escrow.step6SellerAddressMessageId) messageIdsToDelete.add(escrow.step6SellerAddressMessageId);
         if (escrow.dealSummaryMessageId) messageIdsToDelete.add(escrow.dealSummaryMessageId);
@@ -707,79 +748,124 @@ class GroupPoolService {
         if (escrow.roleSelectionMessageId) messageIdsToDelete.add(escrow.roleSelectionMessageId);
       }
 
-      // Delete all known message IDs
+      // Delete all known message IDs first
       for (const msgId of messageIdsToDelete) {
         try {
           await telegram.deleteMessage(chatId, msgId);
           deletedCount++;
-          await new Promise(resolve => setTimeout(resolve, 50));
+          deletedSet.add(msgId);
+          await new Promise(resolve => setTimeout(resolve, 20)); // Small delay between deletions
         } catch (deleteError) {
-          // Message might not exist or is too old - continue
+          // Message might not exist, is too old, or wasn't sent by bot - continue
         }
       }
 
-      // Try to delete messages in a range around known message IDs
-      // Telegram message IDs are sequential, so we can try ranges around known IDs
-      if (messageIdsToDelete.size > 0) {
-        const knownIds = Array.from(messageIdsToDelete).sort((a, b) => a - b);
-        const minId = Math.min(...knownIds);
-        const maxId = Math.max(...knownIds);
+      // Get current message ID by sending a test message
+      // This gives us the latest message ID to work backwards from
+      let currentMessageId = null;
+      try {
+        const testMsg = await telegram.sendMessage(chatId, '🧹');
+        currentMessageId = testMsg.message_id;
         
-        // Try to delete messages in a range around the known IDs (extend by 1000 messages in each direction)
-        const rangeStart = Math.max(1, minId - 1000);
-        const rangeEnd = maxId + 1000;
+        // Immediately delete the test message
+        try {
+          await telegram.deleteMessage(chatId, currentMessageId);
+          deletedCount++;
+          deletedSet.add(currentMessageId);
+        } catch (e) {
+          // Test message deletion failed - continue anyway
+        }
+      } catch (testError) {
+        // Could not send test message - try to use known message IDs for range
+        if (messageIdsToDelete.size > 0) {
+          const knownIds = Array.from(messageIdsToDelete).sort((a, b) => a - b);
+          currentMessageId = Math.max(...knownIds) + 100; // Estimate range
+        } else {
+          // No way to determine message range - return what we've deleted so far
+          return deletedCount;
+        }
+      }
+
+      if (!currentMessageId) {
+        return deletedCount;
+      }
+
+      // Determine range to delete
+      // Start from a reasonable minimum (groups usually start from message ID 1 or 2)
+      const startId = 1;
+      const endId = currentMessageId;
+      
+      // Delete messages in batches - try to delete ALL messages, not just sampled ones
+      // But we need to be careful with rate limits, so we'll delete in smaller batches with delays
+      const BATCH_SIZE = 50; // Delete 50 messages at a time
+      const DELAY_BETWEEN_BATCHES = 100; // 100ms delay between batches
+      const DELAY_BETWEEN_MESSAGES = 10; // 10ms delay between individual messages
+      
+      let consecutiveErrors = 0;
+      const MAX_CONSECUTIVE_ERRORS = 20; // Stop after 20 consecutive errors
+      
+      // Delete messages from endId backwards to startId (newer messages first)
+      // This is more efficient as newer messages are more likely to be deletable
+      // NOTE: Bots can only delete their own messages. User messages cannot be deleted.
+      let totalAttempted = 0;
+      for (let batchStart = endId; batchStart >= startId; batchStart -= BATCH_SIZE) {
+        const batchEnd = Math.max(startId, batchStart - BATCH_SIZE + 1);
+        let batchDeleted = 0;
+        let batchErrors = 0;
         
-        // Delete messages in batches (sample every 10th message to avoid too many requests)
-        for (let msgId = rangeStart; msgId <= rangeEnd; msgId += 10) {
-          if (messageIdsToDelete.has(msgId)) continue; // Already deleted
+        for (let msgId = batchStart; msgId >= batchEnd; msgId--) {
+          // Skip if already deleted
+          if (deletedSet.has(msgId)) continue;
           
+          totalAttempted++;
           try {
             await telegram.deleteMessage(chatId, msgId);
             deletedCount++;
-            await new Promise(resolve => setTimeout(resolve, 30));
-          } catch (deleteError) {
-            // Message doesn't exist or can't be deleted - continue
-          }
-        }
-      } else {
-        // No known message IDs - try to delete recent messages
-        // Get a recent message ID by sending a test message and deleting it
-        try {
-          const testMsg = await telegram.sendMessage(chatId, '🧹 Cleaning up...');
-          const recentMsgId = testMsg.message_id;
-          
-          // Try to delete messages backwards from the recent message
-          // Telegram only allows deleting messages less than 48 hours old
-          const maxRange = 5000; // Reasonable range for a trade group
-          for (let i = 0; i < maxRange; i++) {
-            const msgIdToTry = recentMsgId - i;
-            if (msgIdToTry < 1) break;
+            deletedSet.add(msgId);
+            batchDeleted++;
+            consecutiveErrors = 0; // Reset error counter on success
             
-            try {
-              await telegram.deleteMessage(chatId, msgIdToTry);
-              deletedCount++;
-              await new Promise(resolve => setTimeout(resolve, 30));
-            } catch (deleteError) {
-              // Message doesn't exist or can't be deleted
-              const errorMsg = deleteError?.response?.description || deleteError?.message || '';
-              if (errorMsg.includes('message to delete not found') || 
-                  errorMsg.includes('message can\'t be deleted')) {
-                // Stop if we hit messages that can't be deleted (likely too old)
-                break;
-              }
+            // Small delay between messages to avoid rate limiting
+            if (msgId > batchEnd) {
+              await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_MESSAGES));
+            }
+          } catch (deleteError) {
+            consecutiveErrors++;
+            batchErrors++;
+            
+            // Check error type for debugging
+            const errorMsg = deleteError?.response?.description || deleteError?.message || '';
+            const errorCode = deleteError?.response?.error_code;
+            
+            // Common errors:
+            // - 400: Bad Request (message not found, can't be deleted, etc.)
+            // - 403: Forbidden (not sent by bot, no permission)
+            // Continue trying other messages - these are expected for user messages
+            
+            // Stop if we hit too many consecutive errors (likely reached undeletable messages)
+            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+              // Break out of inner loop to try next batch
+              break;
             }
           }
-          
-          // Delete the test message itself
-          try {
-            await telegram.deleteMessage(chatId, recentMsgId);
-          } catch (e) {}
-        } catch (testError) {
-          console.log('Note: Could not send test message for cleanup:', testError.message);
+        }
+        
+        // If batch had no successful deletions and many errors, we might have hit the end
+        if (batchDeleted === 0 && consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+          // Try one more smaller range before giving up
+          if (batchStart > startId + 100) {
+            // Continue to try a bit more
+          } else {
+            break;
+          }
+        }
+        
+        // Delay between batches to avoid rate limiting
+        if (batchStart > batchEnd) {
+          await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
         }
       }
 
-      console.log(`✅ Deleted ${deletedCount} messages from group ${chatId}`);
       return deletedCount;
     } catch (error) {
       console.error('Error deleting all group messages:', error);

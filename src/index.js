@@ -782,16 +782,17 @@ Waiting for @${buyerUsername} to confirm...`;
             try {
               await GroupPoolService.deleteAllGroupMessages(group.groupId, telegram, freshEscrow);
             } catch (deleteError) {
-              console.log('Note: Could not delete all messages during recycling:', deleteError.message);
+              // Could not delete all messages - continue with recycling
             }
             
+            // Refresh invite link (revoke old and create new) so removed users can rejoin
+            await GroupPoolService.refreshInviteLink(group.groupId, telegram);
+            
             // Recycle group back to pool
-            // IMPORTANT: Do NOT clear group.inviteLink - we keep the permanent link for reuse
             group.status = 'available';
             group.assignedEscrowId = null;
             group.assignedAt = null;
             group.completedAt = null;
-            // Keep inviteLink - it's permanent and will be reused
             await group.save();
             
             await telegram.sendMessage(

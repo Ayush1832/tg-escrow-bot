@@ -632,17 +632,18 @@ ${closeStatus}`;
           try {
             await GroupPoolService.deleteAllGroupMessages(group.groupId, ctx.telegram, updatedEscrow);
           } catch (deleteError) {
-            console.log('Note: Could not delete all messages during trade close:', deleteError.message);
+            // Could not delete all messages - continue with recycling
           }
+
+          // Refresh invite link (revoke old and create new) so removed users can rejoin
+          await GroupPoolService.refreshInviteLink(group.groupId, ctx.telegram);
 
           if (allUsersRemoved) {
             // Only add back to pool if ALL users were successfully removed
-            // IMPORTANT: Do NOT clear group.inviteLink - we keep the permanent link for reuse
             group.status = 'available';
             group.assignedEscrowId = null;
             group.assignedAt = null;
             group.completedAt = null;
-            // Keep inviteLink - it's permanent and will be reused
             await group.save();
               
               await ctx.telegram.sendMessage(
@@ -1057,16 +1058,17 @@ ${closeStatus}`;
             try {
               await GroupPoolService.deleteAllGroupMessages(group.groupId, ctx.telegram, escrow);
             } catch (deleteError) {
-              console.log('Note: Could not delete all messages during recycling:', deleteError.message);
+              // Could not delete all messages - continue with recycling
             }
+
+            // Refresh invite link (revoke old and create new) so removed users can rejoin
+            await GroupPoolService.refreshInviteLink(group.groupId, ctx.telegram);
             
             // Recycle group back to pool
-            // IMPORTANT: Do NOT clear group.inviteLink - we keep the permanent link for reuse
             group.status = 'available';
             group.assignedEscrowId = null;
             group.assignedAt = null;
             group.completedAt = null;
-            // Keep inviteLink - it's permanent and will be reused
             await group.save();
           }
         } catch (recycleError) {
