@@ -80,37 +80,55 @@ class GroupPoolService {
 
       const chatId = String(groupId);
 
-      // IMPORTANT: Always try to use the primary invite link first
-      // Primary invite links work for everyone, including previously removed users
-      // This is critical for groups that are recycled after users are removed
-      try {
-        const primaryLink = await telegram.exportChatInviteLink(chatId);
-        if (primaryLink) {
-          // Update group with primary invite link (this revokes any previous primary link)
-          group.inviteLink = primaryLink;
-          await group.save();
-          return primaryLink;
-        }
-      } catch (exportError) {
-        // Primary link export failed - might not have permission or group doesn't have primary link
-        // Continue to check stored link or create new one
-      }
-
-      // If primary link export failed, check if we have a stored link
-      // Strategy: Reuse existing invite link if it exists
-      // Only create a new link if the group doesn't have one
-      if (group.inviteLink) {
-        // Verify the existing link is still valid by checking chat info
-        try {
-          await telegram.getChat(chatId);
-          
-          // Link exists and chat is accessible - reuse it
-          return group.inviteLink;
-        } catch (verifyError) {
-          // Link might be invalid or chat might have issues
-          // Clear it and create a new one
+      // IMPORTANT: If join request approval is required, we MUST create a new link with creates_join_request: true
+      // Primary invite links (from exportChatInviteLink) do NOT support join request approval
+      // They allow direct joining without verification, which is a security issue
+      if (options.creates_join_request === true) {
+        // Skip primary link and stored link - we need a link with join request approval
+        // This ensures only verified users can join
+        // Revoke any existing stored link first to avoid having multiple links
+        if (group.inviteLink) {
+          try {
+            await telegram.revokeChatInviteLink(chatId, group.inviteLink);
+          } catch (revokeError) {
+            // Link might already be revoked or invalid - continue to create new one
+            // Error is non-critical - we'll create a new link anyway
+          }
           group.inviteLink = null;
           await group.save();
+        }
+      } else {
+        // For non-restricted links, try to use the primary invite link first
+        // Primary invite links work for everyone, including previously removed users
+        try {
+          const primaryLink = await telegram.exportChatInviteLink(chatId);
+          if (primaryLink) {
+            // Update group with primary invite link (this revokes any previous primary link)
+            group.inviteLink = primaryLink;
+            await group.save();
+            return primaryLink;
+          }
+        } catch (exportError) {
+          // Primary link export failed - might not have permission or group doesn't have primary link
+          // Continue to check stored link or create new one
+        }
+
+        // If primary link export failed, check if we have a stored link
+        // Strategy: Reuse existing invite link if it exists
+        // Only create a new link if the group doesn't have one
+        if (group.inviteLink) {
+          // Verify the existing link is still valid by checking chat info
+          try {
+            await telegram.getChat(chatId);
+            
+            // Link exists and chat is accessible - reuse it
+            return group.inviteLink;
+          } catch (verifyError) {
+            // Link might be invalid or chat might have issues
+            // Clear it and create a new one
+            group.inviteLink = null;
+            await group.save();
+          }
         }
       }
 
@@ -689,6 +707,7 @@ class GroupPoolService {
   /**
    * Revoke old invite link and create a new one for a group
    * This is necessary when users are removed, as they cannot rejoin using the same link
+   * IMPORTANT: Always creates a link with join request approval to ensure security
    */
   async refreshInviteLink(groupId, telegram) {
     try {
@@ -699,22 +718,12 @@ class GroupPoolService {
         return null;
       }
 
-      // Strategy: Try to export the primary invite link first
-      // Primary invite links work for everyone, including previously removed users
-      try {
-        const primaryLink = await telegram.exportChatInviteLink(chatId);
-        if (primaryLink) {
-          // Update group with primary invite link
-          group.inviteLink = primaryLink;
-          await group.save();
-          return primaryLink;
-        }
-      } catch (exportError) {
-        // Primary link export failed - continue to create new link
-        // This might happen if bot doesn't have permission or group doesn't have primary link
-      }
+      // IMPORTANT: We MUST create a link with join request approval for security
+      // Primary invite links (from exportChatInviteLink) do NOT support join request approval
+      // They allow direct joining without verification, which is a security issue
+      // So we skip primary link export and always create a new link with creates_join_request: true
 
-      // If primary link export failed, revoke old link and create new one
+      // Revoke old link if it exists
       if (group.inviteLink) {
         try {
           // Telegram API accepts the full invite link URL string
@@ -727,7 +736,7 @@ class GroupPoolService {
         await group.save();
       }
 
-      // Create a new permanent invite link
+      // Create a new permanent invite link with join request approval
       return await this.generateInviteLink(groupId, telegram, { creates_join_request: true });
     } catch (error) {
       // Non-critical error - group can still be recycled, link will be created when needed
