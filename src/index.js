@@ -699,65 +699,6 @@ Waiting for @${buyerUsername} to confirm...`;
     });
     
 
-    this.bot.use(async (ctx, next) => {
-      try {
-        const chatId = ctx.chat.id;
-        if (chatId > 0 || !ctx.message || !ctx.message.text) return next();
-        
-        if (ctx.message.text.startsWith('/')) return next();
-                
-        const escrow = await Escrow.findOne({ 
-          groupId: chatId.toString(), 
-          status: { $in: ['awaiting_details', 'draft'] }
-        });
-        if (!escrow) {
-          return next();
-        }
-        
-        if (escrow.tradeDetailsStep && escrow.tradeDetailsStep !== 'completed') {
-          return next();
-        }
-                
-        const text = ctx.message.text;
-        const qtyMatch = text.match(/Quantity\s*[-:]*\s*(\d+(?:\.\d+)?)/i);
-        const rateMatch = text.match(/Rate\s*[-:]*\s*(\d+(?:\.\d+)?)/i);
-        
-        if (!qtyMatch || !rateMatch) {
-          return ctx.reply('❌ Please provide at least Quantity and Rate in the format:\nQuantity - 10\nRate - 90');
-        }
-        
-        const newQuantity = Number(qtyMatch[1]);
-        const newRate = Number(rateMatch[1]);
-        
-        
-        escrow.quantity = newQuantity;
-        escrow.rate = newRate;
-        escrow.status = 'draft';
-        if (!escrow.tradeStartTime) {
-          escrow.tradeStartTime = escrow.createdAt || new Date();
-        }
-        await escrow.save();
-        
-        await ctx.reply('✅ Deal details saved.');
-        const roleSelectionMsg = await ctx.reply('👤 Both users select your roles:', {
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: '💰 I am Buyer', callback_data: 'select_role_buyer' },
-                { text: '💵 I am Seller', callback_data: 'select_role_seller' }
-              ]
-            ]
-          }
-        });
-        escrow.roleSelectionMessageId = roleSelectionMsg.message_id;
-        await escrow.save();
-        return;
-      } catch (e) {
-        console.error('deal details parse error', e);
-      }
-      return next();
-    });
-    
     // Helper function to settle and recycle group
     const settleAndRecycleGroup = async (escrow, telegram) => {
       try {
