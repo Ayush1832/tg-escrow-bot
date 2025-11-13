@@ -9,6 +9,110 @@ const Contract = require('../models/Contract');
 const config = require('../../config');
 const escrowHandler = require('./escrowHandler');
 
+// Track scheduled group recycling timeouts to avoid duplicate timers
+const groupRecyclingTimers = new Map();
+
+async function scheduleGroupRecycling(escrowId, telegram) {
+  if (!escrowId || !telegram) {
+    return;
+  }
+
+  if (groupRecyclingTimers.has(escrowId)) {
+    return; // Recycling already scheduled
+  }
+
+  const timeoutId = setTimeout(async () => {
+    groupRecyclingTimers.delete(escrowId);
+    try {
+      const finalEscrow = await Escrow.findOne({ escrowId });
+      if (!finalEscrow) {
+        return;
+      }
+
+      const group = await GroupPool.findOne({
+        assignedEscrowId: finalEscrow.escrowId
+      });
+
+      if (group) {
+        const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(finalEscrow, group.groupId, telegram);
+
+        try {
+          await GroupPoolService.deleteAllGroupMessages(group.groupId, telegram, finalEscrow);
+        } catch (_) {
+          // Best-effort deletion; continue even if it fails
+        }
+
+        if (allUsersRemoved) {
+          try {
+            await GroupPoolService.refreshInviteLink(group.groupId, telegram);
+          } catch (refreshError) {
+            console.error('Error refreshing invite link during recycling:', refreshError);
+          }
+
+          group.status = 'available';
+          group.assignedEscrowId = null;
+          group.assignedAt = null;
+          group.completedAt = null;
+          await group.save();
+
+          try {
+            await telegram.sendMessage(
+              finalEscrow.groupId,
+              '✅ Group has been recycled and is ready for a new trade.'
+            );
+          } catch (sendError) {
+            console.error('Error sending recycled notification:', sendError);
+          }
+        } else {
+          group.status = 'completed';
+          group.assignedEscrowId = null;
+          group.assignedAt = null;
+          group.completedAt = new Date();
+          await group.save();
+
+          try {
+            await telegram.sendMessage(
+              finalEscrow.groupId,
+              '✅ Trade closed successfully! Both parties have confirmed. Note: Some users could not be removed from the group.'
+            );
+          } catch (sendError) {
+            console.error('Error sending partial recycling notification:', sendError);
+          }
+        }
+      } else {
+        try {
+          await telegram.sendMessage(
+            finalEscrow.groupId,
+            '✅ Trade closed successfully! Both parties have confirmed.'
+          );
+        } catch (sendError) {
+          console.error('Error sending completion notification:', sendError);
+        }
+      }
+    } catch (error) {
+      console.error('Error recycling group after delay:', error);
+    }
+  }, 5 * 60 * 1000);
+
+  groupRecyclingTimers.set(escrowId, timeoutId);
+}
+
+async function announceAndScheduleRecycling(escrow, ctx, messageText) {
+  if (!escrow || !ctx || !ctx.telegram) {
+    return;
+  }
+
+  const announcement = messageText || '✅ Trade closed successfully! Group will be recycled in 5 minutes.';
+
+  try {
+    await ctx.telegram.sendMessage(escrow.groupId, announcement);
+  } catch (sendError) {
+    console.error('Error sending recycling announcement:', sendError);
+  }
+
+  await scheduleGroupRecycling(escrow.escrowId, ctx.telegram);
+}
+
 /**
  * Update the role selection message with current status
  */
@@ -613,77 +717,12 @@ ${closeStatus}`;
 
       // Check if both have confirmed
       if (updatedEscrow.buyerClosedTrade && updatedEscrow.sellerClosedTrade) {
-        // Both confirmed - send confirmation message and schedule recycling after 5 minutes
-        const confirmationMsg = await ctx.telegram.sendMessage(
-          updatedEscrow.groupId,
+        // Both confirmed - announce and schedule recycling (5 minutes)
+        await announceAndScheduleRecycling(
+          updatedEscrow,
+          ctx,
           '✅ Trade closed successfully! Both parties have confirmed. Group will be recycled in 5 minutes. Proceed to exit this group'
         );
-        
-        // Schedule group recycling after 5 minutes
-        setTimeout(async () => {
-          try {
-            // Re-fetch escrow to ensure we have latest state
-            const finalEscrow = await Escrow.findOne({ escrowId: updatedEscrow.escrowId });
-            if (!finalEscrow) {
-              return; // Escrow was deleted, nothing to do
-            }
-            
-            // Recycle group - remove users and return to pool
-            const group = await GroupPool.findOne({ 
-              assignedEscrowId: finalEscrow.escrowId 
-            });
-
-            if (group) {
-              // Remove ALL users from group (buyer, seller, admins, everyone)
-              const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(finalEscrow, group.groupId, ctx.telegram);
-
-              // Delete all messages and unpin pinned messages before recycling
-              try {
-                await GroupPoolService.deleteAllGroupMessages(group.groupId, ctx.telegram, finalEscrow);
-              } catch (deleteError) {
-                // Could not delete all messages - continue with recycling
-              }
-
-              // Refresh invite link (revoke old and create new) so removed users can rejoin
-              await GroupPoolService.refreshInviteLink(group.groupId, ctx.telegram);
-
-              if (allUsersRemoved) {
-                // Only add back to pool if ALL users were successfully removed
-                group.status = 'available';
-                group.assignedEscrowId = null;
-                group.assignedAt = null;
-                group.completedAt = null;
-                await group.save();
-                
-                await ctx.telegram.sendMessage(
-                  finalEscrow.groupId,
-                  '✅ Group has been recycled and is ready for a new trade.'
-                );
-              } else {
-                // Mark as completed but don't add back to pool if users couldn't be removed
-                // IMPORTANT: Do NOT clear group.inviteLink even here - link stays valid
-                group.status = 'completed';
-                group.assignedEscrowId = null;
-                group.assignedAt = null;
-                group.completedAt = new Date();
-                // Keep inviteLink - it's permanent
-                await group.save();
-                
-                await ctx.telegram.sendMessage(
-                  finalEscrow.groupId,
-                  '✅ Trade closed successfully! Both parties have confirmed. Note: Some users could not be removed from the group.'
-                );
-              }
-            } else {
-              await ctx.telegram.sendMessage(
-                finalEscrow.groupId,
-                '✅ Trade closed successfully! Both parties have confirmed.'
-              );
-            }
-          } catch (error) {
-            console.error('Error recycling group after delay:', error);
-          }
-        }, 5 * 60 * 1000); // 5 minutes delay
       }
       
       return;
@@ -960,9 +999,10 @@ ${closeStatus}`;
       
       if (isYes) {
         await ctx.answerCbQuery('✅ Confirmed receipt of tokens.');
-        await ctx.telegram.sendMessage(
-          escrow.groupId,
-          `✅ Buyer confirmed receipt of tokens. Trade completed successfully!`
+        await announceAndScheduleRecycling(
+          escrow,
+          ctx,
+          '✅ Buyer confirmed receipt of tokens. Trade completed successfully! Group will be recycled in 5 minutes.'
         );
       } else {
         await ctx.answerCbQuery('⚠️ Issue reported.');

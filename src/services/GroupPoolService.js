@@ -677,9 +677,18 @@ class GroupPoolService {
           continue;
         }
 
-        // Try to remove the user
+        // Try to remove the user without leaving them banned
         try {
-          await telegram.kickChatMember(chatId, userId);
+          const untilDate = Math.floor(Date.now() / 1000) + 60; // minimum 60s per Telegram requirements
+          await telegram.kickChatMember(chatId, userId, untilDate);
+          
+          // Immediately lift the ban so user can rejoin when needed
+          try {
+            await telegram.unbanChatMember(chatId, userId);
+          } catch (unbanError) {
+            // Ignore if user was not banned or bot lacks permission
+          }
+          
           removedCount++;
         } catch (kickError) {
           // User might have already left, or bot doesn't have permission

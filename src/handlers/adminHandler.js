@@ -609,7 +609,6 @@ async function adminTradeStats(ctx) {
       statsMessage += `\n\n💰 **${feeDisplay} FEE STRUCTURE:**
 • **Trades:** ${stats.totalTrades}
 • **Volume:** ${stats.totalAmount.toFixed(2)} tokens
-• **Contracts:** ${stats.contracts} deployed
 • **Avg per Trade:** ${stats.totalTrades > 0 ? (stats.totalAmount / stats.totalTrades).toFixed(2) : 0} tokens`;
 
       // Add token breakdown if there are trades
@@ -622,13 +621,7 @@ async function adminTradeStats(ctx) {
     }
 
     // Add system information
-    statsMessage += `\n\n🔧 **SYSTEM INFO:**
-• **Current Fee:** ${config.ESCROW_FEE_PERCENT}%
-• **Supported Tokens:** ${Array.from(allTokens).join(', ') || 'None'}
-• **Supported Networks:** ${Array.from(allNetworks).join(', ') || 'None'}
-• **Total Contracts:** ${contracts.length}
-
-📅 **Last Updated:** ${new Date().toLocaleString()}`;
+    statsMessage += `📅 **Last Updated:** ${new Date().toLocaleString()}`;
 
     await ctx.reply(statsMessage, { parse_mode: 'Markdown' });
 
