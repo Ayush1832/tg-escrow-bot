@@ -88,6 +88,16 @@ const escrowSchema = new mongoose.Schema({
     required: false,
     index: true // Index for faster duplicate checking
   },
+  // Store multiple transaction hashes for partial deposits
+  partialTransactionHashes: {
+    type: [String],
+    default: []
+  },
+  // Store accumulated deposit amount from partial deposits
+  accumulatedDepositAmount: {
+    type: Number,
+    default: 0
+  },
   // Store the actual from address of the deposit transaction (can be any address)
   depositTransactionFromAddress: {
     type: String,
@@ -95,6 +105,11 @@ const escrowSchema = new mongoose.Schema({
   },
   // Store release transaction hash (when funds are released)
   releaseTransactionHash: {
+    type: String,
+    required: false
+  },
+  // Store refund transaction hash (when funds are refunded)
+  refundTransactionHash: {
     type: String,
     required: false
   },

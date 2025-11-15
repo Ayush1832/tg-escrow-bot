@@ -392,8 +392,12 @@ class EscrowBot {
           txHash = '0x' + txHash;
         }
         
+        // Check if this transaction hash was already used in any escrow
         const existingEscrow = await Escrow.findOne({
-          transactionHash: txHash
+          $or: [
+            { transactionHash: txHash },
+            { partialTransactionHashes: txHash }
+          ]
         });
         
         if (existingEscrow) {
@@ -401,12 +405,9 @@ class EscrowBot {
           return;
         }
         
-        if (escrow.transactionHash) {
-          if (escrow.transactionHash === txHash) {
-            await ctx.reply('❌ This transaction has already been submitted for this trade. Please wait for confirmation or contact support if there\'s an issue.');
-            return;
-          }
-          await ctx.reply('❌ This escrow already has a transaction hash. Cannot submit a different one.');
+        // Check if this transaction was already submitted for this escrow
+        if (escrow.transactionHash === txHash || (escrow.partialTransactionHashes && escrow.partialTransactionHashes.includes(txHash))) {
+          await ctx.reply('❌ This transaction has already been submitted for this trade. Please wait for confirmation or contact support if there\'s an issue.');
           return;
         }
         
@@ -484,69 +485,115 @@ class EscrowBot {
           const expectedAmount = escrow.quantity || 0;
           const tolerance = 0.01;
           
-          if (Math.abs(amount - expectedAmount) > tolerance) {
-            await ctx.reply(`⚠️ Amount mismatch. Expected: ${expectedAmount} ${escrow.token}, Found: ${amount.toFixed(2)} ${escrow.token}`);
-            return;
-          }
-          
+          // Get fresh escrow to check current accumulated amount
           const freshEscrow = await Escrow.findById(escrow._id);
-          if (freshEscrow.transactionHash) {
-            if (freshEscrow.transactionHash === txHash) {
-              await ctx.reply('❌ This transaction has already been submitted for this trade. Please wait for confirmation.');
-              return;
-            }
-            await ctx.reply('❌ This escrow already has a transaction hash. Cannot submit a different one.');
+          
+          // Calculate accumulated amount (including this new transaction)
+          const currentAccumulated = freshEscrow.accumulatedDepositAmount || 0;
+          const newAccumulated = currentAccumulated + amount;
+          const remainingAmount = expectedAmount - newAccumulated;
+          
+          // Check if amount exceeds expected (with tolerance)
+          if (newAccumulated > expectedAmount + tolerance) {
+            await ctx.reply(`⚠️ Total deposit amount exceeds expected amount. Expected: ${expectedAmount} ${escrow.token}, Total received: ${newAccumulated.toFixed(2)} ${escrow.token}`);
             return;
           }
           
-          freshEscrow.transactionHash = txHash;
-          freshEscrow.depositAmount = amount;
-          freshEscrow.depositTransactionFromAddress = from;
+          // Check if this transaction was already added
+          if (freshEscrow.transactionHash === txHash || (freshEscrow.partialTransactionHashes && freshEscrow.partialTransactionHashes.includes(txHash))) {
+            await ctx.reply('❌ This transaction has already been submitted for this trade. Please wait for confirmation.');
+            return;
+          }
+          
+          // Update accumulated amount and transaction hashes
+          freshEscrow.accumulatedDepositAmount = newAccumulated;
+          
+          // If this is the first transaction, store it in transactionHash, otherwise add to partialTransactionHashes
+          if (!freshEscrow.transactionHash) {
+            freshEscrow.transactionHash = txHash;
+            freshEscrow.depositTransactionFromAddress = from;
+          } else {
+            if (!freshEscrow.partialTransactionHashes) {
+              freshEscrow.partialTransactionHashes = [];
+            }
+            freshEscrow.partialTransactionHashes.push(txHash);
+          }
+          
+          freshEscrow.depositAmount = newAccumulated;
           await freshEscrow.save();
           
-          try {
-            await ctx.telegram.deleteMessage(chatId, freshEscrow.transactionHashMessageId);
-          } catch (e) {
-            console.error('Failed to delete transaction hash message:', e);
-          }
-          
-          try {
-            await ctx.telegram.deleteMessage(chatId, ctx.message.message_id);
-          } catch (e) {
-            console.error('Failed to delete transaction link message:', e);
-          }
-          
-          const buyerUsername = freshEscrow.buyerUsername || 'Buyer';
-          const txHashShort = txHash.substring(0, 10) + '...';
-          
-          const txDetailsText = `<b>OG OTC Bot 🤖</b>
+          // Check if full amount has been received
+          if (Math.abs(newAccumulated - expectedAmount) <= tolerance) {
+            // Full amount received - proceed to confirmation
+            try {
+              await ctx.telegram.deleteMessage(chatId, freshEscrow.transactionHashMessageId);
+            } catch (e) {
+              console.error('Failed to delete transaction hash message:', e);
+            }
+            
+            try {
+              await ctx.telegram.deleteMessage(chatId, ctx.message.message_id);
+            } catch (e) {
+              console.error('Failed to delete transaction link message:', e);
+            }
+            
+            const buyerUsername = freshEscrow.buyerUsername || 'Buyer';
+            const txHashShort = txHash.substring(0, 10) + '...';
+            const totalTxCount = 1 + (freshEscrow.partialTransactionHashes ? freshEscrow.partialTransactionHashes.length : 0);
+            
+            let txDetailsText = `<b>OG OTC Bot 🤖</b>
 
 🟢 Exact ${freshEscrow.token} found
 
-<b>Amount:</b> ${amount.toFixed(1)}
-<b>From:</b> <code>${from}</code>
-<b>To:</b> <code>${to}</code>
-<b>Tx:</b> <code>${txHashShort}</code>
-
-Waiting for @${buyerUsername} to confirm...`;
-          
-          const txDetailsMsg = await ctx.telegram.sendMessage(
-            chatId,
-            txDetailsText,
-            {
-              parse_mode: 'HTML',
-              reply_markup: {
-                inline_keyboard: [
-                  [{ text: 'Confirm ✅', callback_data: `confirm_transaction_${freshEscrow.escrowId}` }]
-                ]
-              }
+<b>Total Amount:</b> ${newAccumulated.toFixed(2)} ${freshEscrow.token}
+<b>Transactions:</b> ${totalTxCount} transaction(s)
+<b>Latest Tx:</b> <code>${txHashShort}</code>`;
+            
+            if (totalTxCount > 1) {
+              txDetailsText += `\n\n✅ Full amount received through ${totalTxCount} transaction(s)`;
             }
-          );
-          
-          freshEscrow.transactionHashMessageId = txDetailsMsg.message_id;
-          await freshEscrow.save();
-          
-          return;
+            
+            txDetailsText += `\n\nWaiting for @${buyerUsername} to confirm...`;
+            
+            const txDetailsMsg = await ctx.telegram.sendMessage(
+              chatId,
+              txDetailsText,
+              {
+                parse_mode: 'HTML',
+                reply_markup: {
+                  inline_keyboard: [
+                    [{ text: 'Confirm ✅', callback_data: `confirm_transaction_${freshEscrow.escrowId}` }]
+                  ]
+                }
+              }
+            );
+            
+            freshEscrow.transactionHashMessageId = txDetailsMsg.message_id;
+            await freshEscrow.save();
+            
+            return;
+          } else {
+            // Partial deposit - ask seller to send remaining amount
+            const remainingFormatted = remainingAmount.toFixed(2);
+            await ctx.reply(
+              `✅ Partial deposit received: ${amount.toFixed(2)} ${escrow.token}\n\n` +
+              `📊 Total received so far: ${newAccumulated.toFixed(2)} ${escrow.token}\n` +
+              `💰 Remaining amount needed: ${remainingFormatted} ${escrow.token}\n\n` +
+              `Please send the remaining ${remainingFormatted} ${escrow.token} to the same deposit address:\n` +
+              `<code>${escrow.depositAddress}</code>\n\n` +
+              `After sending, provide the new transaction hash.`,
+              { parse_mode: 'HTML' }
+            );
+            
+            // Delete the transaction hash message if it exists
+            try {
+              await ctx.telegram.deleteMessage(chatId, ctx.message.message_id);
+            } catch (e) {
+              console.error('Failed to delete transaction link message:', e);
+            }
+            
+            return;
+          }
         } catch (err) {
           console.error('Error fetching transaction:', err);
           await ctx.reply('❌ Error fetching transaction details. Please check the transaction hash and try again.');
@@ -799,20 +846,43 @@ Waiting for @${buyerUsername} to confirm...`;
             amount
           );
           
+          if (!releaseResult || !releaseResult.success) {
+            throw new Error('Release transaction failed - no result returned');
+          }
+          
           escrow.status = 'completed';
-          if (releaseResult && releaseResult.transactionHash) {
+          if (releaseResult.transactionHash) {
             escrow.releaseTransactionHash = releaseResult.transactionHash;
           }
           await escrow.save();
           
-          await ctx.reply(`✅ ${amount.toFixed(5)} ${escrow.token} has been released to buyer's address!`);
+          let successMessage = `✅ ${amount.toFixed(5)} ${escrow.token} has been released to buyer's address!`;
+          if (releaseResult.transactionHash) {
+            // Generate explorer link based on chain
+            let explorerUrl = '';
+            const chainUpper = escrow.chain.toUpperCase();
+            if (chainUpper === 'BSC' || chainUpper === 'BNB') {
+              explorerUrl = `https://bscscan.com/tx/${releaseResult.transactionHash}`;
+            } else if (chainUpper === 'ETH' || chainUpper === 'ETHEREUM') {
+              explorerUrl = `https://etherscan.io/tx/${releaseResult.transactionHash}`;
+            } else if (chainUpper === 'POLYGON' || chainUpper === 'MATIC') {
+              explorerUrl = `https://polygonscan.com/tx/${releaseResult.transactionHash}`;
+            }
+            
+            if (explorerUrl) {
+              successMessage += `\n\n🔗 Transaction: ${explorerUrl}`;
+            }
+          }
+          
+          await ctx.reply(successMessage);
           
           // Remove users and recycle group
           await settleAndRecycleGroup(escrow, ctx.telegram);
           
         } catch (error) {
           console.error('Error releasing funds:', error);
-          await ctx.reply('❌ Error releasing funds. Please check the logs.');
+          const errorMessage = error?.message || error?.toString() || 'Unknown error';
+          await ctx.reply(`❌ Error releasing funds: ${errorMessage}`);
         }
         
       } catch (error) {
@@ -862,24 +932,50 @@ Waiting for @${buyerUsername} to confirm...`;
         
         try {
           // Refund funds to seller
-          await BlockchainService.refundFunds(
+          const refundResult = await BlockchainService.refundFunds(
             escrow.token,
             escrow.chain,
             escrow.sellerAddress,
             amount
           );
           
+          if (!refundResult || !refundResult.success) {
+            throw new Error('Refund transaction failed - no result returned');
+          }
+          
           escrow.status = 'refunded';
+          if (refundResult.transactionHash) {
+            escrow.refundTransactionHash = refundResult.transactionHash;
+          }
           await escrow.save();
           
-          await ctx.reply(`✅ ${amount.toFixed(5)} ${escrow.token} has been refunded to seller's address!`);
+          let successMessage = `✅ ${amount.toFixed(5)} ${escrow.token} has been refunded to seller's address!`;
+          if (refundResult.transactionHash) {
+            // Generate explorer link based on chain
+            let explorerUrl = '';
+            const chainUpper = escrow.chain.toUpperCase();
+            if (chainUpper === 'BSC' || chainUpper === 'BNB') {
+              explorerUrl = `https://bscscan.com/tx/${refundResult.transactionHash}`;
+            } else if (chainUpper === 'ETH' || chainUpper === 'ETHEREUM') {
+              explorerUrl = `https://etherscan.io/tx/${refundResult.transactionHash}`;
+            } else if (chainUpper === 'POLYGON' || chainUpper === 'MATIC') {
+              explorerUrl = `https://polygonscan.com/tx/${refundResult.transactionHash}`;
+            }
+            
+            if (explorerUrl) {
+              successMessage += `\n\n🔗 Transaction: ${explorerUrl}`;
+            }
+          }
+          
+          await ctx.reply(successMessage);
           
           // Remove users and recycle group
           await settleAndRecycleGroup(escrow, ctx.telegram);
           
         } catch (error) {
           console.error('Error refunding funds:', error);
-          await ctx.reply('❌ Error refunding funds. Please check the logs.');
+          const errorMessage = error?.message || error?.toString() || 'Unknown error';
+          await ctx.reply(`❌ Error refunding funds: ${errorMessage}`);
         }
         
       } catch (error) {

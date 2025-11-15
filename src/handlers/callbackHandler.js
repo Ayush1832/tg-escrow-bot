@@ -778,27 +778,35 @@ ${closeStatus}`;
       }
       
       // Update escrow status - transaction hash is already saved
-      escrow.confirmedAmount = escrow.depositAmount;
+      // Use accumulated deposit amount if available, otherwise use depositAmount
+      const totalDepositAmount = escrow.accumulatedDepositAmount || escrow.depositAmount || 0;
+      escrow.confirmedAmount = totalDepositAmount;
       escrow.status = 'deposited';
       await escrow.save();
       
       // Update transaction details message
       const buyerUsername = escrow.buyerUsername || 'Buyer';
       const txHashShort = escrow.transactionHash.substring(0, 10) + '...';
+      const totalTxCount = 1 + (escrow.partialTransactionHashes ? escrow.partialTransactionHashes.length : 0);
       
       // Use the actual transaction from address (not seller's refund address)
       const fromAddress = escrow.depositTransactionFromAddress || escrow.sellerAddress || 'N/A';
       
-      const confirmedTxText = `<b>OG OTC Bot 🤖</b>
+      let confirmedTxText = `<b>OG OTC Bot 🤖</b>
 
 🟢 Exact ${escrow.token} found
 
-<b>Amount:</b> ${escrow.depositAmount.toFixed(1)}
+<b>Total Amount:</b> ${totalDepositAmount.toFixed(2)} ${escrow.token}
+<b>Transactions:</b> ${totalTxCount} transaction(s)
 <b>From:</b> <code>${fromAddress}</code>
 <b>To:</b> <code>${escrow.depositAddress}</code>
-<b>Tx:</b> <code>${txHashShort}</code>
-
-✅ Confirmed by @${buyerUsername}`;
+<b>Main Tx:</b> <code>${txHashShort}</code>`;
+      
+      if (totalTxCount > 1) {
+        confirmedTxText += `\n\n✅ Full amount received through ${totalTxCount} transaction(s)`;
+      }
+      
+      confirmedTxText += `\n\n✅ Confirmed by @${buyerUsername}`;
       
       try {
         await ctx.telegram.editMessageText(
