@@ -84,10 +84,28 @@ class GroupPoolService {
       // Primary invite links (from exportChatInviteLink) do NOT support join request approval
       // They allow direct joining without verification, which is a security issue
       if (options.creates_join_request === true) {
-        // Skip primary link and stored link - we need a link with join request approval
-        // This ensures only verified users can join
-        // Revoke any existing stored link first to avoid having multiple links
-        if (group.inviteLink) {
+        // If we already have a link with join request approval, try to reuse it
+        // This prevents invalidating links that were just created during recycling
+        // IMPORTANT: Links with join request approval are created after recycling (after users are unbanned)
+        // So reusing them is safe and allows previously removed users to rejoin
+        if (group.inviteLink && group.inviteLinkHasJoinRequest) {
+          // Verify the link is still valid by checking if we can access the chat
+          try {
+            await telegram.getChat(chatId);
+            // Link exists and chat is accessible - reuse it
+            // This is important: reusing the link allows previously removed users to rejoin
+            // The link was created after recycling (after users were unbanned), so it should work
+            return group.inviteLink;
+          } catch (verifyError) {
+            // Link might be invalid or chat might have issues
+            // Clear it and create a new one
+            group.inviteLink = null;
+            group.inviteLinkHasJoinRequest = false;
+            await group.save();
+          }
+        } else if (group.inviteLink) {
+          // We have a link but it doesn't have join request approval
+          // Revoke it and create a new one with join request approval
           try {
             await telegram.revokeChatInviteLink(chatId, group.inviteLink);
           } catch (revokeError) {
@@ -95,6 +113,7 @@ class GroupPoolService {
             // Error is non-critical - we'll create a new link anyway
           }
           group.inviteLink = null;
+          group.inviteLinkHasJoinRequest = false;
           await group.save();
         }
       } else {
@@ -185,6 +204,7 @@ class GroupPoolService {
 
       // Update group with the new permanent invite link
       group.inviteLink = inviteLinkData.invite_link;
+      group.inviteLinkHasJoinRequest = options.creates_join_request === true;
       await group.save();
 
       return inviteLinkData.invite_link;
@@ -742,11 +762,36 @@ class GroupPoolService {
           // Error is non-critical - we'll create a new link anyway
         }
         group.inviteLink = null;
+        group.inviteLinkHasJoinRequest = false;
         await group.save();
       }
 
+      // Small delay to ensure Telegram has processed all unbans before creating new link
+      // This helps ensure the new link will work for previously removed users
+      // Note: Telegram may need a moment to process unbans, so we wait before creating the link
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Increased to 2 seconds for better reliability
+
       // Create a new permanent invite link with join request approval
-      return await this.generateInviteLink(groupId, telegram, { creates_join_request: true });
+      // This new link will work for previously removed users after they are unbanned
+      // We force creation by passing creates_join_request and ensuring no existing link
+      const newLink = await this.generateInviteLink(groupId, telegram, { creates_join_request: true });
+      
+      // Verify the link was created and saved correctly
+      const updatedGroup = await GroupPool.findOne({ groupId });
+      if (updatedGroup) {
+        if (newLink && updatedGroup.inviteLink === newLink) {
+          // Link is saved correctly, ensure flag is set
+          updatedGroup.inviteLinkHasJoinRequest = true;
+          await updatedGroup.save();
+        } else if (newLink) {
+          // Link was created but not saved - save it now
+          updatedGroup.inviteLink = newLink;
+          updatedGroup.inviteLinkHasJoinRequest = true;
+          await updatedGroup.save();
+        }
+      }
+      
+      return newLink;
     } catch (error) {
       // Non-critical error - group can still be recycled, link will be created when needed
       return null;

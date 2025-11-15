@@ -35,6 +35,10 @@ const groupPoolSchema = new mongoose.Schema({
     type: Date,
     required: false
   },
+  inviteLinkHasJoinRequest: {
+    type: Boolean,
+    default: false
+  },
   createdAt: {
     type: Date,
     default: Date.now
