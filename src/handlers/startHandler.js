@@ -1,7 +1,5 @@
 const { Markup } = require('telegraf');
 const config = require('../../config');
-const fs = require('fs');
-const path = require('path');
 
 module.exports = async (ctx) => {
   const welcomeText = `
@@ -38,24 +36,7 @@ ${config.ESCROW_FEE_PERCENT}% Flat
     ]
   ]).reply_markup;
 
-  const localBannerPath = path.join(process.cwd(), 'public', 'images', 'logo.jpg');
-
-  try {
-    if (fs.existsSync(localBannerPath)) {
-      await ctx.replyWithPhoto({ source: fs.createReadStream(localBannerPath) }, {
-        caption: welcomeText,
-        reply_markup: keyboard
-      });
-    } else {
-      // Fallback to text-only message
-      await ctx.reply(welcomeText, {
-        reply_markup: keyboard
-      });
-    }
-  } catch (err) {
-    // If sending photo fails for any reason, fallback to text message
-    await ctx.reply(welcomeText, {
-      reply_markup: keyboard
-    });
-  }
+  await ctx.reply(welcomeText, {
+    reply_markup: keyboard
+  });
 };

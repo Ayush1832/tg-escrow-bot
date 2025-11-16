@@ -986,12 +986,6 @@ async function adminGroupReset(ctx) {
         return;
       }
 
-      // Delete all messages and unpin pinned messages before recycling
-      try {
-        await GroupPoolService.deleteAllGroupMessages(group.groupId, ctx.telegram, escrow);
-      } catch (deleteError) {
-        // Could not delete all messages - continue with recycling
-      }
 
       // Refresh invite link (revoke old and create new) so removed users can rejoin
       await GroupPoolService.refreshInviteLink(group.groupId, ctx.telegram);
@@ -1122,12 +1116,6 @@ async function adminResetForce(ctx) {
       escrow.inviteLink = null;
       await escrow.save();
 
-      // Delete all messages and unpin pinned messages before recycling
-      try {
-        await GroupPoolService.deleteAllGroupMessages(group.groupId, ctx.telegram, escrow);
-      } catch (deleteError) {
-        // Could not delete all messages - continue with recycling
-      }
 
       // Refresh invite link (revoke old and create new) so removed users can rejoin
       await GroupPoolService.refreshInviteLink(group.groupId, ctx.telegram);

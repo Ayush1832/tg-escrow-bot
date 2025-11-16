@@ -2,8 +2,7 @@ const { Markup } = require("telegraf");
 const Escrow = require("../models/Escrow");
 const AddressAssignmentService = require("../services/AddressAssignmentService");
 const config = require("../../config");
-const fs = require('fs');
-const path = require('path');
+const images = require("../config/images");
 
 module.exports = async (ctx) => {
   try {
@@ -178,71 +177,26 @@ Amount to be Received: $${amountDisplay}
 Remember, once commands are used payment will be released, there is no revert!
     `;
 
-    const depositImage = path.join(process.cwd(), 'public', 'images', 'deposit.png');
-    try {
-      if (fs.existsSync(depositImage)) {
-        await ctx.replyWithPhoto({ source: fs.createReadStream(depositImage) }, {
-          caption: depositText,
-          parse_mode: "Markdown",
-          reply_markup: {
-            inline_keyboard: [
-              [
-                {
-                  text: `${address}`,
-                  copy_text: { text: address }
-                },
-              ],
-              [
-                {
-                  text: "✅ I have deposited to escrow address",
-                  callback_data: "check_deposit",
-                },
-              ],
-            ],
-          },
-        });
-      } else {
-        await ctx.reply(depositText, {
-          parse_mode: "Markdown",
-          reply_markup: {
-            inline_keyboard: [
-              [
-                {
-                  text: `${address}`,
-                  copy_text: { text: address }
-                },
-              ],
-              [
-                {
-                  text: "✅ I have deposited to escrow address",
-                  callback_data: "check_deposit",
-                },
-              ],
-            ],
-          },
-        });
-      }
-    } catch (err) {
-      await ctx.reply(depositText, {
-        parse_mode: "Markdown",
-        reply_markup: {
-          inline_keyboard: [
-            [
-              {
-                text: `${address}`,
-                copy_text: { text: address }
-              },
-            ],
-            [
-              {
-                text: "✅ I have deposited to escrow address",
-                callback_data: "check_deposit",
-              },
-            ],
+    await ctx.replyWithPhoto(images.DEPOSIT_ADDRESS, {
+      caption: depositText,
+      parse_mode: "Markdown",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: `${address}`,
+              copy_text: { text: address }
+            },
           ],
-        },
-      });
-    }
+          [
+            {
+              text: "✅ I have deposited to escrow address",
+              callback_data: "check_deposit",
+            },
+          ],
+        ],
+      },
+    });
 
   } catch (error) {
     console.error("Error in deposit handler:", error);

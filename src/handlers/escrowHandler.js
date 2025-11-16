@@ -2,8 +2,6 @@ const { Markup } = require('telegraf');
 const Escrow = require('../models/Escrow');
 const User = require('../models/User');
 const GroupPoolService = require('../services/GroupPoolService');
-const fs = require('fs');
-const path = require('path');
 
 module.exports = async (ctx) => {
   try {
@@ -83,32 +81,11 @@ module.exports = async (ctx) => {
         await newEscrow.save();
 
         // Send welcome message to the assigned group
-        const groupText = `📍 <b>Hey there traders! Welcome to our escrow service.</b>
+        const groupText = `📍 <b>Hey there traders! Welcome to our escrow service.</b>`;
 
-📋 Escrow ID: <code>${escrowId}</code>
-
-⚠️ <b>IMPORTANT</b> - Make sure coin and network matches your deposit address else you may loose your coin.
-⚠️ <b>IMPORTANT</b> - Make sure the /buyer address is of the same chain as the selected token else you may loose your coin.
-
-✅ Please start with /dd command and if you have any doubts please use /start command.`;
-
-        const createEscrowImage = path.join(process.cwd(), 'public', 'images', 'create escrow.png');
-        try {
-          if (fs.existsSync(createEscrowImage)) {
-            await ctx.telegram.sendPhoto(assignedGroup.groupId, { source: fs.createReadStream(createEscrowImage) }, {
-              caption: groupText,
-              parse_mode: 'HTML'
-            });
-          } else {
-            await ctx.telegram.sendMessage(assignedGroup.groupId, groupText, { 
-              parse_mode: 'HTML' 
-            });
-          }
-        } catch (err) {
-          await ctx.telegram.sendMessage(assignedGroup.groupId, groupText, { 
-            parse_mode: 'HTML' 
-          });
-        }
+        await ctx.telegram.sendMessage(assignedGroup.groupId, groupText, { 
+          parse_mode: 'HTML' 
+        });
 
         // Log event
 
@@ -116,49 +93,13 @@ module.exports = async (ctx) => {
         // Check if it's a "no available groups" error
         if (poolError.message && (poolError.message.includes('No available groups') || poolError.message.includes('All groups are currently occupied'))) {
           // User-friendly message for no available groups
-          const botUsername = ctx.botInfo?.username || 'your_bot_username';
-          const fallbackText = `🚫 <b>All Groups Currently Occupied</b>
-
-All managed groups are currently being used for active escrows.
-
-📋 <b>Manual Setup Instructions:</b>
-1) Create a new Telegram group
-2) Add this bot (@${botUsername}) to the group
-3) Set the bot as admin with all permissions
-4) Both buyer and seller join the group
-5) Run /escrow command in the group to start
-
-✅ <b>Once Setup Complete:</b>
-- Use /dd command to set deal details
-- Use /buyer command to set buyer address
-- Use /deposit to generate deposit address
-
-⚠️ <b>Note:</b> Manual groups work exactly the same as managed groups.`;
-          
-          await ctx.reply(fallbackText, { parse_mode: 'HTML' });
+          await ctx.reply('🚫 All groups are currently occupied. Please try again later.');
         } else {
           // Log other errors but don't show them to user
           console.error('Error with managed group pool:', poolError.message);
           
           // Generic fallback message
-          const botUsername = ctx.botInfo?.username || 'your_bot_username';
-          const fallbackText = `🚫 <b>Group Assignment Temporarily Unavailable</b>
-
-Please create a group manually for now:
-
-📋 <b>Manual Setup Instructions:</b>
-1) Create a new Telegram group
-2) Add this bot (@${botUsername}) to the group
-3) Set the bot as admin with all permissions
-4) Both buyer and seller join the group
-5) Run /escrow command in the group to start
-
-✅ <b>Once Setup Complete:</b>
-- Use /dd command to set deal details
-- Use /buyer command to set buyer address
-- Use /deposit to generate deposit address`;
-          
-          await ctx.reply(fallbackText, { parse_mode: 'HTML' });
+          await ctx.reply('🚫 Group assignment temporarily unavailable. Please try again later.');
         }
       }
       
@@ -186,28 +127,9 @@ Please create a group manually for now:
 
     await newEscrow.save();
 
-    const groupText = `📍 <b>Hey there traders! Welcome to our escrow service.</b>
+    const groupText = `📍 <b>Hey there traders! Welcome to our escrow service.</b>`;
 
-📋 Escrow ID: <code>${escrowId}</code>
-
-⚠️ <b>IMPORTANT</b> - Make sure coin and network matches your deposit address else you may loose your coin.
-⚠️ <b>IMPORTANT</b> - Make sure the /buyer address is of the same chain as the selected token else you may loose your coin.
-
-✅ Please start with /dd command and if you have any doubts please use /start command.`;
-
-    const createEscrowImage = path.join(process.cwd(), 'public', 'images', 'create escrow.png');
-    try {
-      if (fs.existsSync(createEscrowImage)) {
-        await ctx.replyWithPhoto({ source: fs.createReadStream(createEscrowImage) }, {
-          caption: groupText,
-          parse_mode: 'HTML'
-        });
-      } else {
-        await ctx.reply(groupText, { parse_mode: 'HTML' });
-      }
-    } catch (err) {
-      await ctx.reply(groupText, { parse_mode: 'HTML' });
-    }
+    await ctx.reply(groupText, { parse_mode: 'HTML' });
 
 
   } catch (error) {

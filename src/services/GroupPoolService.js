@@ -584,15 +584,6 @@ class GroupPoolService {
         // Remove ALL users from group (buyer, seller, admins, everyone)
         const allUsersRemoved = await this.removeUsersFromGroup(escrow, group.groupId, telegram);
 
-        // Delete all messages and unpin pinned messages before recycling
-        try {
-          // Reload escrow to get latest message IDs
-          const freshEscrow = await Escrow.findOne({ escrowId: escrow.escrowId });
-          await this.deleteAllGroupMessages(group.groupId, telegram, freshEscrow);
-        } catch (deleteError) {
-          // Could not delete all messages - continue with recycling
-        }
-
         if (allUsersRemoved) {
           // Only add back to pool if ALL users were successfully removed
           // IMPORTANT: Refresh invite link (revoke old and create new)

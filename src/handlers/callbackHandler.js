@@ -8,6 +8,7 @@ const GroupPool = require('../models/GroupPool');
 const Contract = require('../models/Contract');
 const config = require('../../config');
 const escrowHandler = require('./escrowHandler');
+const images = require('../config/images');
 
 // Track scheduled group recycling timeouts to avoid duplicate timers
 const groupRecyclingTimers = new Map();
@@ -35,12 +36,6 @@ async function scheduleGroupRecycling(escrowId, telegram) {
 
       if (group) {
         const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(finalEscrow, group.groupId, telegram);
-
-        try {
-          await GroupPoolService.deleteAllGroupMessages(group.groupId, telegram, finalEscrow);
-        } catch (_) {
-          // Best-effort deletion; continue even if it fails
-        }
 
         if (allUsersRemoved) {
           try {
@@ -174,7 +169,8 @@ async function updateRoleSelectionMessage(ctx, escrow) {
       ]
     };
     
-    await ctx.telegram.editMessageText(
+    // Role selection message is now a photo, so we need to edit the caption
+    await ctx.telegram.editMessageCaption(
       escrow.groupId,
       escrow.roleSelectionMessageId,
       null,
@@ -243,37 +239,16 @@ module.exports = async (ctx) => {
         // Start step-by-step trade details process if not already completed
         if (!escrow.tradeDetailsStep || escrow.tradeDetailsStep !== 'completed') {
           escrow.tradeDetailsStep = 'step1_amount';
-          const step1Msg = await ctx.telegram.sendMessage(escrow.groupId, '💰 Step 1 - Enter USDT amount including fee → Example: 1000');
+          const step1Msg = await ctx.telegram.sendPhoto(escrow.groupId, images.ENTER_QUANTITY, {
+            caption: '💰 Step 1 - Enter USDT amount including fee → Example: 1000'
+          });
           escrow.step1MessageId = step1Msg.message_id;
           await escrow.save();
           
-          // Schedule deletion of Step 1 message after 5 minutes (backup)
-          const telegram = ctx.telegram;
-          const groupId = escrow.groupId;
-          setTimeout(async () => {
-            try {
-              await telegram.deleteMessage(groupId, step1Msg.message_id);
-            } catch (deleteErr) {
-              // Message might already be deleted
-            }
-          }, 5 * 60 * 1000); // 5 minutes
         } else {
           // Trade details already set, show next instructions
-          const fs = require('fs');
-          const path = require('path');
-          const buyerImage = path.join(process.cwd(), 'public', 'images', 'buyer.png');
           const buyerText = 'Now set /buyer address.\n\n📋 Example:\n• /buyer 0xabcdef1234567890abcdef1234567890abcdef12';
-          try {
-            if (fs.existsSync(buyerImage)) {
-              await ctx.telegram.sendPhoto(escrow.groupId, { source: fs.createReadStream(buyerImage) }, {
-                caption: buyerText
-              });
-            } else {
               await ctx.telegram.sendMessage(escrow.groupId, buyerText);
-        }
-          } catch (err) {
-            await ctx.telegram.sendMessage(escrow.groupId, buyerText);
-          }
         }
       }
       
@@ -365,6 +340,17 @@ ${approvalStatus}`;
       };
       
       try {
+        // Try editing as photo caption first (if it's a photo message)
+        await ctx.telegram.editMessageCaption(
+          updatedEscrow.groupId,
+          updatedEscrow.dealSummaryMessageId,
+          null,
+          summaryText,
+          { parse_mode: 'HTML', reply_markup: replyMarkup }
+        );
+      } catch (captionError) {
+        // If that fails, try editing as text (if it's a text message)
+      try {
         await ctx.telegram.editMessageText(
           updatedEscrow.groupId,
           updatedEscrow.dealSummaryMessageId,
@@ -372,8 +358,18 @@ ${approvalStatus}`;
           summaryText,
           { parse_mode: 'HTML', reply_markup: replyMarkup }
         );
-      } catch (err) {
-        console.error('Error updating deal summary:', err);
+        } catch (textError) {
+          // If both fail, try sending new message with image
+          try {
+            await ctx.telegram.sendPhoto(updatedEscrow.groupId, images.CONFIRM_SUMMARY, {
+              caption: summaryText,
+              parse_mode: 'HTML',
+              reply_markup: replyMarkup
+            });
+          } catch (sendErr) {
+            console.error('Error updating deal summary:', textError);
+          }
+        }
       }
       
       // Check if both have approved
@@ -411,7 +407,8 @@ ${approvalStatus}`;
 
 🛑 <b>Do not send funds here</b> 🛑`;
         
-        const confirmedMsg = await ctx.telegram.sendMessage(updatedEscrow.groupId, confirmedText, {
+        const confirmedMsg = await ctx.telegram.sendPhoto(updatedEscrow.groupId, images.DEAL_CONFIRMED, {
+          caption: confirmedText,
           parse_mode: 'HTML'
         });
         
@@ -443,8 +440,9 @@ ${approvalStatus}`;
 
 📮 ${updatedEscrow.chain || 'BSC'} (BEP20):
 <code>${addressInfo.address}</code>`;
-          
-          await ctx.telegram.sendMessage(updatedEscrow.groupId, depositAddressText, {
+
+          await ctx.telegram.sendPhoto(updatedEscrow.groupId, images.DEPOSIT_ADDRESS, {
+            caption: depositAddressText,
             parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
@@ -505,7 +503,8 @@ ${approvalStatus}`;
       // Immediately show coin selection after chain is chosen
       const coins = ['USDT', 'USDC'];
       try {
-        const coinMsg = await ctx.telegram.sendMessage(escrow.groupId, '⚪ Select Coin', {
+        const coinMsg = await ctx.telegram.sendPhoto(escrow.groupId, images.SELECT_CRYPTO, {
+          caption: '⚪ Select Coin',
           reply_markup: {
             inline_keyboard: [coins.map(c => ({ text: c, callback_data: `step4_select_coin_${c}` }))]
           }
@@ -513,14 +512,6 @@ ${approvalStatus}`;
         escrow.step4CoinMessageId = coinMsg.message_id;
         await escrow.save();
         
-        // Schedule deletion of coin selection message after 5 minutes
-        setTimeout(async () => {
-          try {
-            await ctx.telegram.deleteMessage(escrow.groupId, coinMsg.message_id);
-          } catch (deleteErr) {
-            // Message might already be deleted
-          }
-        }, 5 * 60 * 1000);
       } catch (err) {
         console.error('Error sending coin selection:', err);
       }
@@ -577,18 +568,6 @@ ${approvalStatus}`;
       // Reload escrow to get latest state (in case chain was just selected)
       const updatedEscrow = await Escrow.findById(escrow._id);
       if (updatedEscrow.chain && updatedEscrow.token && updatedEscrow.tradeDetailsStep === 'step4_chain_coin') {
-        // Delete Step 4 messages when moving to Step 5
-        try {
-          if (updatedEscrow.step4ChainMessageId) {
-            await ctx.telegram.deleteMessage(updatedEscrow.groupId, updatedEscrow.step4ChainMessageId);
-          }
-          if (updatedEscrow.step4CoinMessageId) {
-            await ctx.telegram.deleteMessage(updatedEscrow.groupId, updatedEscrow.step4CoinMessageId);
-          }
-        } catch (deleteErr) {
-          // Messages might already be deleted
-        }
-        
         updatedEscrow.tradeDetailsStep = 'step5_buyer_address';
         updatedEscrow.status = 'draft';
         await updatedEscrow.save();
@@ -599,21 +578,15 @@ ${approvalStatus}`;
         const telegram = ctx.telegram;
         const groupId = updatedEscrow.groupId;
         
-        const step5Msg = await telegram.sendMessage(
+        const step5Msg = await telegram.sendPhoto(
           groupId,
-          `💰 Step 5 - ${buyerUsername}, enter your ${chainName} wallet address starts with 0x and is 42 chars (0x + 40 hex).`
+          images.ENTER_ADDRESS,
+          {
+            caption: `💰 Step 5 - ${buyerUsername}, enter your ${chainName} wallet address starts with 0x and is 42 chars (0x + 40 hex).`
+          }
         );
         updatedEscrow.step5BuyerAddressMessageId = step5Msg.message_id;
         await updatedEscrow.save();
-        
-        // Schedule deletion of Step 5 message after 5 minutes
-        setTimeout(async () => {
-          try {
-            await telegram.deleteMessage(groupId, step5Msg.message_id);
-          } catch (deleteErr) {
-            // Message might already be deleted
-          }
-        }, 5 * 60 * 1000); // 5 minutes
       }
       
       return;
@@ -690,6 +663,17 @@ ${closeStatus}`;
       // Update or send close trade message
       if (updatedEscrow.closeTradeMessageId) {
         try {
+          // Try editing as photo caption first (if it's a photo message)
+          await ctx.telegram.editMessageCaption(
+            updatedEscrow.groupId,
+            updatedEscrow.closeTradeMessageId,
+            null,
+            closeTradeText,
+            { reply_markup: replyMarkup }
+          );
+        } catch (captionError) {
+          // If that fails, try editing as text (if it's a text message)
+        try {
           await ctx.telegram.editMessageText(
             updatedEscrow.groupId,
             updatedEscrow.closeTradeMessageId,
@@ -697,16 +681,20 @@ ${closeStatus}`;
             closeTradeText,
             { reply_markup: replyMarkup }
           );
-        } catch (e) {
-          console.error('Failed to update close trade message:', e);
+          } catch (textError) {
+            console.error('Failed to update close trade message:', textError);
+          }
       }
       } else {
-        // First time - send the message
+        // First time - send the message as photo
         try {
-          const closeMsg = await ctx.telegram.sendMessage(
+          const closeMsg = await ctx.telegram.sendPhoto(
             updatedEscrow.groupId,
-            closeTradeText,
-            { reply_markup: replyMarkup }
+            images.DEAL_COMPLETE,
+            {
+              caption: closeTradeText,
+              reply_markup: replyMarkup
+            }
           );
           updatedEscrow.closeTradeMessageId = closeMsg.message_id;
           await updatedEscrow.save();
@@ -809,7 +797,7 @@ ${closeStatus}`;
       confirmedTxText += `\n\n✅ Confirmed by @${buyerUsername}`;
       
       try {
-        await ctx.telegram.editMessageText(
+        await ctx.telegram.editMessageCaption(
           escrow.groupId,
           escrow.transactionHashMessageId,
           null,
@@ -817,7 +805,15 @@ ${closeStatus}`;
           { parse_mode: 'HTML' }
         );
       } catch (e) {
+        // If editing caption fails, try sending new message with image
+        try {
+          await ctx.telegram.sendPhoto(escrow.groupId, images.DEPOSIT_FOUND, {
+            caption: confirmedTxText,
+            parse_mode: 'HTML'
+          });
+        } catch (sendErr) {
         console.error('Failed to update transaction message:', e);
+        }
       }
       
       // Ask buyer to confirm they've sent the fiat payment
@@ -909,11 +905,11 @@ ${closeStatus}`;
         // Extract escrowId - handle cases where escrowId might have underscores
         const escrowId = callbackData.replace('fiat_sent_buyer_', '');
         
-        // Only buyer can click
-        const escrow = await Escrow.findOne({
-          escrowId: escrowId,
-          status: { $in: ['deposited', 'in_fiat_transfer'] }
-        });
+      // Only buyer can click
+      const escrow = await Escrow.findOne({
+        escrowId: escrowId,
+        status: { $in: ['deposited', 'in_fiat_transfer'] }
+      });
         
         
         if (!escrow) {
@@ -927,33 +923,29 @@ ${closeStatus}`;
           return;
         }
 
-        escrow.buyerSentFiat = true;
-        escrow.status = 'in_fiat_transfer';
-        await escrow.save();
+      escrow.buyerSentFiat = true;
+      escrow.status = 'in_fiat_transfer';
+      await escrow.save();
 
-        await ctx.answerCbQuery('✅ Noted.');
+      await ctx.answerCbQuery('✅ Noted.');
         
         // Ask seller to confirm receipt - send to the group using groupId
         const sellerPrompt = await ctx.telegram.sendMessage(
           escrow.groupId,
-          `🏦 Seller ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}: Did you receive the fiat payment?`,
-          {
-            reply_markup: Markup.inlineKeyboard([
-              [
-                Markup.button.callback('✅ Yes, I received', `fiat_received_seller_yes_${escrow.escrowId}`),
-                Markup.button.callback('❌ No, not received', `fiat_received_seller_no_${escrow.escrowId}`)
-              ],
-              [
-                Markup.button.callback('⚠️ Received less money', `fiat_received_seller_partial_${escrow.escrowId}`)
-              ]
-            ]).reply_markup
-          }
-        );
+        `🏦 Seller ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escrow.sellerId + ']'}: Did you receive the fiat payment?`,
+        {
+          reply_markup: Markup.inlineKeyboard([
+            [
+              Markup.button.callback('✅ Yes, I received', `fiat_received_seller_yes_${escrow.escrowId}`),
+              Markup.button.callback('❌ No, not received', `fiat_received_seller_no_${escrow.escrowId}`)
+            ],
+            [
+              Markup.button.callback('⚠️ Received less money', `fiat_received_seller_partial_${escrow.escrowId}`)
+            ]
+          ]).reply_markup
+        }
+      );
         
-        // Auto-delete seller prompt after 5 minutes
-        setTimeout(async () => {
-          try { await ctx.telegram.deleteMessage(escrow.groupId, sellerPrompt.message_id); } catch (_) {}
-        }, 5 * 60 * 1000);
       } catch (error) {
         console.error('❌ Error in fiat_sent_buyer handler:', error);
         await ctx.answerCbQuery('❌ An error occurred. Please try again.');
@@ -1092,10 +1084,6 @@ ${closeStatus}`;
             ]).reply_markup
           }
         );
-        // Auto-delete confirmation prompt after 5 minutes
-        setTimeout(async () => {
-          try { await ctx.telegram.deleteMessage(escrow.groupId, confirmMsg.message_id); } catch (_) {}
-        }, 5 * 60 * 1000);
       }
 
     } else if (callbackData.startsWith('fiat_release_cancel_')) {
@@ -1128,9 +1116,11 @@ ${closeStatus}`;
           escrow.releaseTransactionHash = releaseResult.transactionHash;
         }
         await escrow.save();
-        
+
         // Send release confirmation message
-        await ctx.reply(`✅ ${(amount - 0).toFixed(5)} ${escrow.token} released to buyer's address. Trade completed.`);
+        await ctx.replyWithPhoto(images.RELEASE_CONFIRMATION, {
+          caption: `✅ ${(amount - 0).toFixed(5)} ${escrow.token} released to buyer's address. Trade completed.`
+        });
         
         // Send transaction explorer link if available
         if (releaseResult && releaseResult.transactionHash) {
@@ -1163,10 +1153,6 @@ ${closeStatus}`;
           }
         );
         
-        // Auto-delete buyer confirmation prompt after 5 minutes
-        setTimeout(async () => {
-          try { await ctx.telegram.deleteMessage(escrow.groupId, buyerConfirmationMsg.message_id); } catch (_) {}
-        }, 5 * 60 * 1000);
         
         // Note: Group recycling will happen after buyer confirms receipt and both parties close the trade
         // This is handled in the close_trade callback with a 5-minute delay
@@ -1281,10 +1267,6 @@ Approved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escro
             }
           );
           
-          // Auto-delete buyer confirmation prompt after 5 minutes
-          setTimeout(async () => {
-            try { await ctx.telegram.deleteMessage(escrow.groupId, buyerConfirmationMsg.message_id); } catch (_) {}
-          }, 5 * 60 * 1000);
 
           // Send trade completion message with close trade button
           // Initialize close trade tracking
@@ -1300,7 +1282,8 @@ Approved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escro
 ⏳ Waiting for @${buyerUsername} to confirm.
 ⏳ Waiting for @${sellerUsername} to confirm.`;
           
-          const closeMsg = await ctx.reply(closeTradeText, {
+          const closeMsg = await ctx.replyWithPhoto(images.DEAL_COMPLETE, {
+            caption: closeTradeText,
               reply_markup: {
                 inline_keyboard: [
                   [

@@ -85,24 +85,35 @@ module.exports = async (ctx) => {
 
     // Post the room card in the current group (showing invite link from pool group)
     const roomSuffix = escrowId.slice(-2);
+    const images = require('../config/images');
     const participantsText = `* Participants:\n• @${initiatorUsername} (Initiator)\n• @${counterpartyUsername} (Counterparty)`;
     const noteText = 'Note: Only the mentioned members can join. Never join any link shared via DM.';
-    const message = `🏠 Deal Room Created! [ROOM ${roomSuffix}]\n\n🔗 Join Link: ${inviteLink}\n\n👥 ${participantsText}\n\n${noteText}`;
-    const inviteMsg = await ctx.reply(message);
+    const message = `🏠 Deal Room Created! \n\n🔗 Join Link: ${inviteLink}\n\n👥 ${participantsText}\n\n${noteText}`;
+    const inviteMsg = await ctx.replyWithPhoto(images.DEAL_ROOM_CREATED, {
+      caption: message
+    });
     // Save origin message id to remove later once both join
     try {
       newEscrow.originInviteMessageId = inviteMsg.message_id;
       await newEscrow.save();
     } catch (_) {}
-
+    
     // Schedule 5-minute timeout to check if both parties joined
     // If not, cancel the deal and recycle the group
     const telegram = ctx.telegram; // Store telegram instance for use in timeout
     
+    // Auto-delete invite link message after 5 minutes
+    const originChatId = String(chatId);
+    const inviteMessageId = inviteMsg.message_id;
+    setTimeout(async () => {
+      try {
+        await telegram.deleteMessage(originChatId, inviteMessageId);
+      } catch (_) {}
+    }, 5 * 60 * 1000);
+    
     // Delete the /deal command message after 5 minutes
     if (ctx.message && ctx.message.message_id) {
       const commandMessageId = ctx.message.message_id;
-      const originChatId = String(chatId); // Convert to string for consistency
       setTimeout(async () => {
         try {
           await telegram.deleteMessage(originChatId, commandMessageId);

@@ -64,10 +64,6 @@ class BlockchainService {
         throw new Error(`No EscrowVault contracts found with ${desiredFeePercent}% fee. Please deploy contracts with this fee percentage.`);
       }
       
-      contracts.forEach(contract => {
-        console.log(`   • ${contract.token} on ${contract.network}: ${contract.address}`);
-      });
-      
       // Initialize is successful if at least one contract exists
       // The bot will use getEscrowContractAddress() which filters by token for specific operations
       return contracts[0].address;

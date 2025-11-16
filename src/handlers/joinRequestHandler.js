@@ -103,13 +103,17 @@ async function joinRequestHandler(ctx) {
         await ctx.telegram.deleteMessage(escrow.originChatId, escrow.originInviteMessageId);
       } catch (_) {}
       try {
-        const startedMsg = await ctx.telegram.sendMessage(
-          escrow.originChatId,
+        const telegram = ctx.telegram;
+        const originChatId = escrow.originChatId;
+        const startedMsg = await telegram.sendMessage(
+          originChatId,
           `✅ Trade started between @${(escrow.allowedUsernames?.[0] || 'buyer')} and @${(escrow.allowedUsernames?.[1] || 'seller')}.`
         );
         // Auto-delete this message after 5 minutes
         setTimeout(async () => {
-          try { await ctx.telegram.deleteMessage(escrow.originChatId, startedMsg.message_id); } catch (_) {}
+          try {
+            await telegram.deleteMessage(originChatId, startedMsg.message_id);
+          } catch (_) {}
         }, 5 * 60 * 1000);
       } catch (e) {}
     }
@@ -125,8 +129,13 @@ async function joinRequestHandler(ctx) {
       .map(u => (u ? `⏳ @${u} - Waiting...` : '⏳ Unknown - Waiting...'));
 
     try {
-      await ctx.telegram.sendMessage(chatId, disclaimer);
-      const roleSelectionMsg = await ctx.telegram.sendMessage(chatId, statusLines.join('\n'), {
+      const images = require('../config/images');
+      await ctx.telegram.sendPhoto(chatId, images.DEAL_DISCLAIMER, {
+        caption: disclaimer,
+        parse_mode: 'Markdown'
+      });
+      const roleSelectionMsg = await ctx.telegram.sendPhoto(chatId, images.SELECT_ROLES, {
+        caption: statusLines.join('\n'),
         reply_markup: {
           inline_keyboard: [
             [

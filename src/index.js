@@ -15,6 +15,8 @@ const joinRequestHandler = require('./handlers/joinRequestHandler');
 const callbackHandler = require('./handlers/callbackHandler');
 const adminHandler = require('./handlers/adminHandler');
 const GroupPoolService = require('./services/GroupPoolService');
+const verifyHandler = require('./handlers/verifyHandler');
+const images = require('./config/images');
 
 /**
  * RPC Rate Limiting Queue
@@ -184,37 +186,8 @@ class EscrowBot {
         const groupId = escrow.groupId;
         
         if (!text.startsWith('0x') || text.length !== 42 || !/^0x[a-fA-F0-9]{40}$/.test(text)) {
-          const errorMsg = await ctx.reply('❌ Invalid address format. Address must start with 0x and be 42 characters (0x + 40 hexadecimal characters).');
-          // Try to delete the invalid message to avoid confusion
-          try {
-            await telegram.deleteMessage(groupId, ctx.message.message_id);
-          } catch (deleteErr) {
-            // non-critical
-          }
-          setTimeout(async () => {
-            try {
-              await telegram.deleteMessage(groupId, errorMsg.message_id);
-            } catch (deleteErr) {
-              console.error(`Failed to delete error message:`, deleteErr.message);
-            }
-          }, 5 * 60 * 1000);
+          await ctx.reply('❌ Invalid address format. Address must start with 0x and be 42 characters (0x + 40 hexadecimal characters).');
           return;
-        }
-        
-        // Delete user input message immediately
-        try {
-          await telegram.deleteMessage(groupId, ctx.message.message_id);
-        } catch (deleteErr) {
-          // Message might already be deleted
-        }
-        
-        // Delete Step 6 instruction message
-        if (escrow.step6SellerAddressMessageId) {
-          try {
-            await telegram.deleteMessage(groupId, escrow.step6SellerAddressMessageId);
-          } catch (deleteErr) {
-            // Message might already be deleted
-          }
         }
         
         escrow.sellerAddress = text;
@@ -225,7 +198,8 @@ class EscrowBot {
         await escrow.save();
         
         const summaryText = await buildDealSummary(escrow);
-        const summaryMsg = await telegram.sendMessage(groupId, summaryText, {
+        const summaryMsg = await telegram.sendPhoto(groupId, images.CONFIRM_SUMMARY, {
+          caption: summaryText,
           parse_mode: 'HTML',
           reply_markup: {
             inline_keyboard: [
@@ -264,19 +238,7 @@ class EscrowBot {
         const text = ctx.message.text.trim();
         
         if (!escrow.buyerId || escrow.buyerId !== userId) {
-          try {
-            const onlyBuyerMsg = await ctx.reply('❌ Only the designated buyer can submit the wallet address for this step.');
-            const telegram = ctx.telegram;
-            const groupId = escrow.groupId;
-            setTimeout(async () => {
-              try {
-                await telegram.deleteMessage(groupId, onlyBuyerMsg.message_id);
-              } catch (deleteErr) {
-                console.error(`Failed to delete only-buyer warning:`, deleteErr.message);
-              }
-            }, 5 * 60 * 1000);
-          } catch (warnErr) {
-          }
+          await ctx.reply('❌ Only the designated buyer can submit the wallet address for this step.');
           return; // Block others from proceeding
         }
         
@@ -284,31 +246,8 @@ class EscrowBot {
         const groupId = escrow.groupId;
         
         if (!text.startsWith('0x') || text.length !== 42 || !/^0x[a-fA-F0-9]{40}$/.test(text)) {
-          const errorMsg = await ctx.reply('❌ Invalid address format. Address must start with 0x and be 42 characters (0x + 40 hexadecimal characters).');
-          setTimeout(async () => {
-            try {
-              await telegram.deleteMessage(groupId, errorMsg.message_id);
-            } catch (deleteErr) {
-              console.error(`Failed to delete error message:`, deleteErr.message);
-            }
-          }, 5 * 60 * 1000);
+          await ctx.reply('❌ Invalid address format. Address must start with 0x and be 42 characters (0x + 40 hexadecimal characters).');
           return;
-        }
-        
-        // Delete user input message immediately
-        try {
-          await telegram.deleteMessage(groupId, ctx.message.message_id);
-        } catch (deleteErr) {
-          // Message might already be deleted
-        }
-        
-        // Delete Step 5 instruction message
-        if (escrow.step5BuyerAddressMessageId) {
-          try {
-            await telegram.deleteMessage(groupId, escrow.step5BuyerAddressMessageId);
-          } catch (deleteErr) {
-            // Message might already be deleted
-          }
         }
         
         escrow.buyerAddress = text;
@@ -318,20 +257,15 @@ class EscrowBot {
         
         const sellerUsername = escrow.sellerUsername ? `@${escrow.sellerUsername}` : 'Seller';
         const chainName = escrow.chain || 'BSC';
-        const step6Msg = await telegram.sendMessage(
+        const step6Msg = await telegram.sendPhoto(
           groupId,
-          `💰 Step 6 - ${sellerUsername}, enter your ${chainName} wallet address\nto receive refund if deal is cancelled.`
+          images.ENTER_ADDRESS,
+          {
+            caption: `💰 Step 6 - ${sellerUsername}, enter your ${chainName} wallet address\nto receive refund if deal is cancelled.`
+          }
         );
         escrow.step6SellerAddressMessageId = step6Msg.message_id;
         await escrow.save();
-        
-        setTimeout(async () => {
-          try {
-            await telegram.deleteMessage(groupId, step6Msg.message_id);
-          } catch (deleteErr) {
-            // Message might already be deleted
-          }
-        }, 5 * 60 * 1000); // 5 minutes
         
         return; // Don't continue to next handlers
       } catch (e) {
@@ -555,10 +489,11 @@ class EscrowBot {
             
             txDetailsText += `\n\nWaiting for @${buyerUsername} to confirm...`;
             
-            const txDetailsMsg = await ctx.telegram.sendMessage(
+            const txDetailsMsg = await ctx.telegram.sendPhoto(
               chatId,
-              txDetailsText,
+              images.TX_LINK,
               {
+                caption: txDetailsText,
                 parse_mode: 'HTML',
                 reply_markup: {
                   inline_keyboard: [
@@ -585,12 +520,6 @@ class EscrowBot {
               { parse_mode: 'HTML' }
             );
             
-            // Delete the transaction hash message if it exists
-            try {
-              await ctx.telegram.deleteMessage(chatId, ctx.message.message_id);
-            } catch (e) {
-              console.error('Failed to delete transaction link message:', e);
-            }
             
             return;
           }
@@ -632,87 +561,47 @@ class EscrowBot {
         const telegram = ctx.telegram;
         const groupId = escrow.groupId;
         
-        const scheduleMessageDeletion = (messageId, delayMs = 5 * 60 * 1000) => {
-          setTimeout(async () => {
-            try {
-              await telegram.deleteMessage(groupId, messageId);
-            } catch (deleteErr) {
-              // Message might already be deleted or bot doesn't have permission
-            }
-          }, delayMs);
-        };
-        
-        const deleteMessageImmediately = async (messageId) => {
-          try {
-            await telegram.deleteMessage(groupId, messageId);
-          } catch (deleteErr) {
-            // Message might already be deleted or bot doesn't have permission
-          }
-        };
-        
         if (escrow.tradeDetailsStep === 'step1_amount') {
           const amount = parseFloat(text);
           if (isNaN(amount) || amount <= 0) {
-            const errorMsg = await ctx.reply('❌ Please enter a valid amount. Example: 1000');
-            scheduleMessageDeletion(errorMsg.message_id);
+            await ctx.reply('❌ Please enter a valid amount. Example: 1000');
             return;
-          }
-          
-          // Delete user input message immediately
-          await deleteMessageImmediately(ctx.message.message_id);
-          // Delete Step 1 instruction message if it exists
-          if (escrow.step1MessageId) {
-            await deleteMessageImmediately(escrow.step1MessageId);
           }
           
           escrow.quantity = amount;
           escrow.tradeDetailsStep = 'step2_rate';
           await escrow.save();
           
-          const step2Msg = await ctx.reply('📊 Step 2 - Rate per USDT → Example: 89.5');
+          const step2Msg = await ctx.replyWithPhoto(images.ENTER_RATE, {
+            caption: '📊 Step 2 - Rate per USDT → Example: 89.5'
+          });
           escrow.step2MessageId = step2Msg.message_id;
           await escrow.save();
-          scheduleMessageDeletion(step2Msg.message_id);
           return;
           
         } else if (escrow.tradeDetailsStep === 'step2_rate') {
           const rate = parseFloat(text);
           if (isNaN(rate) || rate <= 0) {
-            const errorMsg = await ctx.reply('❌ Please enter a valid rate. Example: 89.5');
-            scheduleMessageDeletion(errorMsg.message_id);
+            await ctx.reply('❌ Please enter a valid rate. Example: 89.5');
             return;
-          }
-          
-          // Delete user input message immediately
-          await deleteMessageImmediately(ctx.message.message_id);
-          // Delete Step 2 instruction message if it exists
-          if (escrow.step2MessageId) {
-            await deleteMessageImmediately(escrow.step2MessageId);
           }
           
           escrow.rate = rate;
           escrow.tradeDetailsStep = 'step3_payment';
           await escrow.save();
           
-          const step3Msg = await ctx.reply('💳 Step 3 - Payment method → Examples: CDM, CASH, CCW');
+          const step3Msg = await ctx.replyWithPhoto(images.PAYMENT_METHOD, {
+            caption: '💳 Step 3 - Payment method → Examples: CDM, CASH, CCW'
+          });
           escrow.step3MessageId = step3Msg.message_id;
           await escrow.save();
-          scheduleMessageDeletion(step3Msg.message_id);
           return;
           
         } else if (escrow.tradeDetailsStep === 'step3_payment') {
           const paymentMethod = text.toUpperCase().trim();
           if (!paymentMethod || paymentMethod.length < 2) {
-            const errorMsg = await ctx.reply('❌ Please enter a valid payment method. Examples: CDM, CASH, CCW');
-            scheduleMessageDeletion(errorMsg.message_id);
+            await ctx.reply('❌ Please enter a valid payment method. Examples: CDM, CASH, CCW');
             return;
-          }
-          
-          // Delete user input message immediately
-          await deleteMessageImmediately(ctx.message.message_id);
-          // Delete Step 3 instruction message if it exists
-          if (escrow.step3MessageId) {
-            await deleteMessageImmediately(escrow.step3MessageId);
           }
           
           escrow.paymentMethod = paymentMethod;
@@ -723,7 +612,8 @@ class EscrowBot {
           }
           await escrow.save();
           
-          const step4ChainMsg = await ctx.reply('🔗 Step 4 – Choose Blockchain', {
+          const step4ChainMsg = await ctx.replyWithPhoto(images.SELECT_CHAIN, {
+            caption: '🔗 Step 4 – Choose Blockchain',
             reply_markup: {
               inline_keyboard: [
                 [
@@ -734,8 +624,6 @@ class EscrowBot {
           });
           escrow.step4ChainMessageId = step4ChainMsg.message_id;
           await escrow.save();
-          
-          scheduleMessageDeletion(step4ChainMsg.message_id);
           
           return;
         }
@@ -766,13 +654,6 @@ class EscrowBot {
               await freshEscrow.save();
             }
             
-            // Delete all messages and unpin pinned messages before recycling
-            try {
-              await GroupPoolService.deleteAllGroupMessages(group.groupId, telegram, freshEscrow);
-            } catch (deleteError) {
-              // Could not delete all messages - continue with recycling
-            }
-            
             // Refresh invite link (revoke old and create new) so removed users can rejoin
             await GroupPoolService.refreshInviteLink(group.groupId, telegram);
             
@@ -796,6 +677,9 @@ class EscrowBot {
     
     // Restrict interaction: only allow /deal in groups
     this.bot.command('deal', groupDealHandler);
+    
+    // Verify address command (main group only)
+    this.bot.command('verify', verifyHandler);
     
     // Admin-only release/refund commands
     this.bot.command('release', async (ctx) => {
