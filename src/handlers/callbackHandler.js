@@ -326,7 +326,7 @@ module.exports = async (ctx) => {
           approvalStatus = approvals.join('\n');
         }
         
-        return `📋 <b>OTC Deal Summary</b>
+        return `📋 <b> Deal Summary</b>
 
 • <b>Amount:</b> ${amount} ${escrow.token || 'USDT'}
 • <b>Rate:</b> ₹${rate.toFixed(1)}
@@ -403,7 +403,7 @@ ${approvalStatus}`;
 <b>Seller:</b> ${sellerTag}
 
 <b>Deal Amount:</b> ${amount.toFixed(1)} ${updatedEscrow.token || 'USDT'}
-<b>OTC Fees:</b> ${escrowFee.toFixed(2)} ${updatedEscrow.token || 'USDT'}
+<b> Fees:</b> ${escrowFee.toFixed(2)} ${updatedEscrow.token || 'USDT'}
 <b>Release Amount:</b> ${releaseAmount.toFixed(2)} ${updatedEscrow.token || 'USDT'}
 <b>Rate:</b> ₹${rate.toFixed(1)}
 <b>Payment:</b> ${paymentMethod}

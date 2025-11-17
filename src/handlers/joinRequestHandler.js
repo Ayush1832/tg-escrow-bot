@@ -120,7 +120,7 @@ async function joinRequestHandler(ctx) {
     const disclaimer = `⚠️ P2P Deal Disclaimer ⚠️
 
 • Always verify the **admin wallet** before sending any funds.
-• Confirm **<code>pool</code>** is present in both the deal room & the main group.
+• Confirm \`@pool\` is present in both the deal room & the main group.
 • ❌ Never engage in direct or outside-room deals.
 • 💬 Share all details only within this deal room.`;
 

@@ -124,7 +124,7 @@ async function buildDealSummary(escrow) {
     approvalStatus = approvals.join('\n');
   }
   
-  return `📋 <b>OTC Deal Summary</b>
+  return `📋 <b> Deal Summary</b>
 
 • <b>Amount:</b> ${amount} ${escrow.token || 'USDT'}
 • <b>Rate:</b> ₹${rate.toFixed(1)}
@@ -435,8 +435,7 @@ class EscrowBot {
           
           // Check if amount exceeds expected (with tolerance)
           if (newAccumulated > expectedAmount + tolerance) {
-            await ctx.reply(`⚠️ Total deposit amount exceeds expected amount. Expected: ${expectedAmount} ${escrow.token}, Total received: ${newAccumulated.toFixed(2)} ${escrow.token}`);
-            return;
+            // Allow overpayments to continue through the normal flow without interrupting the trade
           }
           
           // Check if this transaction was already added
@@ -481,20 +480,30 @@ class EscrowBot {
             const totalTxCount = 1 + (freshEscrow.partialTransactionHashes ? freshEscrow.partialTransactionHashes.length : 0);
             const fromAddress = freshEscrow.depositTransactionFromAddress || from || 'N/A';
             const depositAddress = freshEscrow.depositAddress || 'N/A';
+            const expectedAmountDisplay = (freshEscrow.quantity || 0).toFixed(2);
+            const overDelivered = expectedAmount > 0 && (newAccumulated - expectedAmount) > tolerance;
             
             freshEscrow.confirmedAmount = newAccumulated;
             freshEscrow.status = 'deposited';
             await freshEscrow.save();
             
+            const statusLine = overDelivered
+              ? `🟢 Extra ${freshEscrow.token} received (expected ${expectedAmount.toFixed(2)}, got ${newAccumulated.toFixed(2)})`
+              : `🟢 Exact ${freshEscrow.token} found`;
+            
             let confirmedTxText = `<b>P2P MM Bot 🤖</b>
 
-🟢 Exact ${freshEscrow.token} found
+${statusLine}
 
 <b>Total Amount:</b> ${newAccumulated.toFixed(2)} ${freshEscrow.token}
 <b>Transactions:</b> ${totalTxCount} transaction(s)
 <b>From:</b> <code>${fromAddress}</code>
 <b>To:</b> <code>${depositAddress}</code>
 <b>Main Tx:</b> <code>${txHashShort}</code>`;
+            
+            if (overDelivered) {
+              confirmedTxText += `\n<b>Original Deal Amount:</b> ${expectedAmountDisplay} ${freshEscrow.token}`;
+            }
             
             if (totalTxCount > 1) {
               confirmedTxText += `\n\n✅ Full amount received through ${totalTxCount} transaction(s)`;
