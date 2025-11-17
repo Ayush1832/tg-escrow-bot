@@ -433,11 +433,6 @@ class EscrowBot {
           const newAccumulated = currentAccumulated + amount;
           const remainingAmount = expectedAmount - newAccumulated;
           
-          // Check if amount exceeds expected (with tolerance)
-          if (newAccumulated > expectedAmount + tolerance) {
-            // Allow overpayments to continue through the normal flow without interrupting the trade
-          }
-          
           // Check if this transaction was already added
           if (freshEscrow.transactionHash === txHash || (freshEscrow.partialTransactionHashes && freshEscrow.partialTransactionHashes.includes(txHash))) {
             await ctx.reply('❌ This transaction has already been submitted for this trade. Please wait for confirmation.');
@@ -459,10 +454,15 @@ class EscrowBot {
           }
           
           freshEscrow.depositAmount = newAccumulated;
+          // Ensure status is 'awaiting_deposit' for partial payments to allow next transaction
+          if (freshEscrow.status !== 'awaiting_deposit') {
+            freshEscrow.status = 'awaiting_deposit';
+          }
           await freshEscrow.save();
           
-          // Check if full amount has been received
-          if (Math.abs(newAccumulated - expectedAmount) <= tolerance) {
+          // Check if full amount (or more) has been received
+          // If amount is >= expected amount (with tolerance), proceed to confirmation
+          if (newAccumulated >= expectedAmount - tolerance) {
             // Full amount received - proceed to confirmation
             try {
               await ctx.telegram.deleteMessage(chatId, freshEscrow.transactionHashMessageId);
@@ -541,19 +541,31 @@ Use /release After Fund Transfer to Seller
             
             return;
           } else {
-            // Partial deposit - ask seller to send remaining amount
-            const remainingFormatted = remainingAmount.toFixed(2);
-            await ctx.reply(
-              `✅ Partial deposit received: ${amount.toFixed(2)} ${escrow.token}\n\n` +
-              `📊 Total received so far: ${newAccumulated.toFixed(2)} ${escrow.token}\n` +
-              `💰 Remaining amount needed: ${remainingFormatted} ${escrow.token}\n\n` +
-              `Please send the remaining ${remainingFormatted} ${escrow.token} to the same deposit address:\n` +
-              `<code>${escrow.depositAddress}</code>\n\n` +
-              `After sending, provide the new transaction hash.`,
-              { parse_mode: 'HTML' }
-            );
-            
-            
+            // Partial deposit - only show this if amount is actually less than expected
+            // (This should only happen if newAccumulated < expectedAmount - tolerance)
+            if (newAccumulated < expectedAmount - tolerance) {
+              const remainingFormatted = remainingAmount.toFixed(2);
+              const partialMessage = await ctx.reply(
+                `✅ Partial deposit received: ${amount.toFixed(2)} ${escrow.token}\n\n` +
+                `📊 Total received so far: ${newAccumulated.toFixed(2)} ${escrow.token}\n` +
+                `💰 Remaining amount needed: ${remainingFormatted} ${escrow.token}\n\n` +
+                `Please choose an option:`,
+                {
+                  parse_mode: 'HTML',
+                  reply_markup: Markup.inlineKeyboard([
+                    [
+                      Markup.button.callback('✅ Continue with this amount', `partial_continue_${freshEscrow.escrowId}`),
+                      Markup.button.callback('💰 Pay remaining amount', `partial_pay_remaining_${freshEscrow.escrowId}`)
+                    ]
+                  ]).reply_markup
+                }
+              );
+              
+              // Store partial payment message ID for potential updates
+              freshEscrow.partialPaymentMessageId = partialMessage.message_id;
+              await freshEscrow.save();
+            }
+            // If somehow we get here with excess amount, it should have been caught above
             return;
           }
         } catch (err) {
@@ -758,6 +770,11 @@ Use /release After Fund Transfer to Seller
             ? `[${escrow.buyerId}]`
             : 'the buyer';
         
+        // Reset confirmation flags
+        escrow.buyerConfirmedRelease = false;
+        escrow.sellerConfirmedRelease = false;
+        await escrow.save();
+        
         const buyerLine = `⌛️ ${buyerLabel} - Waiting...`;
         const sellerLabel = escrow.sellerUsername
           ? `@${escrow.sellerUsername}`
@@ -773,16 +790,19 @@ ${sellerLine}
 
 Both users must approve to release payment.`;
         
-        await ctx.replyWithPhoto(images.RELEASE_CONFIRMATION, {
+        const releaseMsg = await ctx.replyWithPhoto(images.RELEASE_CONFIRMATION, {
           caption: releaseCaption,
           parse_mode: 'HTML',
           reply_markup: Markup.inlineKeyboard([
             [
-              Markup.button.callback('✅ Approve', `release_confirm_yes_${escrow.escrowId}_${userId}`),
-              Markup.button.callback('❌ Decline', `release_confirm_no_${escrow.escrowId}_${userId}`)
+              Markup.button.callback('✅ Approve', `release_confirm_yes_${escrow.escrowId}`),
+              Markup.button.callback('❌ Decline', `release_confirm_no_${escrow.escrowId}`)
             ]
           ]).reply_markup
         });
+        
+        escrow.releaseConfirmationMessageId = releaseMsg.message_id;
+        await escrow.save();
         
       } catch (error) {
         console.error('Error in release command:', error);

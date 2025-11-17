@@ -87,6 +87,11 @@ const escrowSchema = new mongoose.Schema({
     type: Number,
     required: false
   },
+  // Store partial payment message ID for editing
+  partialPaymentMessageId: {
+    type: Number,
+    required: false
+  },
   // Store confirmed transaction hash (deposit transaction)
   transactionHash: {
     type: String,
@@ -195,6 +200,11 @@ const escrowSchema = new mongoose.Schema({
   },
   // Store close trade message ID for editing
   closeTradeMessageId: {
+    type: Number,
+    required: false
+  },
+  // Store release confirmation message ID for editing
+  releaseConfirmationMessageId: {
     type: Number,
     required: false
   },
