@@ -842,7 +842,8 @@ Both users must approve to release payment.`;
           return ctx.reply('❌ Seller address is not set.');
         }
         
-        const amount = escrow.confirmedAmount || escrow.depositAmount || 0;
+        // Use confirmedAmount first, then depositAmount, then accumulatedDepositAmount (for partial payments)
+        const amount = Number(escrow.confirmedAmount || escrow.depositAmount || escrow.accumulatedDepositAmount || 0);
         if (amount <= 0) {
           return ctx.reply('❌ No confirmed deposit found.');
         }

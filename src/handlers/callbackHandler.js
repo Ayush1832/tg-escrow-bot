@@ -1052,8 +1052,8 @@ Once you’ve sent the amount, tap the button below.`;
       if (isAdmin && !isBuyer && !isSeller) {
         escrow.buyerConfirmedRelease = true;
         escrow.sellerConfirmedRelease = true;
-        }
-        await escrow.save();
+      }
+      await escrow.save();
 
       // Reload to get latest state
       const updatedEscrow = await Escrow.findById(escrow._id);
