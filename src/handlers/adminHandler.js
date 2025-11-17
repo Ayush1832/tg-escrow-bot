@@ -904,13 +904,29 @@ async function adminGroupReset(ctx) {
       }
     }, 60 * 1000);
 
+    // First, try to find the group in pool to get assignedEscrowId
+    let group = await GroupPool.findOne({ groupId: chatId.toString() });
+    
     // Find active escrow for this group
-    const escrow = await Escrow
-      .findOne({
-        groupId: chatId.toString(),
+    let escrow = null;
+    
+    if (group && group.assignedEscrowId) {
+      // Try to find escrow by assignedEscrowId first
+      escrow = await Escrow.findOne({
+        escrowId: group.assignedEscrowId,
         status: { $nin: ['completed', 'refunded'] }
-      })
-      .sort({ createdAt: -1 });
+      });
+    }
+    
+    // If not found, try to find by groupId
+    if (!escrow) {
+      escrow = await Escrow
+        .findOne({
+          groupId: chatId.toString(),
+          status: { $nin: ['completed', 'refunded'] }
+        })
+        .sort({ createdAt: -1 });
+    }
 
     if (!escrow) {
       const errorMsg = await ctx.reply('❌ No escrow found for this group.');
@@ -949,10 +965,12 @@ async function adminGroupReset(ctx) {
       return;
     }
 
-    // Find the group in pool
-    let group = await GroupPool.findOne({ 
-      assignedEscrowId: escrow.escrowId 
-    });
+    // Find the group in pool (we may have already found it above)
+    if (!group) {
+      group = await GroupPool.findOne({ 
+        assignedEscrowId: escrow.escrowId 
+      });
+    }
 
     if (!group) {
       group = await GroupPool.findOne({ groupId: chatId.toString() });
@@ -1071,13 +1089,29 @@ async function adminResetForce(ctx) {
       }
     }, 60 * 1000);
 
+    // First, try to find the group in pool to get assignedEscrowId
+    let group = await GroupPool.findOne({ groupId: chatId.toString() });
+    
     // Find active escrow for this group
-    const escrow = await Escrow
-      .findOne({
-        groupId: chatId.toString(),
+    let escrow = null;
+    
+    if (group && group.assignedEscrowId) {
+      // Try to find escrow by assignedEscrowId first
+      escrow = await Escrow.findOne({
+        escrowId: group.assignedEscrowId,
         status: { $nin: ['completed', 'refunded'] }
-      })
-      .sort({ createdAt: -1 });
+      });
+    }
+    
+    // If not found, try to find by groupId
+    if (!escrow) {
+      escrow = await Escrow
+        .findOne({
+          groupId: chatId.toString(),
+          status: { $nin: ['completed', 'refunded'] }
+        })
+        .sort({ createdAt: -1 });
+    }
 
     if (!escrow) {
       const errorMsg = await ctx.reply('❌ No escrow found for this group.');
@@ -1089,10 +1123,12 @@ async function adminResetForce(ctx) {
       return;
     }
 
-    // Find the group in pool
-    let group = await GroupPool.findOne({ 
-      assignedEscrowId: escrow.escrowId 
-    });
+    // Find the group in pool (we may have already found it above)
+    if (!group) {
+      group = await GroupPool.findOne({ 
+        assignedEscrowId: escrow.escrowId 
+      });
+    }
 
     if (!group) {
       group = await GroupPool.findOne({ groupId: chatId.toString() });
