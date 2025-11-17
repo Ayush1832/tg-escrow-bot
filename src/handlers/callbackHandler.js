@@ -742,92 +742,6 @@ ${closeStatus}`;
       await escrow.save();
       
       return;
-    } else if (callbackData.startsWith('confirm_transaction_')) {
-      await ctx.answerCbQuery('Confirming transaction...');
-      
-      const escrowId = callbackData.replace('confirm_transaction_', '');
-      const escrow = await Escrow.findOne({
-        escrowId: escrowId,
-        status: { $in: ['awaiting_deposit', 'deposited'] }
-      });
-      
-      if (!escrow) {
-        return ctx.answerCbQuery('❌ No active escrow found.');
-      }
-      
-      const userId = ctx.from.id;
-      // Only buyer can confirm
-      if (escrow.buyerId !== userId) {
-        return ctx.answerCbQuery('❌ Only the buyer can confirm this transaction.');
-      }
-      
-      if (!escrow.transactionHash) {
-        return ctx.answerCbQuery('❌ No transaction found. Please ask seller to submit transaction hash first.');
-      }
-      
-      // Update escrow status - transaction hash is already saved
-      // Use accumulated deposit amount if available, otherwise use depositAmount
-      const totalDepositAmount = escrow.accumulatedDepositAmount || escrow.depositAmount || 0;
-      escrow.confirmedAmount = totalDepositAmount;
-      escrow.status = 'deposited';
-      await escrow.save();
-      
-      // Update transaction details message
-      const buyerUsername = escrow.buyerUsername || 'Buyer';
-      const txHashShort = escrow.transactionHash.substring(0, 10) + '...';
-      const totalTxCount = 1 + (escrow.partialTransactionHashes ? escrow.partialTransactionHashes.length : 0);
-      
-      // Use the actual transaction from address (not seller's refund address)
-      const fromAddress = escrow.depositTransactionFromAddress || escrow.sellerAddress || 'N/A';
-      
-      let confirmedTxText = `<b>P2P MM Bot 🤖</b>
-
-🟢 Exact ${escrow.token} found
-
-<b>Total Amount:</b> ${totalDepositAmount.toFixed(2)} ${escrow.token}
-<b>Transactions:</b> ${totalTxCount} transaction(s)
-<b>From:</b> <code>${fromAddress}</code>
-<b>To:</b> <code>${escrow.depositAddress}</code>
-<b>Main Tx:</b> <code>${txHashShort}</code>`;
-      
-      if (totalTxCount > 1) {
-        confirmedTxText += `\n\n✅ Full amount received through ${totalTxCount} transaction(s)`;
-      }
-      
-      confirmedTxText += `\n\n✅ Confirmed by @${buyerUsername}`;
-      
-      try {
-        await ctx.telegram.editMessageCaption(
-          escrow.groupId,
-          escrow.transactionHashMessageId,
-          null,
-          confirmedTxText,
-          { parse_mode: 'HTML' }
-        );
-      } catch (e) {
-        // If editing caption fails, try sending new message with image
-        try {
-          await ctx.telegram.sendPhoto(escrow.groupId, images.DEPOSIT_FOUND, {
-            caption: confirmedTxText,
-            parse_mode: 'HTML'
-          });
-        } catch (sendErr) {
-        console.error('Failed to update transaction message:', e);
-        }
-      }
-      
-      // Ask buyer to confirm they've sent the fiat payment
-      await ctx.telegram.sendMessage(
-        escrow.groupId,
-        `💸 Buyer ${escrow.buyerUsername ? '@' + escrow.buyerUsername : '[' + escrow.buyerId + ']'}: Please send the agreed fiat amount to the seller via your agreed method and confirm below.`,
-        {
-          reply_markup: Markup.inlineKeyboard([
-            [Markup.button.callback('✅ I sent the fiat payment', `fiat_sent_buyer_${escrow.escrowId}`)]
-          ]).reply_markup
-        }
-      );
-      
-      return;
     } else if (callbackData === 'check_deposit') {
       await ctx.answerCbQuery('Checking for your deposit...');
       const chatId = ctx.chat.id;
@@ -1086,6 +1000,144 @@ ${closeStatus}`;
         );
       }
 
+    } else if (callbackData.startsWith('release_confirm_no_')) {
+      const parts = callbackData.split('_');
+      const initiatorId = Number(parts[4]);
+      if (ctx.from.id !== initiatorId) {
+        return ctx.answerCbQuery('❌ Only the requester can cancel this action.');
+      }
+      await ctx.answerCbQuery('❎ Release cancelled');
+      try {
+        await ctx.editMessageText('❎ Release cancelled. No action taken.');
+      } catch (e) {}
+      return;
+    } else if (callbackData.startsWith('release_confirm_yes_')) {
+      const parts = callbackData.split('_');
+      const escrowId = parts[3];
+      const initiatorId = Number(parts[4]);
+      if (ctx.from.id !== initiatorId) {
+        return ctx.answerCbQuery('❌ Only the requester can confirm this action.');
+      }
+      
+      const escrow = await Escrow.findOne({
+        escrowId,
+        status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release'] }
+      });
+      
+      if (!escrow) {
+        return ctx.answerCbQuery('❌ No active escrow found.');
+      }
+      
+      const userId = ctx.from.id;
+      const isAdmin = config.getAllAdminUsernames().includes(ctx.from.username) ||
+                      config.getAllAdminIds().includes(String(userId));
+      const isSeller = Number(escrow.sellerId) === Number(userId);
+      
+      if (!isAdmin && !isSeller) {
+        return ctx.answerCbQuery('❌ Only admins or the seller can confirm release.');
+      }
+      
+      const amount = Number(escrow.confirmedAmount || escrow.depositAmount || 0);
+      if (!escrow.buyerAddress || amount <= 0) {
+        return ctx.answerCbQuery('❌ Cannot release funds: missing buyer address or zero amount.');
+      }
+      
+      await ctx.answerCbQuery('🚀 Processing release...');
+      try {
+        await ctx.editMessageText('🚀 Releasing funds to the buyer...');
+      } catch (e) {}
+      
+      try {
+        const releaseResult = await BlockchainService.releaseFunds(
+          escrow.token,
+          escrow.chain,
+          escrow.buyerAddress,
+          amount
+        );
+        
+        if (!releaseResult || !releaseResult.success) {
+          throw new Error('Release transaction failed - no result returned');
+        }
+        
+        if (releaseResult.transactionHash) {
+          escrow.releaseTransactionHash = releaseResult.transactionHash;
+        }
+        escrow.status = 'completed';
+        escrow.buyerClosedTrade = false;
+        escrow.sellerClosedTrade = false;
+        await escrow.save();
+        
+        const tradeStart = escrow.tradeStartTime || escrow.createdAt || new Date();
+        const minutesTaken = Math.max(
+          1,
+          Math.round((Date.now() - new Date(tradeStart)) / (60 * 1000))
+        );
+        
+        const chainUpper = (escrow.chain || '').toUpperCase();
+        let explorerUrl = '';
+        if (releaseResult.transactionHash) {
+          if (chainUpper === 'BSC' || chainUpper === 'BNB') {
+            explorerUrl = `https://bscscan.com/tx/${releaseResult.transactionHash}`;
+          } else if (chainUpper === 'ETH' || chainUpper === 'ETHEREUM') {
+            explorerUrl = `https://etherscan.io/tx/${releaseResult.transactionHash}`;
+          } else if (chainUpper === 'POLYGON' || chainUpper === 'MATIC') {
+            explorerUrl = `https://polygonscan.com/tx/${releaseResult.transactionHash}`;
+          }
+        }
+        
+        const linkLine = releaseResult?.transactionHash
+          ? explorerUrl
+            ? `🔗 Release TX Link: Click Here (${explorerUrl})`
+            : `🔗 Release TX Link: ${releaseResult.transactionHash}`
+          : '🔗 Release TX Link: Not available';
+        
+        const completionText = `🎉 Deal Complete! ✅
+
+⏱️ Time Taken: ${minutesTaken} mins
+${linkLine}
+
+Thank you for using our safe escrow system.`;
+        
+        let closeTradeKeyboard = {
+          inline_keyboard: [
+            [
+              {
+                text: '🔒 Close Deal',
+                callback_data: `close_trade_${escrow.escrowId}`
+              }
+            ]
+          ]
+        };
+        
+        let summaryMsg;
+        try {
+          summaryMsg = await ctx.telegram.sendMessage(escrow.groupId, completionText, {
+            reply_markup: closeTradeKeyboard
+          });
+        } catch (sendError) {
+          console.error('Error sending completion summary:', sendError);
+          summaryMsg = await ctx.reply(completionText, { reply_markup: closeTradeKeyboard });
+        }
+        
+        if (summaryMsg) {
+          escrow.closeTradeMessageId = summaryMsg.message_id;
+          await escrow.save();
+        }
+        
+        try {
+          await ctx.editMessageText('✅ Release completed.');
+        } catch (e) {}
+        
+      } catch (error) {
+        console.error('Error releasing funds via confirmation:', error);
+        try {
+          await ctx.editMessageText('❌ Release failed. Please try again or contact support.');
+        } catch (e) {}
+        await ctx.answerCbQuery('❌ Release failed');
+        return;
+      }
+      
+      return;
     } else if (callbackData.startsWith('fiat_release_cancel_')) {
       await ctx.answerCbQuery('❎ Cancelled');
       try { await ctx.editMessageText('❎ Release cancelled. No action taken.'); } catch (e) {}

@@ -154,6 +154,10 @@ ${buyerTag}
 🟢 *ESCROW ADDRESS*
 ${address}
 
+⚠️ *PLEASE NOTE:*
+• Double-check the address before sending.
+• We are not responsible for fake, incorrect, or unsupported tokens sent to this address.
+
 Seller ${sellerTag} Will Pay on the Escrow Address, And Click On Check Payment.
 
 Amount to be Received: $${amountDisplay}

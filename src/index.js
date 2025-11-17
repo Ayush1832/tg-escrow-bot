@@ -477,40 +477,56 @@ class EscrowBot {
               console.error('Failed to delete transaction link message:', e);
             }
             
-            const buyerUsername = freshEscrow.buyerUsername || 'Buyer';
             const txHashShort = txHash.substring(0, 10) + '...';
             const totalTxCount = 1 + (freshEscrow.partialTransactionHashes ? freshEscrow.partialTransactionHashes.length : 0);
+            const fromAddress = freshEscrow.depositTransactionFromAddress || from || 'N/A';
+            const depositAddress = freshEscrow.depositAddress || 'N/A';
             
-            let txDetailsText = `<b>P2P MM Bot 🤖</b>
+            freshEscrow.confirmedAmount = newAccumulated;
+            freshEscrow.status = 'deposited';
+            await freshEscrow.save();
+            
+            let confirmedTxText = `<b>P2P MM Bot 🤖</b>
 
 🟢 Exact ${freshEscrow.token} found
 
 <b>Total Amount:</b> ${newAccumulated.toFixed(2)} ${freshEscrow.token}
 <b>Transactions:</b> ${totalTxCount} transaction(s)
-<b>Latest Tx:</b> <code>${txHashShort}</code>`;
+<b>From:</b> <code>${fromAddress}</code>
+<b>To:</b> <code>${depositAddress}</code>
+<b>Main Tx:</b> <code>${txHashShort}</code>`;
             
             if (totalTxCount > 1) {
-              txDetailsText += `\n\n✅ Full amount received through ${totalTxCount} transaction(s)`;
+              confirmedTxText += `\n\n✅ Full amount received through ${totalTxCount} transaction(s)`;
             }
-            
-            txDetailsText += `\n\nWaiting for @${buyerUsername} to confirm...`;
             
             const txDetailsMsg = await ctx.telegram.sendPhoto(
               chatId,
-              images.TX_LINK,
+              images.DEPOSIT_FOUND,
               {
-                caption: txDetailsText,
-                parse_mode: 'HTML',
-                reply_markup: {
-                  inline_keyboard: [
-                    [{ text: 'Confirm ✅', callback_data: `confirm_transaction_${freshEscrow.escrowId}` }]
-                  ]
-                }
+                caption: confirmedTxText,
+                parse_mode: 'HTML'
               }
             );
             
             freshEscrow.transactionHashMessageId = txDetailsMsg.message_id;
             await freshEscrow.save();
+            
+            if (freshEscrow.buyerId) {
+              const buyerMention = freshEscrow.buyerUsername
+                ? `@${freshEscrow.buyerUsername}`
+                : freshEscrow.buyerId
+                  ? `[${freshEscrow.buyerId}]`
+                  : 'Buyer';
+
+              const buyerInstruction = `${buyerMention}\n\nFunds received\n\nNow you proceed & pay to seller according to received amount\n\nAfter deal is complete you can use /release button for release`;
+
+              await ctx.telegram.sendMessage(chatId, buyerInstruction, {
+                reply_markup: Markup.inlineKeyboard([
+                  [Markup.button.callback('✅ I sent the fiat payment', `fiat_sent_buyer_${freshEscrow.escrowId}`)]
+                ]).reply_markup
+              });
+            }
             
             return;
           } else {
@@ -687,7 +703,7 @@ class EscrowBot {
     // Verify address command (main group only)
     this.bot.command('verify', verifyHandler);
     
-    // Admin-only release/refund commands
+    // Admin/seller release command (with confirmation)
     this.bot.command('release', async (ctx) => {
       try {
         const chatId = ctx.chat.id;
@@ -696,14 +712,6 @@ class EscrowBot {
         // Must be in a group
         if (chatId > 0) {
           return ctx.reply('❌ This command can only be used in a group chat.');
-        }
-        
-        // Check if user is admin
-        const isAdmin = config.getAllAdminUsernames().includes(ctx.from.username) || 
-                       config.getAllAdminIds().includes(String(userId));
-        
-        if (!isAdmin) {
-          return ctx.reply('❌ Only admins can use this command.');
         }
         
         // Find active escrow
@@ -716,64 +724,45 @@ class EscrowBot {
           return ctx.reply('❌ No active escrow found in this group.');
         }
         
+        const isAdmin = config.getAllAdminUsernames().includes(ctx.from.username) || 
+                        config.getAllAdminIds().includes(String(userId));
+        const isSeller = Number(escrow.sellerId) === Number(userId);
+        
+        if (!isAdmin && !isSeller) {
+          return ctx.reply('❌ Only admins or the seller can use this command.');
+        }
+        
         if (!escrow.buyerAddress) {
           return ctx.reply('❌ Buyer address is not set.');
         }
         
-        const amount = escrow.confirmedAmount || escrow.depositAmount || 0;
+        const amount = Number(escrow.confirmedAmount || escrow.depositAmount || 0);
         if (amount <= 0) {
           return ctx.reply('❌ No confirmed deposit found.');
         }
         
-        await ctx.reply('🚀 Releasing funds to buyer...');
+        const buyerLabel = escrow.buyerUsername
+          ? `@${escrow.buyerUsername}`
+          : escrow.buyerId
+            ? `[${escrow.buyerId}]`
+            : 'the buyer';
         
-        try {
-          // Release funds to buyer
-          const releaseResult = await BlockchainService.releaseFunds(
-            escrow.token,
-            escrow.chain,
-            escrow.buyerAddress,
-            amount
-          );
-          
-          if (!releaseResult || !releaseResult.success) {
-            throw new Error('Release transaction failed - no result returned');
-          }
-          
-          escrow.status = 'completed';
-          if (releaseResult.transactionHash) {
-            escrow.releaseTransactionHash = releaseResult.transactionHash;
-          }
-          await escrow.save();
-          
-          let successMessage = `✅ ${amount.toFixed(5)} ${escrow.token} has been released to buyer's address!`;
-          if (releaseResult.transactionHash) {
-            // Generate explorer link based on chain
-            let explorerUrl = '';
-            const chainUpper = escrow.chain.toUpperCase();
-            if (chainUpper === 'BSC' || chainUpper === 'BNB') {
-              explorerUrl = `https://bscscan.com/tx/${releaseResult.transactionHash}`;
-            } else if (chainUpper === 'ETH' || chainUpper === 'ETHEREUM') {
-              explorerUrl = `https://etherscan.io/tx/${releaseResult.transactionHash}`;
-            } else if (chainUpper === 'POLYGON' || chainUpper === 'MATIC') {
-              explorerUrl = `https://polygonscan.com/tx/${releaseResult.transactionHash}`;
-            }
-            
-            if (explorerUrl) {
-              successMessage += `\n\n🔗 Transaction: ${explorerUrl}`;
-            }
-          }
-          
-          await ctx.reply(successMessage);
-          
-          // Remove users and recycle group
-          await settleAndRecycleGroup(escrow, ctx.telegram);
-          
-        } catch (error) {
-          console.error('Error releasing funds:', error);
-          const errorMessage = error?.message || error?.toString() || 'Unknown error';
-          await ctx.reply(`❌ Error releasing funds: ${errorMessage}`);
-        }
+        const confirmText = `⚠️ Release Confirmation
+
+You are about to release ${amount.toFixed(2)} ${escrow.token} to ${buyerLabel}.
+
+Do you want to continue?`;
+        
+        await ctx.reply(confirmText, {
+          reply_markup: Markup.inlineKeyboard([
+            [
+              Markup.button.callback('✅ Yes, release funds', `release_confirm_yes_${escrow.escrowId}_${userId}`)
+            ],
+            [
+              Markup.button.callback('❌ Cancel', `release_confirm_no_${escrow.escrowId}_${userId}`)
+            ]
+          ]).reply_markup
+        });
         
       } catch (error) {
         console.error('Error in release command:', error);

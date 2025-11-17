@@ -63,8 +63,15 @@ module.exports = async (ctx) => {
       return ctx.reply('🚫 All rooms are currently busy. Please try again in a moment.');
     }
 
-    // Always enforce join-request approval to verify usernames; omit member_limit to avoid API conflict
-    const inviteLink = await GroupPoolService.generateInviteLink(assignedGroup.groupId, ctx.telegram, { creates_join_request: true });
+    // Always enforce join-request approval with a freshly generated link
+    let inviteLink = await GroupPoolService.refreshInviteLink(assignedGroup.groupId, ctx.telegram);
+    if (!inviteLink) {
+      inviteLink = await GroupPoolService.generateInviteLink(
+        assignedGroup.groupId,
+        ctx.telegram,
+        { creates_join_request: true }
+      );
+    }
 
     // Persist escrow with allowed usernames and user IDs
     // Note: assignedFromPool: true ensures this group will be recycled back to pool after completion
@@ -86,11 +93,12 @@ module.exports = async (ctx) => {
     // Post the room card in the current group (showing invite link from pool group)
     const roomSuffix = escrowId.slice(-2);
     const images = require('../config/images');
-    const participantsText = `* Participants:\n• @${initiatorUsername} (Initiator)\n• @${counterpartyUsername} (Counterparty)`;
+    const participantsText = `<b>👥 Participants:</b>\n• @${initiatorUsername} (Initiator)\n• @${counterpartyUsername} (Counterparty)`;
     const noteText = 'Note: Only the mentioned members can join. Never join any link shared via DM.';
-    const message = `🏠 Deal Room Created! \n\n🔗 Join Link: ${inviteLink}\n\n👥 ${participantsText}\n\n${noteText}`;
+    const message = `<b>🏠 Deal Room Created!</b>\n\n🔗 Join Link: ${inviteLink}\n\n${participantsText}\n\n${noteText}`;
     const inviteMsg = await ctx.replyWithPhoto(images.DEAL_ROOM_CREATED, {
-      caption: message
+      caption: message,
+      parse_mode: 'HTML'
     });
     // Save origin message id to remove later once both join
     try {
