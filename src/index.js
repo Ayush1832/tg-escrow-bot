@@ -519,13 +519,15 @@ class EscrowBot {
                   ? `[${freshEscrow.buyerId}]`
                   : 'Buyer';
 
-              const buyerInstruction = `${buyerMention}\n\nFunds received\n\nNow you proceed & pay to seller according to received amount\n\nAfter deal is complete you can use /release button for release`;
+              const buyerInstruction = `✅ Payment Received!
 
-              await ctx.telegram.sendMessage(chatId, buyerInstruction, {
-                reply_markup: Markup.inlineKeyboard([
-                  [Markup.button.callback('✅ I sent the fiat payment', `fiat_sent_buyer_${freshEscrow.escrowId}`)]
-                ]).reply_markup
-              });
+Use /release After Fund Transfer to Seller
+
+⚠️ Please note:
+• Don't share payment details on private chat
+• Please share all deals in group`;
+
+              await ctx.telegram.sendMessage(chatId, buyerInstruction);
             }
             
             return;
@@ -747,19 +749,30 @@ class EscrowBot {
             ? `[${escrow.buyerId}]`
             : 'the buyer';
         
-        const confirmText = `⚠️ Release Confirmation
-
-You are about to release ${amount.toFixed(2)} ${escrow.token} to ${buyerLabel}.
-
-Do you want to continue?`;
+        const buyerLine = `⌛️ ${buyerLabel} - Waiting...`;
+        const sellerLabel = escrow.sellerUsername
+          ? `@${escrow.sellerUsername}`
+          : escrow.sellerId
+            ? `[${escrow.sellerId}]`
+            : 'the seller';
+        const sellerLine = `⌛️ ${sellerLabel} - Waiting...`;
         
-        await ctx.reply(confirmText, {
+        const releaseCaption = `<b>Release Confirmation</b>
+
+${buyerLine}
+${sellerLine}
+
+Both users must approve to release payment.`;
+        
+        await ctx.replyWithPhoto(images.RELEASE_CONFIRMATION, {
+          caption: releaseCaption,
+          parse_mode: 'HTML',
           reply_markup: Markup.inlineKeyboard([
             [
-              Markup.button.callback('✅ Yes, release funds', `release_confirm_yes_${escrow.escrowId}_${userId}`)
+              Markup.button.callback('✅ Approve', `release_confirm_yes_${escrow.escrowId}_${userId}`)
             ],
             [
-              Markup.button.callback('❌ Cancel', `release_confirm_no_${escrow.escrowId}_${userId}`)
+              Markup.button.callback('❌ Decline', `release_confirm_no_${escrow.escrowId}_${userId}`)
             ]
           ]).reply_markup
         });

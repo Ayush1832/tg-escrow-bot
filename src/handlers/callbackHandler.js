@@ -387,10 +387,9 @@ ${approvalStatus}`;
         const escrowFee = (amount * escrowFeePercent) / 100;
         const releaseAmount = amount - escrowFee;
         
-        const confirmedText = `<b>P2P MM Bot 🤖</b>
+        const confirmedText = `<b>P2P AUTO MM BOT 🤖</b>
 
-<b>DEAL CONFIRMED</b>
-================
+<b>✅ DEAL CONFIRMED</b>
 
 <b>Buyer:</b> ${buyerTag}
 <b>Seller:</b> ${sellerTag}
@@ -418,6 +417,8 @@ ${approvalStatus}`;
         } catch (pinErr) {
           console.error('Failed to pin message:', pinErr);
         }
+        updatedEscrow.dealConfirmedMessageId = confirmedMsg.message_id;
+        await updatedEscrow.save();
         
         // Generate deposit address and send deposit instructions
         try {
@@ -436,17 +437,25 @@ ${approvalStatus}`;
           
           // Send deposit address message with SENT button
           // Use code tag to make address copyable (not clickable link)
-          const depositAddressText = `Send USDT & tap on <b>SENT</b> button.
+          const tokenLabel = (updatedEscrow.token || 'USDT').toUpperCase();
+          const chainLabel = (updatedEscrow.chain || 'BEP-20').toUpperCase();
+          
+          const depositAddressText = `💳 ${tokenLabel} ${chainLabel} Deposit
 
-📮 ${updatedEscrow.chain || 'BSC'} (BEP20):
-<code>${addressInfo.address}</code>`;
+🏦 ${tokenLabel} ${chainLabel} Address: <code>${addressInfo.address}</code>
+
+⚠️ Please Note:
+• Double-check the address before sending.
+• We are not responsible for any fake, incorrect, or unsupported tokens sent to this address.
+
+Once you’ve sent the amount, tap the button below.`;
 
           await ctx.telegram.sendPhoto(updatedEscrow.groupId, images.DEPOSIT_ADDRESS, {
             caption: depositAddressText,
             parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
-                [{ text: '✅ SENT', callback_data: 'confirm_sent_deposit' }]
+                [{ text: '✅ Payment Sent', callback_data: 'confirm_sent_deposit' }]
           ]
         }
       });
@@ -705,12 +714,25 @@ ${closeStatus}`;
 
       // Check if both have confirmed
       if (updatedEscrow.buyerClosedTrade && updatedEscrow.sellerClosedTrade) {
+        if (updatedEscrow.dealConfirmedMessageId) {
+          try {
+            await ctx.telegram.unpinChatMessage(updatedEscrow.groupId, updatedEscrow.dealConfirmedMessageId);
+          } catch (_) {}
+          updatedEscrow.dealConfirmedMessageId = undefined;
+          await updatedEscrow.save();
+        }
         // Both confirmed - announce and schedule recycling (5 minutes)
         await announceAndScheduleRecycling(
           updatedEscrow,
           ctx,
           '✅ Trade closed successfully! Both parties have confirmed. Group will be recycled in 5 minutes. Proceed to exit this group'
         );
+      }
+      
+      try {
+        await scheduleGroupRecycling(updatedEscrow.escrowId, ctx.telegram);
+      } catch (cleanupError) {
+        console.error('Error scheduling recycling after close trade:', cleanupError);
       }
       
       return;
@@ -1087,41 +1109,51 @@ ${closeStatus}`;
         
         const linkLine = releaseResult?.transactionHash
           ? explorerUrl
-            ? `🔗 Release TX Link: Click Here (${explorerUrl})`
-            : `🔗 Release TX Link: ${releaseResult.transactionHash}`
-          : '🔗 Release TX Link: Not available';
+            ? `<a href="${explorerUrl}">Click Here</a>`
+            : `<code>${releaseResult.transactionHash}</code>`
+          : 'Not available';
         
-        const completionText = `🎉 Deal Complete! ✅
+        const completionText = `🎉 <b>Deal Complete!</b> ✅
 
-⏱️ Time Taken: ${minutesTaken} mins
-${linkLine}
+⏱️ <b>Time Taken:</b> ${minutesTaken} mins
+🔗 <b>Release TX Link:</b> ${linkLine}
 
 Thank you for using our safe escrow system.`;
         
-        let closeTradeKeyboard = {
-          inline_keyboard: [
-            [
-              {
-                text: '🔒 Close Deal',
-                callback_data: `close_trade_${escrow.escrowId}`
-              }
-            ]
-          ]
+        const closeTradeKeyboard = {
+              inline_keyboard: [
+                [
+                  {
+                text: '❌ Close Deal',
+                    callback_data: `close_trade_${escrow.escrowId}`
+                  }
+                ]
+              ]
         };
         
         let summaryMsg;
         try {
-          summaryMsg = await ctx.telegram.sendMessage(escrow.groupId, completionText, {
-            reply_markup: closeTradeKeyboard
-          });
+          summaryMsg = await ctx.telegram.sendPhoto(
+            escrow.groupId,
+            images.DEAL_COMPLETE,
+            {
+              caption: completionText,
+              parse_mode: 'HTML',
+              reply_markup: closeTradeKeyboard
+            }
+          );
         } catch (sendError) {
           console.error('Error sending completion summary:', sendError);
-          summaryMsg = await ctx.reply(completionText, { reply_markup: closeTradeKeyboard });
+          summaryMsg = await ctx.replyWithPhoto(images.DEAL_COMPLETE, {
+            caption: completionText,
+            parse_mode: 'HTML',
+            reply_markup: closeTradeKeyboard
+          });
         }
         
         if (summaryMsg) {
           escrow.closeTradeMessageId = summaryMsg.message_id;
-          await escrow.save();
+        await escrow.save();
         }
         
         try {

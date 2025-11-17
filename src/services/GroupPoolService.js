@@ -825,6 +825,7 @@ class GroupPoolService {
         if (escrow.step5BuyerAddressMessageId) messageIdsToDelete.add(escrow.step5BuyerAddressMessageId);
         if (escrow.step6SellerAddressMessageId) messageIdsToDelete.add(escrow.step6SellerAddressMessageId);
         if (escrow.dealSummaryMessageId) messageIdsToDelete.add(escrow.dealSummaryMessageId);
+        if (escrow.dealConfirmedMessageId) messageIdsToDelete.add(escrow.dealConfirmedMessageId);
         if (escrow.transactionHashMessageId) messageIdsToDelete.add(escrow.transactionHashMessageId);
         if (escrow.closeTradeMessageId) messageIdsToDelete.add(escrow.closeTradeMessageId);
         if (escrow.originInviteMessageId) messageIdsToDelete.add(escrow.originInviteMessageId);

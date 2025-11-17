@@ -68,6 +68,11 @@ const escrowSchema = new mongoose.Schema({
     type: Number,
     required: false
   },
+  // Store pinned deal confirmed message ID for later unpinning
+  dealConfirmedMessageId: {
+    type: Number,
+    required: false
+  },
   // Track deal approvals
   buyerApproved: {
     type: Boolean,
