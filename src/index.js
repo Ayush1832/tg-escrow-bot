@@ -778,9 +778,7 @@ Both users must approve to release payment.`;
           parse_mode: 'HTML',
           reply_markup: Markup.inlineKeyboard([
             [
-              Markup.button.callback('✅ Approve', `release_confirm_yes_${escrow.escrowId}_${userId}`)
-            ],
-            [
+              Markup.button.callback('✅ Approve', `release_confirm_yes_${escrow.escrowId}_${userId}`),
               Markup.button.callback('❌ Decline', `release_confirm_no_${escrow.escrowId}_${userId}`)
             ]
           ]).reply_markup

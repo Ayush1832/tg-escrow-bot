@@ -92,6 +92,46 @@ async function scheduleGroupRecycling(escrowId, telegram) {
   groupRecyclingTimers.set(escrowId, timeoutId);
 }
 
+async function recycleGroupImmediately(escrow, telegram) {
+  try {
+    if (!escrow || !telegram) {
+      return;
+    }
+
+    const group = await GroupPool.findOne({
+      assignedEscrowId: escrow.escrowId
+    });
+
+    if (!group) {
+      return;
+    }
+
+    const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, telegram);
+
+    if (allUsersRemoved) {
+      try {
+        await GroupPoolService.refreshInviteLink(group.groupId, telegram);
+      } catch (refreshError) {
+        console.error('Error refreshing invite link during immediate recycle:', refreshError);
+      }
+
+      group.status = 'available';
+      group.assignedEscrowId = null;
+      group.assignedAt = null;
+      group.completedAt = null;
+      await group.save();
+    } else {
+      group.status = 'completed';
+      group.assignedEscrowId = null;
+      group.assignedAt = null;
+      group.completedAt = new Date();
+      await group.save();
+    }
+  } catch (error) {
+    console.error('Error during immediate group recycle:', error);
+  }
+}
+
 async function announceAndScheduleRecycling(escrow, ctx, messageText) {
   if (!escrow || !ctx || !ctx.telegram) {
     return;
@@ -616,12 +656,14 @@ Once you’ve sent the amount, tap the button below.`;
         return ctx.answerCbQuery('❌ Escrow not found.');
       }
 
-      // Check if user is buyer or seller
+      // Check if user is buyer, seller, or admin
       const isBuyer = escrow.buyerId === userId;
       const isSeller = escrow.sellerId === userId;
+      const isAdmin = config.getAllAdminUsernames().includes(ctx.from.username) ||
+                      config.getAllAdminIds().includes(String(userId));
       
-      if (!isBuyer && !isSeller) {
-        return ctx.answerCbQuery('❌ Only buyer or seller can close this trade.');
+      if (!isBuyer && !isSeller && !isAdmin) {
+        return ctx.answerCbQuery('❌ Only buyer, seller, or admin can close this trade.');
       }
 
       // Check if trade is completed or refunded
@@ -629,118 +671,25 @@ Once you’ve sent the amount, tap the button below.`;
         return ctx.answerCbQuery('❌ Trade must be completed or refunded before closing.');
       }
 
-      // Update close trade confirmation
-      if (isBuyer) {
-        escrow.buyerClosedTrade = true;
-      } else {
-        escrow.sellerClosedTrade = true;
+      // Unpin the deal confirmed message
+      if (escrow.dealConfirmedMessageId) {
+        try {
+          await ctx.telegram.unpinChatMessage(escrow.groupId, escrow.dealConfirmedMessageId);
+        } catch (_) {}
+        escrow.dealConfirmedMessageId = undefined;
+        await escrow.save();
       }
-      await escrow.save();
-
-      // Reload to get latest state
-      const updatedEscrow = await Escrow.findById(escrow._id);
       
-      // Update close trade message
-      const buyerUsername = updatedEscrow.buyerUsername || 'Buyer';
-      const sellerUsername = updatedEscrow.sellerUsername || 'Seller';
-      
-      let closeStatus = '';
-      if (updatedEscrow.buyerClosedTrade && updatedEscrow.sellerClosedTrade) {
-        closeStatus = '✅ Both parties have confirmed closing.';
-      } else {
-        const statuses = [];
-        if (updatedEscrow.buyerClosedTrade) {
-          statuses.push(`✅ @${buyerUsername} has confirmed.`);
-        } else {
-          statuses.push(`⏳ Waiting for @${buyerUsername} to confirm.`);
-        }
-        if (updatedEscrow.sellerClosedTrade) {
-          statuses.push(`✅ @${sellerUsername} has confirmed.`);
-        } else {
-          statuses.push(`⏳ Waiting for @${sellerUsername} to confirm.`);
-        }
-        closeStatus = statuses.join('\n');
-      }
-
-      const closeTradeText = `✅ The trade has been completed successfully!
-
-${closeStatus}`;
-
-      const replyMarkup = (updatedEscrow.buyerClosedTrade && updatedEscrow.sellerClosedTrade) ? undefined : {
-        inline_keyboard: [
-          [
-            {
-              text: '🔒 Close Trade',
-              callback_data: `close_trade_${updatedEscrow.escrowId}`
-            }
-          ]
-        ]
-      };
-
-      // Update or send close trade message
-      if (updatedEscrow.closeTradeMessageId) {
-        try {
-          // Try editing as photo caption first (if it's a photo message)
-          await ctx.telegram.editMessageCaption(
-            updatedEscrow.groupId,
-            updatedEscrow.closeTradeMessageId,
-            null,
-            closeTradeText,
-            { reply_markup: replyMarkup }
-          );
-        } catch (captionError) {
-          // If that fails, try editing as text (if it's a text message)
-        try {
-          await ctx.telegram.editMessageText(
-            updatedEscrow.groupId,
-            updatedEscrow.closeTradeMessageId,
-            null,
-            closeTradeText,
-            { reply_markup: replyMarkup }
-          );
-          } catch (textError) {
-            console.error('Failed to update close trade message:', textError);
-          }
-      }
-      } else {
-        // First time - send the message as photo
-        try {
-          const closeMsg = await ctx.telegram.sendPhoto(
-            updatedEscrow.groupId,
-            images.DEAL_COMPLETE,
-            {
-              caption: closeTradeText,
-              reply_markup: replyMarkup
-            }
-          );
-          updatedEscrow.closeTradeMessageId = closeMsg.message_id;
-          await updatedEscrow.save();
-        } catch (e) {
-          console.error('Failed to send close trade message:', e);
-        }
-      }
-
-      // Check if both have confirmed
-      if (updatedEscrow.buyerClosedTrade && updatedEscrow.sellerClosedTrade) {
-        if (updatedEscrow.dealConfirmedMessageId) {
-          try {
-            await ctx.telegram.unpinChatMessage(updatedEscrow.groupId, updatedEscrow.dealConfirmedMessageId);
-          } catch (_) {}
-          updatedEscrow.dealConfirmedMessageId = undefined;
-          await updatedEscrow.save();
-        }
-        // Both confirmed - announce and schedule recycling (5 minutes)
-        await announceAndScheduleRecycling(
-          updatedEscrow,
-          ctx,
-          '✅ Trade closed successfully! Both parties have confirmed. Group will be recycled in 5 minutes. Proceed to exit this group'
-        );
-      }
+      // Immediately recycle the group (single click from anyone)
+      await recycleGroupImmediately(escrow, ctx.telegram);
       
       try {
-        await scheduleGroupRecycling(updatedEscrow.escrowId, ctx.telegram);
-      } catch (cleanupError) {
-        console.error('Error scheduling recycling after close trade:', cleanupError);
+        await ctx.telegram.sendMessage(
+          escrow.groupId,
+          '✅ Trade closed successfully! Group has been recycled and is ready for the next deal.'
+        );
+      } catch (notifyError) {
+        console.error('Error notifying group recycle completion:', notifyError);
       }
       
       return;
