@@ -170,13 +170,21 @@ async function updateRoleSelectionMessage(ctx, escrow) {
     };
     
     // Role selection message is now a photo, so we need to edit the caption
-    await ctx.telegram.editMessageCaption(
-      escrow.groupId,
-      escrow.roleSelectionMessageId,
-      null,
-      messageText,
-      { reply_markup: replyMarkup }
-    );
+    try {
+      await ctx.telegram.editMessageCaption(
+        escrow.groupId,
+        escrow.roleSelectionMessageId,
+        null,
+        messageText,
+        { reply_markup: replyMarkup }
+      );
+    } catch (editError) {
+      const description = editError?.response?.description || editError?.message || '';
+      if (description.includes('message is not modified')) {
+        return; // Safe to ignore
+      }
+      throw editError;
+    }
   } catch (error) {
     console.error('Error updating role selection message:', error);
     // Non-critical - continue execution
