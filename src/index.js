@@ -283,11 +283,17 @@ class EscrowBot {
         
         const escrow = await Escrow.findOne({
           groupId: chatId.toString(),
-          status: { $in: ['awaiting_deposit', 'deposited'] },
+          status: { $in: ['awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'] },
           transactionHashMessageId: { $exists: true }
         });
         
         if (!escrow) {
+          return next();
+        }
+        
+        // If escrow is waiting for button clicks (not text input), ignore text messages
+        // Only process text when status is 'awaiting_deposit' (waiting for transaction hash)
+        if (escrow.status !== 'awaiting_deposit') {
           return next();
         }
         
@@ -475,7 +481,7 @@ class EscrowBot {
             const txHashShort = txHash.substring(0, 10) + '...';
             const totalTxCount = 1 + (freshEscrow.partialTransactionHashes ? freshEscrow.partialTransactionHashes.length : 0);
             
-            let txDetailsText = `<b>OG OTC Bot 🤖</b>
+            let txDetailsText = `<b>P2P MM Bot 🤖</b>
 
 🟢 Exact ${freshEscrow.token} found
 

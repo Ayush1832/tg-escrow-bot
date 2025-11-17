@@ -387,7 +387,7 @@ ${approvalStatus}`;
         const escrowFee = (amount * escrowFeePercent) / 100;
         const releaseAmount = amount - escrowFee;
         
-        const confirmedText = `<b>OG OTC Bot 🤖</b>
+        const confirmedText = `<b>P2P MM Bot 🤖</b>
 
 <b>DEAL CONFIRMED</b>
 ================
@@ -780,7 +780,7 @@ ${closeStatus}`;
       // Use the actual transaction from address (not seller's refund address)
       const fromAddress = escrow.depositTransactionFromAddress || escrow.sellerAddress || 'N/A';
       
-      let confirmedTxText = `<b>OG OTC Bot 🤖</b>
+      let confirmedTxText = `<b>P2P MM Bot 🤖</b>
 
 🟢 Exact ${escrow.token} found
 
