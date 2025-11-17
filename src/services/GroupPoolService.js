@@ -660,14 +660,28 @@ class GroupPoolService {
       // Note: Telegram Bot API doesn't provide a direct way to list all regular members
       // We'll work with administrators and any members we can identify via escrow
       const usersToCheck = new Set(adminMembers);
-
+      
+      const addId = (value) => {
+        if (value === null || value === undefined) {
+          return;
+        }
+        const numeric = Number(value);
+        if (!Number.isNaN(numeric) && numeric !== 0) {
+          usersToCheck.add(numeric);
+        }
+      };
+      
       // Always include buyer and seller from escrow if they exist (they might be regular members, not admins)
       if (escrow) {
-        if (escrow.buyerId) {
-          usersToCheck.add(Number(escrow.buyerId));
+        addId(escrow.buyerId);
+        addId(escrow.sellerId);
+        
+        if (Array.isArray(escrow.allowedUserIds)) {
+          escrow.allowedUserIds.forEach(addId);
         }
-        if (escrow.sellerId) {
-          usersToCheck.add(Number(escrow.sellerId));
+        
+        if (Array.isArray(escrow.approvedUserIds)) {
+          escrow.approvedUserIds.forEach(addId);
         }
       }
 
