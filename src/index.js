@@ -759,7 +759,12 @@ Use /release After Fund Transfer to Seller
           return ctx.reply('❌ Buyer address is not set.');
         }
         
-        const amount = Number(escrow.confirmedAmount || escrow.depositAmount || 0);
+        const amount = Number(
+          escrow.accumulatedDepositAmount ||
+          escrow.depositAmount ||
+          escrow.confirmedAmount ||
+          0
+        );
         if (amount <= 0) {
           return ctx.reply('❌ No confirmed deposit found.');
         }
@@ -842,8 +847,16 @@ Both users must approve to release payment.`;
           return ctx.reply('❌ Seller address is not set.');
         }
         
-        // Use confirmedAmount first, then depositAmount, then accumulatedDepositAmount (for partial payments)
-        const amount = Number(escrow.confirmedAmount || escrow.depositAmount || escrow.accumulatedDepositAmount || 0);
+        // Use accumulatedDepositAmount first (actual amount received from all transactions)
+        // Then fall back to depositAmount, then confirmedAmount
+        // NEVER use quantity as that's the expected amount, not the actual received amount
+        const amount = Number(
+          escrow.accumulatedDepositAmount || 
+          escrow.depositAmount || 
+          escrow.confirmedAmount || 
+          0
+        );
+        
         if (amount <= 0) {
           return ctx.reply('❌ No confirmed deposit found.');
         }
@@ -851,7 +864,7 @@ Both users must approve to release payment.`;
         await ctx.reply('🔄 Refunding funds to seller...');
         
         try {
-          // Refund funds to seller
+          // Refund funds to seller's address (as mentioned in the setup message)
           const refundResult = await BlockchainService.refundFunds(
             escrow.token,
             escrow.chain,

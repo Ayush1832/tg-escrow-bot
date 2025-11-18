@@ -1118,7 +1118,12 @@ Both users must approve to release payment.`;
       
       // Check if both have confirmed
       if (updatedEscrow.buyerConfirmedRelease && updatedEscrow.sellerConfirmedRelease) {
-        const amount = Number(updatedEscrow.confirmedAmount || updatedEscrow.depositAmount || 0);
+        const amount = Number(
+          updatedEscrow.accumulatedDepositAmount ||
+          updatedEscrow.depositAmount ||
+          updatedEscrow.confirmedAmount ||
+          0
+        );
         if (!updatedEscrow.buyerAddress || amount <= 0) {
           return ctx.answerCbQuery('❌ Cannot release funds: missing buyer address or zero amount.');
         }
@@ -1389,7 +1394,12 @@ Use /release After Fund Transfer to Seller
       });
       if (!escrow) return ctx.answerCbQuery('❌ No active escrow found.');
       if (escrow.sellerId !== userId) return ctx.answerCbQuery('❌ Only the seller can confirm release.');
-      const amount = Number(escrow.confirmedAmount || escrow.depositAmount || 0);
+      const amount = Number(
+        escrow.accumulatedDepositAmount ||
+        escrow.depositAmount ||
+        escrow.confirmedAmount ||
+        0
+      );
       if (!escrow.buyerAddress || amount <= 0) {
         return ctx.reply('⚠️ Cannot proceed: missing buyer address or zero amount.');
       }
