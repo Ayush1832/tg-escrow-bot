@@ -1118,12 +1118,19 @@ Both users must approve to release payment.`;
       
       // Check if both have confirmed
       if (updatedEscrow.buyerConfirmedRelease && updatedEscrow.sellerConfirmedRelease) {
-        const amount = Number(
+        const decimals = BlockchainService.getTokenDecimals(updatedEscrow.token, updatedEscrow.chain);
+        const amountWeiOverride = updatedEscrow.accumulatedDepositAmountWei && updatedEscrow.accumulatedDepositAmountWei !== '0'
+          ? updatedEscrow.accumulatedDepositAmountWei
+          : null;
+        let amount = Number(
           updatedEscrow.accumulatedDepositAmount ||
           updatedEscrow.depositAmount ||
           updatedEscrow.confirmedAmount ||
           0
         );
+        if (amountWeiOverride) {
+          amount = Number(ethers.formatUnits(BigInt(amountWeiOverride), decimals));
+        }
         if (!updatedEscrow.buyerAddress || amount <= 0) {
           return ctx.answerCbQuery('❌ Cannot release funds: missing buyer address or zero amount.');
         }
@@ -1133,7 +1140,8 @@ Both users must approve to release payment.`;
             updatedEscrow.token,
             updatedEscrow.chain,
             updatedEscrow.buyerAddress,
-            amount
+            amount,
+            amountWeiOverride
           );
           
           if (!releaseResult || !releaseResult.success) {
@@ -1394,12 +1402,19 @@ Use /release After Fund Transfer to Seller
       });
       if (!escrow) return ctx.answerCbQuery('❌ No active escrow found.');
       if (escrow.sellerId !== userId) return ctx.answerCbQuery('❌ Only the seller can confirm release.');
-      const amount = Number(
+      const decimals = BlockchainService.getTokenDecimals(escrow.token, escrow.chain);
+      const amountWeiOverride = escrow.accumulatedDepositAmountWei && escrow.accumulatedDepositAmountWei !== '0'
+        ? escrow.accumulatedDepositAmountWei
+        : null;
+      let amount = Number(
         escrow.accumulatedDepositAmount ||
         escrow.depositAmount ||
         escrow.confirmedAmount ||
         0
       );
+      if (amountWeiOverride) {
+        amount = Number(ethers.formatUnits(BigInt(amountWeiOverride), decimals));
+      }
       if (!escrow.buyerAddress || amount <= 0) {
         return ctx.reply('⚠️ Cannot proceed: missing buyer address or zero amount.');
       }
@@ -1410,7 +1425,8 @@ Use /release After Fund Transfer to Seller
           escrow.token,
           escrow.chain,
           escrow.buyerAddress,
-          amount
+          amount,
+          amountWeiOverride
         );
         escrow.status = 'completed';
         if (releaseResult && releaseResult.transactionHash) {
@@ -1506,10 +1522,16 @@ Use /release After Fund Transfer to Seller
 
       if (bothConfirmed) {
         // Execute the transaction
-        const amount = parseFloat(amount);
-        const escrowFee = (amount * config.ESCROW_FEE_PERCENT) / 100;
+        const decimals = BlockchainService.getTokenDecimals(escrow.token, escrow.chain);
+        const amountWeiOverride = escrow.accumulatedDepositAmountWei && escrow.accumulatedDepositAmountWei !== '0'
+          ? escrow.accumulatedDepositAmountWei
+          : null;
+        const actualAmount = amountWeiOverride
+          ? Number(ethers.formatUnits(BigInt(amountWeiOverride), decimals))
+          : parseFloat(amount);
+        const escrowFee = (actualAmount * config.ESCROW_FEE_PERCENT) / 100;
         const networkFee = 0.1;
-        const netAmount = amount - networkFee;
+        const netAmount = actualAmount - networkFee;
 
         // Action should be 'release' only (checked earlier)
         const targetAddress = escrow.buyerAddress;
@@ -1518,7 +1540,13 @@ Use /release After Fund Transfer to Seller
         }
 
         try {
-          const releaseResult = await BlockchainService.releaseFunds(escrow.token, escrow.chain, targetAddress, amount);
+          const releaseResult = await BlockchainService.releaseFunds(
+            escrow.token,
+            escrow.chain,
+            targetAddress,
+            actualAmount,
+            amountWeiOverride
+          );
           
           // Update escrow status to completed and save transaction hash
           escrow.status = 'completed';

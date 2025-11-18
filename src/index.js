@@ -388,7 +388,9 @@ class EscrowBot {
           
           const depositAddr = escrow.depositAddress.toLowerCase();
           let transferLog = null;
+          const decimals = BlockchainService.getTokenDecimals(escrow.token, escrow.chain);
           let amount = 0;
+          let amountWeiBigInt = 0n;
           let fromAddr = null;
           let toAddr = null;
           
@@ -405,8 +407,8 @@ class EscrowBot {
                 
                 if (toAddr.toLowerCase() === depositAddr) {
                   transferLog = parsed;
-                  const decimals = BlockchainService.getTokenDecimals(escrow.token, escrow.chain);
-                  amount = Number(value) / Math.pow(10, decimals);
+                  amountWeiBigInt = BigInt(value.toString());
+                  amount = Number(amountWeiBigInt) / Math.pow(10, decimals);
                   break;
                 }
               }
@@ -439,8 +441,11 @@ class EscrowBot {
             return;
           }
           
-          // Update accumulated amount and transaction hashes
+          // Update accumulated amount (decimal and wei) and transaction hashes
           freshEscrow.accumulatedDepositAmount = newAccumulated;
+          const currentAccumulatedWei = BigInt(freshEscrow.accumulatedDepositAmountWei || '0');
+          const newAccumulatedWei = currentAccumulatedWei + amountWeiBigInt;
+          freshEscrow.accumulatedDepositAmountWei = newAccumulatedWei.toString();
           
           // If this is the first transaction, store it in transactionHash, otherwise add to partialTransactionHashes
           if (!freshEscrow.transactionHash) {
@@ -759,12 +764,19 @@ Use /release After Fund Transfer to Seller
           return ctx.reply('❌ Buyer address is not set.');
         }
         
-        const amount = Number(
+        const decimals = BlockchainService.getTokenDecimals(escrow.token, escrow.chain);
+        const amountWeiOverride = escrow.accumulatedDepositAmountWei && escrow.accumulatedDepositAmountWei !== '0'
+          ? escrow.accumulatedDepositAmountWei
+          : null;
+        let amount = Number(
           escrow.accumulatedDepositAmount ||
           escrow.depositAmount ||
           escrow.confirmedAmount ||
           0
         );
+        if (amountWeiOverride) {
+          amount = Number(ethers.formatUnits(BigInt(amountWeiOverride), decimals));
+        }
         if (amount <= 0) {
           return ctx.reply('❌ No confirmed deposit found.');
         }
@@ -850,12 +862,19 @@ Both users must approve to release payment.`;
         // Use accumulatedDepositAmount first (actual amount received from all transactions)
         // Then fall back to depositAmount, then confirmedAmount
         // NEVER use quantity as that's the expected amount, not the actual received amount
+        const decimals = BlockchainService.getTokenDecimals(escrow.token, escrow.chain);
+        const amountWeiOverride = escrow.accumulatedDepositAmountWei && escrow.accumulatedDepositAmountWei !== '0'
+          ? escrow.accumulatedDepositAmountWei
+          : null;
         const amount = Number(
           escrow.accumulatedDepositAmount || 
           escrow.depositAmount || 
           escrow.confirmedAmount || 
           0
         );
+        const formattedAmount = amountWeiOverride
+          ? Number(ethers.formatUnits(BigInt(amountWeiOverride), decimals))
+          : amount;
         
         if (amount <= 0) {
           return ctx.reply('❌ No confirmed deposit found.');
@@ -869,7 +888,8 @@ Both users must approve to release payment.`;
             escrow.token,
             escrow.chain,
             escrow.sellerAddress,
-            amount
+            formattedAmount,
+            amountWeiOverride
           );
           
           if (!refundResult || !refundResult.success) {
@@ -882,7 +902,7 @@ Both users must approve to release payment.`;
           }
           await escrow.save();
           
-          let successMessage = `✅ ${amount.toFixed(5)} ${escrow.token} has been refunded to seller's address!`;
+          let successMessage = `✅ ${formattedAmount.toFixed(5)} ${escrow.token} has been refunded to seller's address!`;
           if (refundResult.transactionHash) {
             // Generate explorer link based on chain
             let explorerUrl = '';

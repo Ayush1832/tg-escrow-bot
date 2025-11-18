@@ -108,6 +108,10 @@ const escrowSchema = new mongoose.Schema({
     type: Number,
     default: 0
   },
+  accumulatedDepositAmountWei: {
+    type: String,
+    default: '0'
+  },
   // Store the actual from address of the deposit transaction (can be any address)
   depositTransactionFromAddress: {
     type: String,

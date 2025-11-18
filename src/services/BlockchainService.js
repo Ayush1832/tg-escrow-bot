@@ -388,7 +388,7 @@ class BlockchainService {
   /**
    * Release funds from escrow vault to buyer
    */
-  async releaseFunds(token, network, buyerAddress, amount) {
+  async releaseFunds(token, network, buyerAddress, amount, amountWeiOverride = null) {
     try {
       const contractAddress = await this.getEscrowContractAddress(token, network);
       if (!contractAddress) {
@@ -403,7 +403,9 @@ class BlockchainService {
       const provider = this.providers[network.toUpperCase()];
       const vaultContract = new ethers.Contract(contractAddress, ESCROW_VAULT_ABI, wallet);
       const decimals = this.getTokenDecimals(token, network);
-      const amountWei = ethers.parseUnits(amount.toString(), decimals);
+      const amountWei = amountWeiOverride
+        ? BigInt(amountWeiOverride)
+        : ethers.parseUnits(amount.toString(), decimals);
 
       // Get nonce manually using 'latest' instead of 'pending' to avoid RPC errors
       // Some RPC providers don't support 'pending' tag
@@ -443,7 +445,7 @@ class BlockchainService {
   /**
    * Refund funds from escrow vault to seller
    */
-  async refundFunds(token, network, sellerAddress, amount) {
+  async refundFunds(token, network, sellerAddress, amount, amountWeiOverride = null) {
     try {
       const contractAddress = await this.getEscrowContractAddress(token, network);
       if (!contractAddress) {
@@ -458,7 +460,9 @@ class BlockchainService {
       const provider = this.providers[network.toUpperCase()];
       const vaultContract = new ethers.Contract(contractAddress, ESCROW_VAULT_ABI, wallet);
       const decimals = this.getTokenDecimals(token, network);
-      const amountWei = ethers.parseUnits(amount.toString(), decimals);
+      const amountWei = amountWeiOverride
+        ? BigInt(amountWeiOverride)
+        : ethers.parseUnits(amount.toString(), decimals);
 
       // Get nonce manually using 'latest' instead of 'pending' to avoid RPC errors
       // Some RPC providers don't support 'pending' tag
