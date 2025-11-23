@@ -1610,7 +1610,8 @@ Both users must approve to release payment.`;
             updatedEscrow.chain,
             updatedEscrow.buyerAddress,
             releaseAmount,
-            amountWeiOverride
+            amountWeiOverride,
+            updatedEscrow.groupId
           );
           
           if (!releaseResult || !releaseResult.success) {
@@ -2343,7 +2344,8 @@ Thank you for using our safe escrow system.`;
           escrow.chain,
           escrow.buyerAddress,
           amount,
-          amountWeiOverride
+          amountWeiOverride,
+          escrow.groupId
         );
         // Ensure transaction hash exists (should always exist if transaction succeeded)
         if (!releaseResult || !releaseResult.transactionHash) {
@@ -2507,7 +2509,8 @@ Thank you for using our safe escrow system.`;
             escrow.chain,
             targetAddress,
             actualAmount,
-            amountWeiOverride
+            amountWeiOverride,
+            escrow.groupId
           );
           
           // Ensure transaction hash exists (should always exist if transaction succeeded)
