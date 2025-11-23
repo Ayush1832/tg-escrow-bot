@@ -11,6 +11,8 @@ module.exports = {
   ADMIN_USER_ID3: process.env.ADMIN_USER_ID3,
   ADMIN_USERNAME4: process.env.ADMIN_USERNAME4,
   ADMIN_USER_ID4: process.env.ADMIN_USER_ID4,
+  ADMIN_USERNAME5: process.env.ADMIN_USERNAME5,
+  ADMIN_USER_ID5: process.env.ADMIN_USER_ID5,
 
   // MongoDB Configuration
   MONGODB_URI: process.env.MONGODB_URI,
@@ -68,6 +70,7 @@ module.exports = {
     if (this.ADMIN_USER_ID2) adminIds.push(this.ADMIN_USER_ID2);
     if (this.ADMIN_USER_ID3) adminIds.push(this.ADMIN_USER_ID3);
     if (this.ADMIN_USER_ID4) adminIds.push(this.ADMIN_USER_ID4);
+    if (this.ADMIN_USER_ID5) adminIds.push(this.ADMIN_USER_ID5);
     return adminIds;
   },
 
@@ -78,6 +81,7 @@ module.exports = {
     if (this.ADMIN_USERNAME2) adminUsernames.push(this.ADMIN_USERNAME2);
     if (this.ADMIN_USERNAME3) adminUsernames.push(this.ADMIN_USERNAME3);
     if (this.ADMIN_USERNAME4) adminUsernames.push(this.ADMIN_USERNAME4);
+    if (this.ADMIN_USERNAME5) adminUsernames.push(this.ADMIN_USERNAME5);
     return adminUsernames;
   }
 };
