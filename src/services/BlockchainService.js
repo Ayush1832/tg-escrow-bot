@@ -388,11 +388,11 @@ class BlockchainService {
   /**
    * Release funds from escrow vault to buyer
    */
-  async releaseFunds(token, network, buyerAddress, amount, amountWeiOverride = null) {
+  async releaseFunds(token, network, buyerAddress, amount, amountWeiOverride = null, groupId = null) {
     try {
-      const contractAddress = await this.getEscrowContractAddress(token, network);
+      const contractAddress = await this.getEscrowContractAddress(token, network, groupId);
       if (!contractAddress) {
-        throw new Error(`No escrow contract found for ${token} on ${network}`);
+        throw new Error(`No escrow contract found for ${token} on ${network}${groupId ? ` for group ${groupId}` : ''}`);
       }
 
       const wallet = this.wallets[network.toUpperCase()];
@@ -445,11 +445,11 @@ class BlockchainService {
   /**
    * Refund funds from escrow vault to seller
    */
-  async refundFunds(token, network, sellerAddress, amount, amountWeiOverride = null) {
+  async refundFunds(token, network, sellerAddress, amount, amountWeiOverride = null, groupId = null) {
     try {
-      const contractAddress = await this.getEscrowContractAddress(token, network);
+      const contractAddress = await this.getEscrowContractAddress(token, network, groupId);
       if (!contractAddress) {
-        throw new Error(`No escrow contract found for ${token} on ${network}`);
+        throw new Error(`No escrow contract found for ${token} on ${network}${groupId ? ` for group ${groupId}` : ''}`);
       }
 
       const wallet = this.wallets[network.toUpperCase()];
@@ -501,15 +501,36 @@ class BlockchainService {
 
   /**
    * Get escrow contract address for token/network pair
+   * If groupId is provided, returns the contract assigned to that group
+   * Otherwise returns any available contract for the token/network
    */
-  async getEscrowContractAddress(token, network) {
+  async getEscrowContractAddress(token, network, groupId = null) {
     try {
       const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
+      
+      // If groupId is provided, try to find group-specific contract first
+      if (groupId) {
+        const groupContract = await ContractModel.findOne({
+          name: 'EscrowVault',
+          token: token.toUpperCase(),
+          network: network.toUpperCase(),
+          feePercent: desiredFeePercent,
+          groupId: groupId,
+          status: 'deployed'
+        });
+        
+        if (groupContract) {
+          return groupContract.address;
+        }
+      }
+      
+      // Fallback: find any contract for the token/network (backward compatibility)
       const contract = await ContractModel.findOne({
         name: 'EscrowVault',
         token: token.toUpperCase(),
         network: network.toUpperCase(),
-        feePercent: desiredFeePercent
+        feePercent: desiredFeePercent,
+        status: 'deployed'
       });
 
       return contract ? contract.address : null;

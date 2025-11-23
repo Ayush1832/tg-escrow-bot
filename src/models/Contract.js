@@ -7,6 +7,7 @@ const contractSchema = new mongoose.Schema({
   address: { type: String, required: true },
   feePercent: { type: Number, required: true, default: 0 }, // Fee percentage (1 = 1%)
   status: { type: String, default: 'deployed' }, // Status of the contract
+  groupId: { type: String, required: false }, // Group ID this contract is assigned to
   deployedAt: { type: Date, default: Date.now }
 });
 

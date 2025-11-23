@@ -91,7 +91,12 @@ module.exports = async (ctx) => {
         return;
       }
 
-      const notFoundMsg = await ctx.reply('❌ Address not found.');
+      const notFoundMsg = await ctx.reply(
+        `⚠️ <b>WARNING: Address Not Verified</b>\n\n` +
+        `❌ This address does <b>NOT</b> belong to this bot.\n\n` +
+        `🚫 <b>DO NOT send funds to this address!</b>\n\n`,
+        { parse_mode: 'HTML' }
+      );
       
       // Delete user's command message and bot's response after 5 minutes
       const telegram = ctx.telegram;

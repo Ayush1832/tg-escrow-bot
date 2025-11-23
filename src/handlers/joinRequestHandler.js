@@ -1,4 +1,5 @@
 const Escrow = require('../models/Escrow');
+const { getParticipants, formatParticipant, formatParticipantById } = require('../utils/participant');
 
 // Import timeout map from groupDealHandler to cancel timeouts when both join
 // We'll use a shared module pattern to access the timeout map
@@ -32,14 +33,47 @@ async function joinRequestHandler(ctx) {
       return;
     }
 
-    // Check if user is allowed (by username or user ID)
-    const allowedUsernames = (escrow.allowedUsernames || []).map(u => (u || '').toLowerCase());
-    const allowedUserIds = escrow.allowedUserIds || [];
-    const idAllowed = allowedUserIds.includes(Number(user.id));
-    const usernameAllowed = username && allowedUsernames.includes(username);
-    
-    if (!idAllowed && !usernameAllowed) {
-      // Not an allowed user - decline
+    const participants = getParticipants(escrow);
+    while (participants.length < 2) {
+      participants.push({ username: null, id: null });
+    }
+
+    const normalizedUserId = Number(user.id);
+    const lowercaseUsername = (user.username || '').toLowerCase();
+
+    let participantIndex = participants.findIndex(
+      p => p.id !== null && p.id === normalizedUserId
+    );
+
+    if (participantIndex === -1 && lowercaseUsername) {
+      participantIndex = participants.findIndex(
+        p => (p.username || '').toLowerCase() === lowercaseUsername
+      );
+    }
+
+    if (participantIndex === -1) {
+      try { await ctx.telegram.declineChatJoinRequest(chatId, user.id); } catch (_) {}
+      return;
+    }
+
+    // Update stored participant info with latest identifiers
+    participants[participantIndex].id = normalizedUserId;
+    if (user.username) {
+      participants[participantIndex].username = user.username;
+    }
+
+    const updatedIds = participants.map(p => {
+      if (p.id === null || p.id === undefined) {
+        return null;
+      }
+      const numeric = Number(p.id);
+      return Number.isFinite(numeric) ? numeric : null;
+    });
+    const updatedUsernames = participants.map(p => p.username || null);
+
+    // Prevent registering more than two distinct user IDs
+    const distinctIds = new Set(updatedIds.filter(id => id !== null));
+    if (!distinctIds.has(normalizedUserId) && distinctIds.size >= 2) {
       try { await ctx.telegram.declineChatJoinRequest(chatId, user.id); } catch (_) {}
       return;
     }
@@ -53,9 +87,12 @@ async function joinRequestHandler(ctx) {
       return;
     }
 
+    escrow.allowedUserIds = updatedIds;
+    escrow.allowedUsernames = updatedUsernames;
+
     // Track approvals
     const approved = new Set(escrow.approvedUserIds || []);
-    approved.add(Number(user.id));
+    approved.add(normalizedUserId);
     escrow.approvedUserIds = Array.from(approved);
     await escrow.save();
 
@@ -76,7 +113,48 @@ async function joinRequestHandler(ctx) {
 
     if (joinedCount < 2) {
       try {
-        await ctx.telegram.sendMessage(chatId, `✅ @${user.username || 'user'} joined.`);
+        const joinedLabel = formatParticipant({ username: user.username || null, id: normalizedUserId }, 'User', { html: true });
+        await ctx.telegram.sendMessage(
+          chatId,
+          `✅ ${joinedLabel} joined.`,
+          { parse_mode: 'HTML' }
+        );
+
+        const joinedUserIds = new Set(escrow.approvedUserIds || []);
+        if (initiatorPresent && escrow.creatorId) {
+          joinedUserIds.add(Number(escrow.creatorId));
+        }
+
+        let waitingParticipant = null;
+        for (const participant of participants) {
+          if (!participant) continue;
+          if (participant.id === null || participant.id === undefined) {
+            continue;
+          }
+          if (!joinedUserIds.has(Number(participant.id))) {
+            waitingParticipant = participant;
+            break;
+          }
+        }
+
+        // Delete any existing waiting message
+        if (escrow.waitingForUserMessageId) {
+      try {
+            await ctx.telegram.deleteMessage(chatId, escrow.waitingForUserMessageId);
+          } catch (_) {}
+        }
+        
+        // Send waiting message if we found the waiting user
+        if (waitingParticipant) {
+          const waitingLabel = formatParticipant(waitingParticipant, 'the other participant', { html: true });
+          const waitingMsg = await ctx.telegram.sendMessage(
+            chatId, 
+            `⏳ Waiting for ${waitingLabel} to join...`,
+            { parse_mode: 'HTML' }
+          );
+          escrow.waitingForUserMessageId = waitingMsg.message_id;
+          await escrow.save();
+        }
       } catch (msgError) {
         // User might not have joined yet, or bot can't send message
         console.error('Failed to send join progress message:', msgError);
@@ -88,6 +166,29 @@ async function joinRequestHandler(ctx) {
     // Avoid sending twice
     if (escrow.roleSelectionMessageId) {
       return;
+    }
+
+    // Send message that second user joined
+    try {
+      const joinedLabel = formatParticipant({ username: user.username || null, id: normalizedUserId }, 'User', { html: true });
+      await ctx.telegram.sendMessage(
+        chatId,
+        `✅ ${joinedLabel} joined.`,
+        { parse_mode: 'HTML' }
+      );
+    } catch (msgError) {
+      console.error('Failed to send join progress message:', msgError);
+    }
+
+    // Delete the waiting message if it exists
+    if (escrow.waitingForUserMessageId) {
+      try {
+        await ctx.telegram.deleteMessage(chatId, escrow.waitingForUserMessageId);
+        escrow.waitingForUserMessageId = null;
+        await escrow.save();
+      } catch (_) {
+        // Message may already be deleted, ignore
+      }
     }
 
     // Cancel the 5-minute timeout since both parties have joined
@@ -105,17 +206,19 @@ async function joinRequestHandler(ctx) {
       try {
         const telegram = ctx.telegram;
         const originChatId = escrow.originChatId;
+        const initiatorLabel = formatParticipantById(escrow, escrow.allowedUserIds?.[0], 'buyer', { html: true });
+        const counterpartyLabel = formatParticipantById(escrow, escrow.allowedUserIds?.[1], 'seller', { html: true });
         const startedMsg = await telegram.sendMessage(
           originChatId,
-          `✅ Trade started between @${(escrow.allowedUsernames?.[0] || 'buyer')} and @${(escrow.allowedUsernames?.[1] || 'seller')}.`
+          `✅ Trade started between ${initiatorLabel} and ${counterpartyLabel}.`,
+          { parse_mode: 'HTML' }
         );
-        // Auto-delete this message after 5 minutes
-        setTimeout(async () => {
-          try {
-            await telegram.deleteMessage(originChatId, startedMsg.message_id);
-          } catch (_) {}
-        }, 5 * 60 * 1000);
-      } catch (e) {}
+        // Store message ID for later editing (don't delete - will be updated with completion details)
+        escrow.tradeStartedMessageId = startedMsg.message_id;
+        await escrow.save();
+      } catch (e) {
+        console.error('Error sending trade started message:', e);
+      }
     }
     const disclaimer = `⚠️ P2P Deal Disclaimer ⚠️
 
@@ -125,8 +228,10 @@ async function joinRequestHandler(ctx) {
 • 💬 Share all details only within this deal room.`;
 
     // Build initial status with waiting indicators
-    const statusLines = (escrow.allowedUsernames || [])
-      .map(u => (u ? `⏳ @${u} - Waiting...` : '⏳ Unknown - Waiting...'));
+    const statusLines = getParticipants(escrow).map((participant, index) => {
+      const label = formatParticipant(participant, index === 0 ? 'Participant 1' : 'Participant 2', { html: true });
+      return `⏳ ${label} - Waiting...`;
+    });
 
     try {
       const images = require('../config/images');
@@ -134,8 +239,19 @@ async function joinRequestHandler(ctx) {
         caption: disclaimer,
         parse_mode: 'Markdown'
       });
+      
+      // Role selection disclaimer
+      const roleDisclaimer = `<b>⚠️ Choose roles accordingly</b>
+
+<b>As release & refund happen according to roles</b>
+
+<b>Refund goes to seller & release to buyer</b>
+
+`;
+      
       const roleSelectionMsg = await ctx.telegram.sendPhoto(chatId, images.SELECT_ROLES, {
-        caption: statusLines.join('\n'),
+        caption: roleDisclaimer + statusLines.join('\n'),
+        parse_mode: 'HTML',
         reply_markup: {
           inline_keyboard: [
             [

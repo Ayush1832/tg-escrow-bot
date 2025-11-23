@@ -17,16 +17,25 @@ async function adminStats(ctx) {
       return ctx.reply('❌ Access denied. Admin privileges required.');
     }
 
-    const totalEscrows = await Escrow.countDocuments({});
+    // Count active escrows (ongoing/pending trades)
     const activeEscrows = await Escrow.countDocuments({ 
       status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'] }
     });
+
+    // Only count fully completed escrows (with transaction hashes proving actual completion)
     const completedEscrows = await Escrow.countDocuments({ 
-      status: 'completed' 
+      status: 'completed',
+      releaseTransactionHash: { $exists: true, $ne: null, $ne: '' }
     });
+
+    // Only count fully refunded escrows (with transaction hashes proving actual refund)
     const refundedEscrows = await Escrow.countDocuments({ 
-      status: 'refunded' 
+      status: 'refunded',
+      refundTransactionHash: { $exists: true, $ne: null, $ne: '' }
     });
+
+    // Total = only completed + refunded (fully finished trades)
+    const totalEscrows = completedEscrows + refundedEscrows;
 
     const statsMessage = `
 📊 *ADMIN STATISTICS*
@@ -112,7 +121,8 @@ async function adminPoolList(ctx) {
     if (availableGroups.length > 0) {
       message += `🟢 *Available (${availableGroups.length}):*\n`;
       availableGroups.forEach(group => {
-        message += `• \`${group.groupId}\` - ${group.groupTitle || 'No title'}\n`;
+        const title = group.groupTitle || 'Unknown';
+        message += `• ${title}\n`;
       });
       message += '\n';
     }
@@ -120,7 +130,8 @@ async function adminPoolList(ctx) {
     if (assignedGroups.length > 0) {
       message += `🟡 *Assigned (${assignedGroups.length}):*\n`;
       assignedGroups.forEach(group => {
-        message += `• \`${group.groupId}\` - Escrow: ${group.assignedEscrowId}\n`;
+        const title = group.groupTitle || 'Unknown';
+        message += `• ${title} - Escrow: ${group.assignedEscrowId}\n`;
       });
       message += '\n';
     }
@@ -128,10 +139,11 @@ async function adminPoolList(ctx) {
     if (completedGroups.length > 0) {
       message += `🔵 *Completed (${completedGroups.length}):*\n`;
       completedGroups.forEach(group => {
+        const title = group.groupTitle || 'Unknown';
         const completedAgo = group.completedAt 
           ? Math.floor((Date.now() - group.completedAt) / (1000 * 60 * 60))
           : 'Unknown';
-        message += `• \`${group.groupId}\` - ${completedAgo}h ago\n`;
+        message += `• ${title} - ${completedAgo}h ago\n`;
       });
     }
 
@@ -326,21 +338,6 @@ async function adminInitAddresses(ctx) {
 /**
  * Admin command to show timeout statistics
  */
-async function adminTimeoutStats(ctx) {
-  try {
-    if (!isAdmin(ctx)) {
-      return ctx.reply('❌ Access denied. Admin privileges required.');
-    }
-
-    return ctx.reply('❌ Trade timeout functionality has been removed. This command is no longer available.');
-
-  } catch (error) {
-    console.error('Error getting timeout stats:', error);
-    ctx.reply('❌ Error loading timeout statistics.');
-  }
-}
-
-
 
 /**
  * Admin command to cleanup abandoned addresses
@@ -444,7 +441,6 @@ async function adminHelp(ctx) {
 • \`/admin_address_pool\` - View address pool status
 • \`/admin_init_addresses\` - Verify deployed EscrowVault contracts
 • \`/admin_cleanup_addresses\` - Cleanup abandoned addresses
-• \`/admin_timeout_stats\` - View timeout statistics
 
 📋 **AUTOMATIC FEATURES:**
 ✅ **Group Recycling**: Automatic 15-minute delayed recycling after trade completion
@@ -485,7 +481,9 @@ async function adminTradeStats(ctx) {
       return ctx.reply('❌ Access denied. Admin privileges required.');
     }
 
-    // Get all completed and refunded escrows
+    // Get all fully completed and refunded escrows
+    // Include all trades marked as completed/refunded (we'll filter for valid amounts later)
+    // Prefer trades with transaction hashes, but include all completed/refunded trades
     const completedEscrows = await Escrow.find({
       status: { $in: ['completed', 'refunded'] }
     });
@@ -493,6 +491,52 @@ async function adminTradeStats(ctx) {
     // Get all contracts to understand fee structures
     const Contract = require('../models/Contract');
     const contracts = await Contract.find({ name: 'EscrowVault' });
+
+    // Helper function to get the settled amount for a completed/refunded escrow
+    // For completed/refunded trades, deposit amounts are zeroed, so we use quantity as source of truth
+    const getSettledAmount = (escrow) => {
+      // For completed/refunded trades, use quantity (the original agreed amount)
+      // This is the most reliable since deposit amounts are zeroed after completion
+      if (escrow.status === 'completed' || escrow.status === 'refunded') {
+        const q = parseFloat(escrow.quantity);
+        if (!isNaN(q) && q > 0) {
+          return q;
+        }
+      }
+      // Fallback for edge cases (shouldn't happen for completed/refunded with transaction hashes)
+      const c = parseFloat(escrow.confirmedAmount);
+      const d = parseFloat(escrow.depositAmount);
+      const q = parseFloat(escrow.quantity);
+      return (!isNaN(c) && c > 0)
+        ? c
+        : (!isNaN(d) && d > 0)
+          ? d
+          : (!isNaN(q) && q > 0)
+            ? q
+            : 0;
+    };
+
+    // Filter out escrows with zero or invalid amounts (only count actual completed trades)
+    // Also prefer trades with transaction hashes (proving actual blockchain completion)
+    // This must be done before the fee percentage loop
+    const validCompletedEscrows = completedEscrows.filter(escrow => {
+      const amt = getSettledAmount(escrow);
+      if (amt <= 0) {
+        return false; // Exclude escrows with invalid amounts
+      }
+      
+      // Prefer trades with transaction hashes (more reliable)
+      // But include all trades with valid amounts to ensure we don't miss any
+      const hasReleaseHash = escrow.status === 'completed' && 
+                             escrow.releaseTransactionHash && 
+                             escrow.releaseTransactionHash.trim() !== '';
+      const hasRefundHash = escrow.status === 'refunded' && 
+                            escrow.refundTransactionHash && 
+                            escrow.refundTransactionHash.trim() !== '';
+      
+      // Include if it has a transaction hash OR if it has a valid quantity (for edge cases)
+      return hasReleaseHash || hasRefundHash || (escrow.quantity && escrow.quantity > 0);
+    });
 
     // Group contracts by fee percentage
     const contractsByFee = {};
@@ -513,7 +557,8 @@ async function adminTradeStats(ctx) {
       const contractAddresses = contractList.map(c => c.address.toLowerCase());
       
       // Find escrows that used contracts with this fee percentage
-      const escrowsWithFee = completedEscrows.filter(escrow => {
+      // Use validCompletedEscrows instead of completedEscrows to ensure we only count valid trades
+      const escrowsWithFee = validCompletedEscrows.filter(escrow => {
         // This is a simplified approach - in reality, you'd need to track which contract was used
         // For now, we'll use the current ESCROW_FEE_PERCENT from config
         const currentFee = Number(config.ESCROW_FEE_PERCENT || 0);
@@ -521,34 +566,15 @@ async function adminTradeStats(ctx) {
       });
 
       const totalTrades = escrowsWithFee.length;
-      // Use confirmedAmount -> depositAmount -> quantity as fallback to avoid 0 totals
+      // Use getSettledAmount helper for consistent amount calculation
       const totalAmount = escrowsWithFee.reduce((sum, escrow) => {
-        const c = parseFloat(escrow.confirmedAmount);
-        const d = parseFloat(escrow.depositAmount);
-        const q = parseFloat(escrow.quantity);
-        const amt = (!isNaN(c) && c > 0)
-          ? c
-          : (!isNaN(d) && d > 0)
-            ? d
-            : (['completed', 'refunded'].includes(escrow.status) && !isNaN(q) && q > 0)
-              ? q
-              : 0;
-        return sum + amt;
+        return sum + getSettledAmount(escrow);
       }, 0);
 
       const tokenBreakdown = {};
       escrowsWithFee.forEach(escrow => {
         const token = escrow.token || 'Unknown';
-        const c = parseFloat(escrow.confirmedAmount);
-        const d = parseFloat(escrow.depositAmount);
-        const q = parseFloat(escrow.quantity);
-        const amount = (!isNaN(c) && c > 0)
-          ? c
-          : (!isNaN(d) && d > 0)
-            ? d
-            : (['completed', 'refunded'].includes(escrow.status) && !isNaN(q) && q > 0)
-              ? q
-              : 0;
+        const amount = getSettledAmount(escrow);
         
         if (!tokenBreakdown[token]) {
           tokenBreakdown[token] = { count: 0, amount: 0 };
@@ -568,24 +594,14 @@ async function adminTradeStats(ctx) {
       };
     }
 
-    // Calculate overall statistics
-    const totalTrades = completedEscrows.length;
-    const totalAmount = completedEscrows.reduce((sum, escrow) => {
-      const c = parseFloat(escrow.confirmedAmount);
-      const d = parseFloat(escrow.depositAmount);
-      const q = parseFloat(escrow.quantity);
-      const amt = (!isNaN(c) && c > 0)
-        ? c
-        : (!isNaN(d) && d > 0)
-          ? d
-          : (!isNaN(q) && q > 0)
-            ? q
-            : 0;
-      return sum + amt;
+    // Calculate overall statistics using only valid completed escrows
+    const totalTrades = validCompletedEscrows.length;
+    const totalAmount = validCompletedEscrows.reduce((sum, escrow) => {
+      return sum + getSettledAmount(escrow);
     }, 0);
 
-    const completedCount = completedEscrows.filter(e => e.status === 'completed').length;
-    const refundedCount = completedEscrows.filter(e => e.status === 'refunded').length;
+    const completedCount = validCompletedEscrows.filter(e => e.status === 'completed').length;
+    const refundedCount = validCompletedEscrows.filter(e => e.status === 'refunded').length;
 
     // Build the statistics message
     let statsMessage = `📊 **COMPREHENSIVE TRADE STATISTICS**
@@ -640,8 +656,20 @@ async function adminExportTrades(ctx) {
       return ctx.reply('❌ Access denied. Admin privileges required.');
     }
 
-    // Get all escrows with detailed information
-    const allEscrows = await Escrow.find({})
+    // Get all fully completed/refunded escrows with transaction hashes only
+    // Transaction hash must exist and be a non-empty string
+    const allEscrows = await Escrow.find({
+        $or: [
+          { 
+            status: 'completed',
+            releaseTransactionHash: { $exists: true, $ne: null, $ne: '' }
+          },
+          { 
+            status: 'refunded',
+            refundTransactionHash: { $exists: true, $ne: null, $ne: '' }
+          }
+        ]
+      })
       .sort({ createdAt: -1 }); // Most recent first
 
     if (allEscrows.length === 0) {
@@ -751,9 +779,19 @@ async function adminRecentTrades(ctx) {
       return ctx.reply('❌ Maximum 50 trades per request. Use /admin_export_trades for complete data.');
     }
 
-    // Get recent trades - only necessary statuses
+    // Get recent trades - only fully completed/refunded trades with transaction hashes
+    // Transaction hash must exist and be a non-empty string
     const recentTrades = await Escrow.find({
-        status: { $in: ['completed', 'refunded'] }
+        $or: [
+          { 
+            status: 'completed',
+            releaseTransactionHash: { $exists: true, $ne: null, $ne: '' }
+          },
+          { 
+            status: 'refunded',
+            refundTransactionHash: { $exists: true, $ne: null, $ne: '' }
+          }
+        ]
       })
       .sort({ createdAt: -1 })
       .limit(limit)
@@ -936,31 +974,24 @@ async function adminGroupReset(ctx) {
       return;
     }
 
-    // Verify status is in allowed states (must be before deposit check)
-    const allowedStatuses = ['draft', 'awaiting_details', 'awaiting_deposit'];
-    if (!allowedStatuses.includes(escrow.status)) {
-      const errorMsg = await ctx.reply('❌ Cannot reset: Trade has already started. Only reset before deposits.');
-      setTimeout(async () => {
-        try {
-          await ctx.telegram.deleteMessage(chatId, errorMsg.message_id);
-        } catch (e) {}
-      }, 60 * 1000);
-      return;
-    }
+    // Only check for deposits if trade is NOT completed/refunded
+    // If trade is completed, allow reset to clean up the group
+    const isCompleted = ['completed', 'refunded'].includes(escrow.status);
+    if (!isCompleted) {
+      // Check if deposits were made (only for active trades)
+      const depositAmount = Number(escrow.depositAmount || 0);
+      const confirmedAmount = Number(escrow.confirmedAmount || 0);
+      const hasDeposit = depositAmount > 0 || confirmedAmount > 0;
 
-    // Check if deposits were made (amount-based check, since status is already validated)
-    const depositAmount = Number(escrow.depositAmount || 0);
-    const confirmedAmount = Number(escrow.confirmedAmount || 0);
-    const hasDeposit = depositAmount > 0 || confirmedAmount > 0;
-
-    if (hasDeposit) {
-      const errorMsg = await ctx.reply('❌ Cannot reset: Deposits were made. Use /release or /refund to settle.');
-      setTimeout(async () => {
-        try {
-          await ctx.telegram.deleteMessage(chatId, errorMsg.message_id);
-        } catch (e) {}
-      }, 60 * 1000);
-      return;
+      if (hasDeposit) {
+        const errorMsg = await ctx.reply('❌ Cannot reset: Deposits were made. Use /release or /refund to settle.');
+        setTimeout(async () => {
+          try {
+            await ctx.telegram.deleteMessage(chatId, errorMsg.message_id);
+          } catch (e) {}
+        }, 60 * 1000);
+        return;
+      }
     }
 
     // Find the group in pool (we may have already found it above)
@@ -995,18 +1026,34 @@ async function adminGroupReset(ctx) {
     }, 60 * 1000);
 
     try {
+      // Unpin the deal confirmed message if it exists
+      if (escrow.dealConfirmedMessageId) {
+        try {
+          await ctx.telegram.unpinChatMessage(chatId, escrow.dealConfirmedMessageId);
+        } catch (unpinError) {
+          // Ignore errors (message may already be unpinned or deleted)
+        }
+      }
+
       // Remove buyer and seller from group
       const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, ctx.telegram);
 
-      if (!allUsersRemoved) {
+      // For completed trades, continue even if some users can't be removed
+      // For active trades, be more strict
+      if (!allUsersRemoved && !isCompleted) {
         const errorMsg = await ctx.reply('⚠️ Some users could not be removed from the group. Please check manually.');
         // Delete error message after 1 minute
         setTimeout(async () => {
-          try {
+      try {
             await ctx.telegram.deleteMessage(chatId, errorMsg.message_id);
           } catch (e) {}
         }, 60 * 1000);
         return;
+    }
+
+      // For completed trades, log warning but continue
+      if (!allUsersRemoved && isCompleted) {
+        console.log('⚠️ Some users could not be removed during reset of completed trade, continuing anyway...');
       }
 
 
@@ -1038,7 +1085,7 @@ async function adminGroupReset(ctx) {
         } catch (e) {}
       }, 60 * 1000);
 
-    } catch (error) {
+  } catch (error) {
       console.error('Error resetting group:', error);
       const errorMsg = await ctx.reply('❌ Error resetting group. Please check the logs.');
       // Delete error message after 1 minute
@@ -1151,6 +1198,15 @@ async function adminResetForce(ctx) {
     }, 60 * 1000);
 
     try {
+      // Unpin the deal confirmed message if it exists
+      if (escrow.dealConfirmedMessageId) {
+        try {
+          await ctx.telegram.unpinChatMessage(chatId, escrow.dealConfirmedMessageId);
+        } catch (unpinError) {
+          // Ignore errors (message may already be unpinned or deleted)
+        }
+      }
+
       // Remove buyer and seller from group (not admin)
       const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, ctx.telegram);
 
@@ -1189,7 +1245,7 @@ async function adminResetForce(ctx) {
         } catch (e) {}
       }, 60 * 1000);
 
-    } catch (error) {
+  } catch (error) {
       console.error('Error force resetting group:', error);
       const errorMsg = await ctx.reply('❌ Error force resetting group. Please check the logs.');
       // Delete error message after 1 minute
@@ -1224,7 +1280,6 @@ module.exports = {
   adminRecentTrades,
   adminAddressPool,
   adminInitAddresses,
-  adminTimeoutStats,
   adminCleanupAddresses,
   adminRecycleGroups,
   adminGroupReset,

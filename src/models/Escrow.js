@@ -24,7 +24,7 @@ const escrowSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release', 'completed', 'refunded'],
+    enum: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release', 'completed', 'refunded', 'disputed'],
     default: 'draft'
   },
   token: {
@@ -89,6 +89,11 @@ const escrowSchema = new mongoose.Schema({
   },
   // Store partial payment message ID for editing
   partialPaymentMessageId: {
+    type: Number,
+    required: false
+  },
+  // Store waiting for user message ID (when only one user has joined)
+  waitingForUserMessageId: {
     type: Number,
     required: false
   },
@@ -161,6 +166,10 @@ const escrowSchema = new mongoose.Schema({
     type: Number,
     required: false
   },
+  tradeStartedMessageId: {
+    type: Number,
+    required: false
+  },
   // Allowed usernames for restricted join requests (when room is created via /deal in a group)
   allowedUsernames: {
     type: [String],
@@ -212,6 +221,28 @@ const escrowSchema = new mongoose.Schema({
     type: Number,
     required: false
   },
+  // Store refund confirmation message ID for editing
+  refundConfirmationMessageId: {
+    type: Number,
+    required: false
+  },
+  // Store pending refund/release amount (for partial operations)
+  pendingRefundAmount: {
+    type: Number,
+    required: false
+  },
+  pendingReleaseAmount: {
+    type: Number,
+    required: false
+  },
+  buyerStatsParticipationRecorded: {
+    type: Boolean,
+    default: false
+  },
+  sellerStatsParticipationRecorded: {
+    type: Boolean,
+    default: false
+  },
   inviteLink: String,
   depositAmount: {
     type: Number,
@@ -242,6 +273,10 @@ const escrowSchema = new mongoose.Schema({
     default: false
   },
   sellerConfirmedRelease: {
+    type: Boolean,
+    default: false
+  },
+  adminConfirmedRelease: {
     type: Boolean,
     default: false
   },

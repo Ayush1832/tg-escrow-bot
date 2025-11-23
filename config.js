@@ -43,7 +43,6 @@ module.exports = {
 
   // Wallet Configuration
   HOT_WALLET_PRIVATE_KEY: process.env.HOT_WALLET_PRIVATE_KEY,
-  ADMIN_DEPOSIT_ADDRESS: process.env.ADMIN_DEPOSIT_ADDRESS,
 
   // Escrow Configuration
   ESCROW_FEE_PERCENT: Number(process.env.ESCROW_FEE_PERCENT || 0),
@@ -57,6 +56,10 @@ module.exports = {
 
   // Security
   NODE_ENV: process.env.NODE_ENV || 'development',
+
+  // Dispute Management
+  DISPUTE_CHANNEL_ID: process.env.DISPUTE_CHANNEL_ID,
+  COMPLETION_FEED_CHAT_ID: process.env.COMPLETION_FEED_CHAT_ID,
 
   // Helper function to get all admin IDs
   getAllAdminIds() {

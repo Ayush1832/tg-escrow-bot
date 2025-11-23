@@ -3,6 +3,7 @@ const GroupPool = require('../models/GroupPool');
 const GroupPoolService = require('../services/GroupPoolService');
 const config = require('../../config');
 const joinRequestHandler = require('./joinRequestHandler');
+const { formatParticipant, formatParticipantByIndex } = require('../utils/participant');
 
 // Store timeout references for invite message expiration checks
 const inviteTimeoutMap = new Map();
@@ -20,36 +21,73 @@ module.exports = async (ctx) => {
 
     const text = ctx.message?.text || '';
     
-    // Extract mentioned username from message entities (more reliable than string parsing)
-    let counterpartyUsername = null;
+    const initiatorId = ctx.from.id;
+    const initiatorUsername = ctx.from.username || null;
+
+    // Determine the counterparty using mention, text_mention, or reply target
+    let counterpartyUser = null;
+    let counterpartyHandle = null;
+
     if (ctx.message?.entities) {
       for (const entity of ctx.message.entities) {
-        if (entity.type === 'mention' && entity.offset > 0) {
-          const mention = text.substring(entity.offset, entity.offset + entity.length);
-          counterpartyUsername = mention.replace('@', '').trim();
+        if (entity.type === 'text_mention' && entity.user) {
+          counterpartyUser = entity.user;
           break;
+        }
+        if (entity.type === 'mention' && !counterpartyHandle) {
+          const mention = text.substring(entity.offset, entity.offset + entity.length);
+          counterpartyHandle = mention.trim();
         }
       }
     }
-    
-    // Fallback to simple parsing if entities don't work
-    if (!counterpartyUsername) {
+
+    if (!counterpartyUser && ctx.message?.reply_to_message?.from) {
+      counterpartyUser = ctx.message.reply_to_message.from;
+    }
+
+    if (!counterpartyUser && !counterpartyHandle) {
       const parts = text.trim().split(/\s+/);
-      const counterpartyHandle = parts[1] || '';
-      if (counterpartyHandle.startsWith('@') && counterpartyHandle.length > 1) {
-        counterpartyUsername = counterpartyHandle.slice(1);
+      const handleCandidate = parts[1];
+      if (handleCandidate && handleCandidate.startsWith('@') && handleCandidate.length > 1) {
+        counterpartyHandle = handleCandidate;
       }
     }
 
-    const initiatorUsername = ctx.from.username || null;
-    if (!initiatorUsername) {
-      return ctx.reply('❌ You must set a Telegram username to start a deal.');
+    if (!counterpartyUser && counterpartyHandle) {
+      const handle = counterpartyHandle.startsWith('@') ? counterpartyHandle : `@${counterpartyHandle}`;
+      try {
+        const chatInfo = await ctx.telegram.getChat(handle);
+        if (!chatInfo || (chatInfo.type !== 'private' && chatInfo.type !== 'user')) {
+          return ctx.reply('❌ Could not retrieve user info. Please tag the user directly (tap their name) or reply to their message when using /deal.');
+        }
+        if (chatInfo.is_bot) {
+          return ctx.reply('❌ You cannot start a deal with a bot.');
+        }
+        counterpartyUser = {
+          id: Number(chatInfo.id),
+          username: chatInfo.username || null,
+          first_name: chatInfo.first_name,
+          last_name: chatInfo.last_name,
+          is_bot: chatInfo.is_bot
+        };
+      } catch (fetchError) {
+        console.error('Error fetching counterparty info:', fetchError);
+        return ctx.reply('❌ Unable to fetch that user. Please tag them directly (tap their name) or reply to one of their messages when using /deal.');
+      }
     }
 
-    if (!counterpartyUsername) {
-      return ctx.reply('❌ Usage: /deal @counterparty');
+    if (!counterpartyUser) {
+      return ctx.reply('❌ Please mention the counterparty (tap their name to tag) or reply to their message when using /deal so we can verify their user ID.');
     }
-    if (counterpartyUsername.toLowerCase() === initiatorUsername.toLowerCase()) {
+
+    if (counterpartyUser.is_bot) {
+      return ctx.reply('❌ You cannot start a deal with a bot.');
+    }
+
+    const counterpartyId = counterpartyUser.id;
+    const counterpartyUsername = counterpartyUser.username || null;
+
+    if (Number(counterpartyId) === Number(initiatorId)) {
       return ctx.reply('❌ You cannot start a deal with yourself.');
     }
 
@@ -75,25 +113,41 @@ module.exports = async (ctx) => {
 
     // Persist escrow with allowed usernames and user IDs
     // Note: assignedFromPool: true ensures this group will be recycled back to pool after completion
+    const participants = [
+      { id: initiatorId, username: initiatorUsername },
+      { id: counterpartyId, username: counterpartyUsername }
+    ];
+
     const newEscrow = new Escrow({
       escrowId,
-      creatorId: ctx.from.id,
+      creatorId: initiatorId,
       creatorUsername: initiatorUsername,
       groupId: assignedGroup.groupId, // This is a pool group assigned from GroupPoolService
       assignedFromPool: true, // Mark as pool group for proper recycling
       status: 'draft',
       inviteLink, // Join-request link from the pool group
-      allowedUsernames: [initiatorUsername, counterpartyUsername],
-      allowedUserIds: [ctx.from.id], // Track initiator's ID in case username changes
+      allowedUsernames: participants.map(p => p.username || null),
+      allowedUserIds: participants.map(p => Number(p.id)),
       approvedUserIds: [], // Will be populated as users join via join-request approval
       originChatId: String(chatId)
     });
     await newEscrow.save();
 
     // Post the room card in the current group (showing invite link from pool group)
-    const roomSuffix = escrowId.slice(-2);
     const images = require('../config/images');
-    const participantsText = `<b>👥 Participants:</b>\n• @${initiatorUsername} (Initiator)\n• @${counterpartyUsername} (Counterparty)`;
+    
+    // Format participants with better handling for users without usernames
+    const formatParticipantWithRole = (participant, role) => {
+      const formatted = formatParticipant(participant, role, { html: true });
+      // If user has username, add role in parentheses. If not, the Telegram link will show their name
+      if (participant && participant.username) {
+        return `${formatted} (${role})`;
+      }
+      // For users without username, just show the formatted link (Telegram will display their name)
+      return formatted;
+    };
+    
+    const participantsText = `<b>👥 Participants:</b>\n• ${formatParticipantWithRole(participants[0], 'Initiator')}\n• ${formatParticipantWithRole(participants[1], 'Counterparty')}`;
     const noteText = 'Note: Only the mentioned members can join. Never join any link shared via DM.';
     const message = `<b>🏠 Deal Room Created!</b>\n\n🔗 Join Link: ${inviteLink}\n\n${participantsText}\n\n${noteText}`;
     const inviteMsg = await ctx.replyWithPhoto(images.DEAL_ROOM_CREATED, {
@@ -190,12 +244,13 @@ module.exports = async (ctx) => {
         }
 
         // Send cancellation message
-        const initiatorName = currentEscrow.allowedUsernames?.[0] || 'user';
-        const counterpartyName = currentEscrow.allowedUsernames?.[1] || 'user';
+        const initiatorName = formatParticipantByIndex(currentEscrow, 0, 'initiator', { html: true });
+        const counterpartyName = formatParticipantByIndex(currentEscrow, 1, 'counterparty', { html: true });
         try {
           const cancellationMsg = await telegram.sendMessage(
             currentEscrow.originChatId,
-            `❌ Deal cancelled between @${initiatorName} and @${counterpartyName} due to inactivity. Both parties must join within 5 minutes.`
+            `❌ Deal cancelled between ${initiatorName} and ${counterpartyName} due to inactivity. Both parties must join within 5 minutes.`,
+            { parse_mode: 'HTML' }
           );
           
           // Delete cancellation message after 5 minutes
@@ -214,11 +269,27 @@ module.exports = async (ctx) => {
         }
 
         // Recycle the group
-        const group = await GroupPool.findOne({ 
+        let group = await GroupPool.findOne({ 
           assignedEscrowId: currentEscrow.escrowId 
         });
 
+        // Fallback: try to find by groupId if not found by assignedEscrowId
+        if (!group) {
+          group = await GroupPool.findOne({ 
+            groupId: currentEscrow.groupId 
+          });
+        }
+
         if (group) {
+          // Delete waiting message if it exists
+          if (currentEscrow.waitingForUserMessageId) {
+            try {
+              await telegram.deleteMessage(String(currentEscrow.groupId), currentEscrow.waitingForUserMessageId);
+            } catch (_) {
+              // Message may already be deleted, ignore
+            }
+          }
+
           // Clear escrow invite link (but keep group invite link - it's permanent)
           if (currentEscrow.inviteLink) {
             currentEscrow.inviteLink = null;
@@ -232,6 +303,13 @@ module.exports = async (ctx) => {
             console.log('Could not remove users during timeout cancellation:', removeError.message);
           }
 
+          // Refresh invite link (revoke old and create new) so removed users can rejoin
+          try {
+            await GroupPoolService.refreshInviteLink(group.groupId, telegram);
+          } catch (linkError) {
+            console.log('Could not refresh invite link during timeout cancellation:', linkError.message);
+          }
+
           // Reset group pool entry
           // IMPORTANT: Do NOT clear group.inviteLink - we keep the permanent link for reuse
           group.status = 'available';
@@ -240,6 +318,8 @@ module.exports = async (ctx) => {
           group.completedAt = null;
           // Keep inviteLink - it's permanent and will be reused
           await group.save();
+        } else {
+          console.log(`Warning: Could not find group pool entry for escrow ${currentEscrow.escrowId} during timeout cancellation`);
         }
 
         // Delete the escrow

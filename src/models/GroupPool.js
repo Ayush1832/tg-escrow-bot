@@ -39,6 +39,10 @@ const groupPoolSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  assignedAddresses: {
+    type: Map,
+    of: String
+  },
   createdAt: {
     type: Date,
     default: Date.now
