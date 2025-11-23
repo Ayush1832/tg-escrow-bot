@@ -65,21 +65,94 @@ module.exports = async (ctx) => {
 
     if (!counterpartyUser && counterpartyHandle) {
       const handle = counterpartyHandle.startsWith("@")
-        ? counterpartyHandle
-        : `@${counterpartyHandle}`;
+        ? counterpartyHandle.substring(1) // Remove @ for username lookup
+        : counterpartyHandle;
+      
+      // Try multiple methods to get the user
+      let chatInfo = null;
+      
+      // Method 1: Try getChat with @username (works if user has interacted with bot)
       try {
-        const chatInfo = await ctx.telegram.getChat(handle);
-        if (
-          !chatInfo ||
-          (chatInfo.type !== "private" && chatInfo.type !== "user")
-        ) {
+        chatInfo = await ctx.telegram.getChat(`@${handle}`);
+      } catch (getChatError) {
+        // getChat failed, will try alternative methods
+        console.log(`getChat failed for @${handle}, trying alternative methods`);
+      }
+      
+      // Method 2: If getChat didn't work, try to find the user in our database
+      // (if they've done trades before, we'll have their user ID)
+      if (!chatInfo || chatInfo.type !== "private") {
+        try {
+          const Escrow = require("../models/Escrow");
+          // Search for the user in recent escrows by username
+          const escrowWithUser = await Escrow.findOne({
+            $or: [
+              { buyerUsername: { $regex: new RegExp(`^${handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } },
+              { sellerUsername: { $regex: new RegExp(`^${handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }
+            ]
+          }).sort({ createdAt: -1 });
+          
+          if (escrowWithUser) {
+            // Found the user in database, get their info
+            const userId = escrowWithUser.buyerUsername?.toLowerCase() === handle.toLowerCase()
+              ? escrowWithUser.buyerId
+              : escrowWithUser.sellerId;
+            const userUsername = escrowWithUser.buyerUsername?.toLowerCase() === handle.toLowerCase()
+              ? escrowWithUser.buyerUsername
+              : escrowWithUser.sellerUsername;
+            
+            if (userId) {
+              // Try to get chat member info from the group
+              try {
+                const memberInfo = await ctx.telegram.getChatMember(chatId, userId);
+                if (memberInfo && memberInfo.user) {
+                  counterpartyUser = {
+                    id: Number(memberInfo.user.id),
+                    username: memberInfo.user.username || userUsername || null,
+                    first_name: memberInfo.user.first_name,
+                    last_name: memberInfo.user.last_name,
+                    is_bot: memberInfo.user.is_bot || false,
+                  };
+                }
+              } catch (memberError) {
+                // User not in group or can't get member info
+                console.log(`Could not get member info for user ${userId}:`, memberError.message);
+              }
+            }
+          }
+        } catch (dbError) {
+          console.error("Error searching database for user:", dbError);
+        }
+      }
+      
+      // Method 3: If we still don't have the user, try getChat one more time
+      // (sometimes it works on retry)
+      if (!counterpartyUser && (!chatInfo || chatInfo.type !== "private")) {
+        try {
+          chatInfo = await ctx.telegram.getChat(`@${handle}`);
+        } catch (retryError) {
+          // Final fallback: ask user to properly tag
+          return ctx.reply(
+            `❌ Unable to fetch user @${handle}. Please:\n` +
+            `1. Tap their name in the group to tag them (don't type @ manually), OR\n` +
+            `2. Reply to one of their messages when using /deal`
+          );
+        }
+      }
+      
+      // If we got chatInfo, validate and use it
+      if (!counterpartyUser && chatInfo) {
+        // getChat can return different types, we need a user
+        if (chatInfo.type !== "private") {
           return ctx.reply(
             "❌ Could not retrieve user info. Please tag the user directly (tap their name) or reply to their message when using /deal."
           );
         }
+        
         if (chatInfo.is_bot) {
           return ctx.reply("❌ You cannot start a deal with a bot.");
         }
+        
         counterpartyUser = {
           id: Number(chatInfo.id),
           username: chatInfo.username || null,
@@ -87,10 +160,14 @@ module.exports = async (ctx) => {
           last_name: chatInfo.last_name,
           is_bot: chatInfo.is_bot,
         };
-      } catch (fetchError) {
-        console.error("Error fetching counterparty info:", fetchError);
+      }
+      
+      // If we still don't have the user, return error
+      if (!counterpartyUser) {
         return ctx.reply(
-          "❌ Unable to fetch that user. Please tag them directly (tap their name) or reply to one of their messages when using /deal."
+          `❌ Unable to fetch user @${handle}. Please:\n` +
+          `1. Tap their name in the group to tag them (don't type @ manually), OR\n` +
+          `2. Reply to one of their messages when using /deal`
         );
       }
     }
