@@ -81,9 +81,38 @@ module.exports = async (ctx) => {
         chatInfo = null; // Ensure chatInfo is null so we proceed to Method 2
       }
       
-      // Method 2: If getChat didn't work, try to find the user in our database
+      // Method 2: Try to find the user in the current group's administrators
+      // This works even if the user hasn't interacted with the bot
+      if (!counterpartyUser && chatId < 0) {
+        try {
+          const administrators = await ctx.telegram.getChatAdministrators(chatId);
+          const normalizedHandle = handle.toLowerCase();
+          
+          for (const admin of administrators) {
+            if (admin.user && admin.user.username) {
+              const adminUsername = admin.user.username.toLowerCase();
+              if (adminUsername === normalizedHandle) {
+                // Found the user in group administrators
+                counterpartyUser = {
+                  id: Number(admin.user.id),
+                  username: admin.user.username || null,
+                  first_name: admin.user.first_name,
+                  last_name: admin.user.last_name,
+                  is_bot: admin.user.is_bot || false,
+                };
+                break;
+              }
+            }
+          }
+        } catch (adminError) {
+          // Can't get administrators (bot might not be admin or group doesn't allow it)
+          // Silently continue to other methods
+        }
+      }
+      
+      // Method 3: If still not found, try to find the user in our database
       // (if they've done trades before, we'll have their user ID)
-      if (!chatInfo || chatInfo.type !== "private") {
+      if (!counterpartyUser && (!chatInfo || chatInfo.type !== "private")) {
         try {
           const Escrow = require("../models/Escrow");
           // Search for the user in recent escrows by username
@@ -135,7 +164,7 @@ module.exports = async (ctx) => {
         }
       }
       
-      // Method 3: If we still don't have the user, try getChat one more time
+      // Method 4: If we still don't have the user, try getChat one more time
       // (usually won't work if Method 1 failed, but worth a try)
       if (!counterpartyUser && (!chatInfo || chatInfo.type !== "private")) {
         try {
@@ -169,13 +198,20 @@ module.exports = async (ctx) => {
         };
       }
       
-      // If we still don't have the user, return error
-      if (!counterpartyUser) {
-        return ctx.reply(
-          `❌ Unable to fetch user @${handle}. Please:\n` +
-          `1. Tap their name in the group to tag them (don't type @ manually), OR\n` +
-          `2. Reply to one of their messages when using /deal`
-        );
+      // Method 5: If we still don't have the user ID but have a username,
+      // allow proceeding with just the username. The join request handler will
+      // match them by username when they try to join.
+      // This handles cases where the user is in the group but we can't get their ID yet.
+      if (!counterpartyUser && handle) {
+        // Create a minimal user object with just the username
+        // The join request handler will match by username and update with the actual ID
+        counterpartyUser = {
+          id: null, // Will be set when user joins via join request
+          username: handle,
+          first_name: null,
+          last_name: null,
+          is_bot: false,
+        };
       }
     }
 
@@ -192,7 +228,8 @@ module.exports = async (ctx) => {
     const counterpartyId = counterpartyUser.id;
     const counterpartyUsername = counterpartyUser.username || null;
 
-    if (Number(counterpartyId) === Number(initiatorId)) {
+    // Check if user is trying to deal with themselves (only if we have both IDs)
+    if (counterpartyId !== null && counterpartyId !== undefined && Number(counterpartyId) === Number(initiatorId)) {
       return ctx.reply("❌ You cannot start a deal with yourself.");
     }
 
@@ -240,7 +277,11 @@ module.exports = async (ctx) => {
       status: "draft",
       inviteLink, // Join-request link from the pool group
       allowedUsernames: participants.map((p) => p.username || null),
-      allowedUserIds: participants.map((p) => Number(p.id)),
+      // Only include valid user IDs (filter out null/undefined)
+      // Users without IDs will be matched by username in joinRequestHandler
+      allowedUserIds: participants
+        .map((p) => (p.id !== null && p.id !== undefined ? Number(p.id) : null))
+        .filter((id) => id !== null),
       approvedUserIds: [], // Will be populated as users join via join-request approval
       originChatId: String(chatId),
     });
