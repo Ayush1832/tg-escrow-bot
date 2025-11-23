@@ -121,17 +121,53 @@ async function joinRequestHandler(ctx) {
         );
 
         const joinedUserIds = new Set(escrow.approvedUserIds || []);
+        const joinedUsernames = new Set();
+        
+        // Track joined user IDs
         if (initiatorPresent && escrow.creatorId) {
           joinedUserIds.add(Number(escrow.creatorId));
+        }
+        
+        // Track joined usernames from approved users
+        if (escrow.allowedUsernames && escrow.allowedUserIds) {
+          for (let i = 0; i < escrow.allowedUserIds.length; i++) {
+            if (joinedUserIds.has(Number(escrow.allowedUserIds[i])) && escrow.allowedUsernames[i]) {
+              joinedUsernames.add(escrow.allowedUsernames[i].toLowerCase());
+            }
+          }
+        }
+        
+        // Also track the current user's username
+        if (user.username) {
+          joinedUsernames.add(user.username.toLowerCase());
+        }
+        
+        // Track initiator's username if they're present
+        if (initiatorPresent && escrow.creatorId && escrow.allowedUsernames && escrow.allowedUserIds) {
+          const initiatorIndex = escrow.allowedUserIds.findIndex(id => Number(id) === Number(escrow.creatorId));
+          if (initiatorIndex >= 0 && escrow.allowedUsernames[initiatorIndex]) {
+            joinedUsernames.add(escrow.allowedUsernames[initiatorIndex].toLowerCase());
+          }
         }
 
         let waitingParticipant = null;
         for (const participant of participants) {
           if (!participant) continue;
-          if (participant.id === null || participant.id === undefined) {
-            continue;
+          
+          let isJoined = false;
+          
+          // Check by ID if available
+          if (participant.id !== null && participant.id !== undefined) {
+            isJoined = joinedUserIds.has(Number(participant.id));
           }
-          if (!joinedUserIds.has(Number(participant.id))) {
+          
+          // If not joined by ID, check by username
+          if (!isJoined && participant.username) {
+            isJoined = joinedUsernames.has(participant.username.toLowerCase());
+          }
+          
+          // If still not joined, this is the waiting participant
+          if (!isJoined) {
             waitingParticipant = participant;
             break;
           }
@@ -139,12 +175,13 @@ async function joinRequestHandler(ctx) {
 
         // Delete any existing waiting message
         if (escrow.waitingForUserMessageId) {
-      try {
+          try {
             await ctx.telegram.deleteMessage(chatId, escrow.waitingForUserMessageId);
           } catch (_) {}
         }
         
-        // Send waiting message if we found the waiting user
+        // Send waiting message - always send if we haven't reached 2 participants
+        // Try to identify the waiting participant, otherwise use a generic message
         if (waitingParticipant) {
           const waitingLabel = formatParticipant(waitingParticipant, 'the other participant', { html: true });
           const waitingMsg = await ctx.telegram.sendMessage(
@@ -154,10 +191,21 @@ async function joinRequestHandler(ctx) {
           );
           escrow.waitingForUserMessageId = waitingMsg.message_id;
           await escrow.save();
-          
-          // Set timeout to reset group if second user doesn't join within 5 minutes
-          // Only set timeout if this is the first user (joinedCount === 1)
-          if (joinedCount === 1 && inviteTimeoutMap) {
+        } else {
+          // Fallback: If we can't identify the waiting participant, still send a generic message
+          // This can happen if participant data is incomplete
+          const waitingMsg = await ctx.telegram.sendMessage(
+            chatId, 
+            `⏳ Waiting for the other participant to join...`,
+            { parse_mode: 'HTML' }
+          );
+          escrow.waitingForUserMessageId = waitingMsg.message_id;
+          await escrow.save();
+        }
+        
+        // Set timeout to reset group if second user doesn't join within 5 minutes
+        // Only set timeout if this is the first user (joinedCount === 1)
+        if (joinedCount === 1 && inviteTimeoutMap) {
             // Capture telegram instance for use in timeout callback
             const telegram = ctx.telegram;
             const escrowId = escrow.escrowId;
@@ -276,7 +324,6 @@ async function joinRequestHandler(ctx) {
 
             inviteTimeoutMap.set(escrowId, timeoutId);
           }
-        }
       } catch (msgError) {
         // User might not have joined yet, or bot can't send message
         console.error('Failed to send join progress message:', msgError);
