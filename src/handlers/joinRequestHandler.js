@@ -154,6 +154,128 @@ async function joinRequestHandler(ctx) {
           );
           escrow.waitingForUserMessageId = waitingMsg.message_id;
           await escrow.save();
+          
+          // Set timeout to reset group if second user doesn't join within 5 minutes
+          // Only set timeout if this is the first user (joinedCount === 1)
+          if (joinedCount === 1 && inviteTimeoutMap) {
+            // Capture telegram instance for use in timeout callback
+            const telegram = ctx.telegram;
+            const escrowId = escrow.escrowId;
+            
+            // Clear any existing timeout for this escrow
+            if (inviteTimeoutMap.has(escrowId)) {
+              clearTimeout(inviteTimeoutMap.get(escrowId));
+            }
+            
+            // Set new timeout starting from now (5 minutes from first user join)
+            const timeoutId = setTimeout(async () => {
+              try {
+                // Re-fetch escrow to get latest state
+                const currentEscrow = await Escrow.findOne({ escrowId });
+                if (!currentEscrow) {
+                  inviteTimeoutMap.delete(escrowId);
+                  return;
+                }
+
+                // Check if both parties have joined (trade started)
+                if (currentEscrow.roleSelectionMessageId || currentEscrow.status !== 'draft') {
+                  // Trade has progressed, cancel timeout
+                  inviteTimeoutMap.delete(escrowId);
+                  return;
+                }
+
+                // Check if both parties have joined
+                const currentApprovedCount = (currentEscrow.approvedUserIds || []).length;
+                let currentInitiatorPresent = false;
+                if (currentEscrow.creatorId) {
+                  try {
+                    const memberInfo = await telegram.getChatMember(
+                      String(currentEscrow.groupId),
+                      Number(currentEscrow.creatorId)
+                    );
+                    currentInitiatorPresent = ['member', 'administrator', 'creator'].includes(memberInfo.status);
+                  } catch (_) {
+                    currentInitiatorPresent = false;
+                  }
+                }
+
+                const currentCreatorAlreadyCounted = currentEscrow.approvedUserIds?.includes(Number(currentEscrow.creatorId));
+                const currentTotalJoined = currentApprovedCount + (currentInitiatorPresent && !currentCreatorAlreadyCounted ? 1 : 0);
+
+                if (currentTotalJoined >= 2) {
+                  // Both joined, cancel timeout
+                  inviteTimeoutMap.delete(escrowId);
+                  return;
+                }
+
+                // Timeout expired - reset the group
+                inviteTimeoutMap.delete(escrowId);
+
+                // Get the group
+                const GroupPool = require('../models/GroupPool');
+                const GroupPoolService = require('../services/GroupPoolService');
+                let group = await GroupPool.findOne({ assignedEscrowId: escrowId });
+                if (!group) {
+                  group = await GroupPool.findOne({ groupId: currentEscrow.groupId });
+                }
+
+                if (group) {
+                  // Delete waiting message
+                  if (currentEscrow.waitingForUserMessageId) {
+                    try {
+                      await telegram.deleteMessage(String(currentEscrow.groupId), currentEscrow.waitingForUserMessageId);
+                    } catch (_) {}
+                  }
+
+                  // Remove the user who joined
+                  try {
+                    await GroupPoolService.removeUsersFromGroup(currentEscrow, group.groupId, telegram);
+                  } catch (removeError) {
+                    console.error('Error removing users during timeout:', removeError);
+                  }
+
+                  // Refresh invite link
+                  try {
+                    await GroupPoolService.refreshInviteLink(group.groupId, telegram);
+                  } catch (linkError) {
+                    console.error('Error refreshing invite link during timeout:', linkError);
+                  }
+
+                  // Reset group
+                  group.status = 'available';
+                  group.assignedEscrowId = null;
+                  group.assignedAt = null;
+                  group.completedAt = null;
+                  await group.save();
+
+                  // Send message to group that deal was cancelled
+                  try {
+                    await telegram.sendMessage(
+                      String(currentEscrow.groupId),
+                      '❌ Deal cancelled: The other participant did not join within 5 minutes. The group has been reset.',
+                      { parse_mode: 'HTML' }
+                    );
+                  } catch (msgError) {
+                    console.error('Error sending cancellation message to group:', msgError);
+                  }
+                }
+
+                // Delete the escrow
+                try {
+                  await Escrow.deleteOne({ escrowId });
+                } catch (deleteError) {
+                  console.error('Error deleting escrow during timeout:', deleteError);
+                }
+              } catch (error) {
+                console.error('Error in join timeout handler:', error);
+                if (inviteTimeoutMap) {
+                  inviteTimeoutMap.delete(escrowId);
+                }
+              }
+            }, 5 * 60 * 1000); // 5 minutes from first user join
+
+            inviteTimeoutMap.set(escrowId, timeoutId);
+          }
         }
       } catch (msgError) {
         // User might not have joined yet, or bot can't send message

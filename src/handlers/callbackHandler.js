@@ -2398,10 +2398,15 @@ Thank you for using our safe escrow system.`;
           releaseResult?.transactionHash
         );
 
-        // Send release confirmation message
-        await ctx.replyWithPhoto(images.RELEASE_CONFIRMATION, {
-          caption: `✅ ${(amount - 0).toFixed(5)} ${escrow.token} released to buyer's address. Trade completed.`
-        });
+        // Send release confirmation message to the group (not as a reply to callback)
+        try {
+          await ctx.telegram.sendPhoto(escrow.groupId, images.RELEASE_CONFIRMATION, {
+            caption: `✅ ${(amount - 0).toFixed(5)} ${escrow.token} released to buyer's address. Trade completed.`,
+            parse_mode: 'HTML'
+          });
+        } catch (sendError) {
+          console.error('Error sending release confirmation message:', sendError);
+        }
         
         // Send transaction explorer link if available
         if (releaseResult && releaseResult.transactionHash) {
@@ -2416,7 +2421,11 @@ Thank you for using our safe escrow system.`;
           }
           
           if (explorerUrl) {
-            await ctx.reply(`🔗 Transaction: ${explorerUrl}`);
+            try {
+              await ctx.telegram.sendMessage(escrow.groupId, `🔗 Transaction: ${explorerUrl}`, { parse_mode: 'HTML' });
+            } catch (sendError) {
+              console.error('Error sending transaction link:', sendError);
+            }
           }
         }
         
