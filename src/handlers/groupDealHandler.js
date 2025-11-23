@@ -104,7 +104,7 @@ module.exports = async (ctx) => {
               : escrowWithUser.sellerUsername;
             
             if (userId) {
-              // Try to get chat member info from the group
+              // Try to get chat member info from the group (preferred method)
               try {
                 const memberInfo = await ctx.telegram.getChatMember(chatId, userId);
                 if (memberInfo && memberInfo.user) {
@@ -118,7 +118,15 @@ module.exports = async (ctx) => {
                 }
               } catch (memberError) {
                 // User not in group or can't get member info
-                console.log(`Could not get member info for user ${userId}:`, memberError.message);
+                // Fallback: Use database info to create user object
+                // This allows the deal to proceed even if we can't verify group membership
+                counterpartyUser = {
+                  id: Number(userId),
+                  username: userUsername || handle,
+                  first_name: null,
+                  last_name: null,
+                  is_bot: false,
+                };
               }
             }
           }
