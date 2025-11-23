@@ -75,8 +75,10 @@ module.exports = async (ctx) => {
       try {
         chatInfo = await ctx.telegram.getChat(`@${handle}`);
       } catch (getChatError) {
-        // getChat failed, will try alternative methods
-        console.log(`getChat failed for @${handle}, trying alternative methods`);
+        // getChat failed (expected if user hasn't interacted with bot)
+        // Silently continue to alternative methods - don't log as error
+        // This is normal behavior for users who haven't started the bot
+        chatInfo = null; // Ensure chatInfo is null so we proceed to Method 2
       }
       
       // Method 2: If getChat didn't work, try to find the user in our database
@@ -126,17 +128,14 @@ module.exports = async (ctx) => {
       }
       
       // Method 3: If we still don't have the user, try getChat one more time
-      // (sometimes it works on retry)
+      // (usually won't work if Method 1 failed, but worth a try)
       if (!counterpartyUser && (!chatInfo || chatInfo.type !== "private")) {
         try {
           chatInfo = await ctx.telegram.getChat(`@${handle}`);
         } catch (retryError) {
-          // Final fallback: ask user to properly tag
-          return ctx.reply(
-            `❌ Unable to fetch user @${handle}. Please:\n` +
-            `1. Tap their name in the group to tag them (don't type @ manually), OR\n` +
-            `2. Reply to one of their messages when using /deal`
-          );
+          // getChat failed again - this is expected for users who haven't interacted with bot
+          // Silently continue - don't log as error
+          chatInfo = null;
         }
       }
       
