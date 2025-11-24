@@ -128,6 +128,13 @@ async function joinRequestHandler(ctx) {
     escrow.approvedUserIds = Array.from(approved);
     await escrow.save();
 
+    // Re-fetch escrow to get latest state (important for race conditions when both users join simultaneously)
+    const currentEscrow = await Escrow.findOne({ escrowId: escrow.escrowId });
+    if (!currentEscrow) {
+      return; // Escrow was deleted
+    }
+    escrow = currentEscrow; // Use fresh data
+
     // Check if initiator (creator) is already a member (e.g., admin was present before)
     let initiatorPresent = false;
     if (escrow.creatorId) {
@@ -140,8 +147,62 @@ async function joinRequestHandler(ctx) {
     }
 
     // Compute how many of the two parties are in the room now
-    const creatorAlreadyCounted = escrow.approvedUserIds.includes(Number(escrow.creatorId));
-    let joinedCount = escrow.approvedUserIds.length + (initiatorPresent && !creatorAlreadyCounted ? 1 : 0);
+    // Check if both participants from allowedUserIds have joined
+    const approvedUserIdsSet = new Set((escrow.approvedUserIds || []).map(id => Number(id)));
+    
+    // Add creator if they're present but not in approvedUserIds
+    if (initiatorPresent && escrow.creatorId) {
+      approvedUserIdsSet.add(Number(escrow.creatorId));
+    }
+    
+    // Count how many of the allowed participants have actually joined
+    const allowedUserIds = (escrow.allowedUserIds || []).map(id => Number(id));
+    let joinedCount = 0;
+    for (const allowedId of allowedUserIds) {
+      if (approvedUserIdsSet.has(allowedId)) {
+        joinedCount++;
+      }
+    }
+    
+    // If we still don't have 2, verify by checking actual group membership
+    // This handles edge cases where IDs might not match exactly or users joined differently
+    if (joinedCount < 2 && allowedUserIds.length >= 2) {
+      let verifiedJoinedCount = 0;
+      for (const allowedId of allowedUserIds) {
+        try {
+          const memberInfo = await ctx.telegram.getChatMember(chatId, allowedId);
+          if (['member', 'administrator', 'creator'].includes(memberInfo.status)) {
+            verifiedJoinedCount++;
+          }
+        } catch (_) {
+          // User not in group or error checking - skip
+        }
+      }
+      // Use verified count if it's higher (more accurate)
+      if (verifiedJoinedCount > joinedCount) {
+        joinedCount = verifiedJoinedCount;
+        // If verification shows both joined, ensure they're in approvedUserIds
+        if (verifiedJoinedCount >= 2) {
+          for (const allowedId of allowedUserIds) {
+            if (!approvedUserIdsSet.has(allowedId)) {
+              approvedUserIdsSet.add(allowedId);
+            }
+          }
+          // Update escrow with any missing approved IDs
+          escrow.approvedUserIds = Array.from(approvedUserIdsSet);
+          await escrow.save();
+        }
+      }
+    }
+
+    // Final check: if we have 2 allowed participants and both are in approvedUserIds, proceed
+    if (allowedUserIds.length >= 2 && joinedCount < 2) {
+      // One more check: count distinct approved users that match allowed participants
+      const matchingApproved = allowedUserIds.filter(id => approvedUserIdsSet.has(id));
+      if (matchingApproved.length >= 2) {
+        joinedCount = 2;
+      }
+    }
 
     if (joinedCount < 2) {
       try {
