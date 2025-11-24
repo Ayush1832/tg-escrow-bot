@@ -1533,7 +1533,12 @@ Both users must approve to release payment.`;
             }
           );
         } catch (e) {
-          console.error('Error updating release confirmation message:', e);
+          const description = e?.response?.description || e?.message || '';
+          if (description.includes('message is not modified')) {
+            // Safe to ignore - message is already in correct state
+          } else {
+            console.error('Error updating release confirmation message:', e);
+          }
         }
       }
       
@@ -1823,12 +1828,22 @@ Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${updatedEscr
               { parse_mode: 'HTML' }
             );
           } catch (e) {
-            try {
-              const releaseStatusText = isPartialRelease 
-                ? `✅ Partial release completed: ${releaseAmount.toFixed(5)} ${updatedEscrow.token}`
-                : '✅ Release completed.';
-              await ctx.editMessageText(releaseStatusText);
-            } catch (e2) {}
+            const description = e?.response?.description || e?.message || '';
+            if (description.includes('message is not modified')) {
+              // Safe to ignore - message is already in correct state
+            } else {
+              try {
+                const releaseStatusText = isPartialRelease 
+                  ? `✅ Partial release completed: ${releaseAmount.toFixed(5)} ${updatedEscrow.token}`
+                  : '✅ Release completed.';
+                await ctx.editMessageText(releaseStatusText);
+              } catch (e2) {
+                const desc2 = e2?.response?.description || e2?.message || '';
+                if (!desc2.includes('message is not modified')) {
+                  // Only log if it's not the "message is not modified" error
+                }
+              }
+            }
           }
       } catch (error) {
           console.error('Error releasing funds via confirmation:', error);
@@ -2435,12 +2450,18 @@ Thank you for using our safe escrow system.`;
 
 Trade completed successfully.`;
           
-          await ctx.telegram.sendPhoto(escrow.groupId, images.RELEASE_CONFIRMATION, {
+          console.log('Sending release confirmation with caption:', releaseConfirmationCaption);
+          const sentMessage = await ctx.telegram.sendPhoto(escrow.groupId, images.RELEASE_CONFIRMATION, {
             caption: releaseConfirmationCaption,
             parse_mode: 'HTML'
           });
+          console.log('Release confirmation message sent successfully. Message ID:', sentMessage.message_id);
         } catch (sendError) {
           console.error('Error sending release confirmation message:', sendError);
+          console.error('Error details:', {
+            message: sendError.message,
+            response: sendError.response
+          });
         }
         
         // Ask buyer to confirm receipt of tokens
