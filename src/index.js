@@ -758,8 +758,9 @@ Use /release After Fund Transfer to Seller
           status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
         });
         
+        // Silently ignore if no escrow found (command should only work in trade groups)
         if (!escrow) {
-          return ctx.reply('❌ No active escrow found in this group.');
+          return;
         }
         
         const isAdmin = config.getAllAdminUsernames().includes(ctx.from.username) || 
@@ -934,8 +935,9 @@ Both users must approve to release payment.`;
           status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
         });
         
+        // Silently ignore if no escrow found (command should only work in trade groups)
         if (!escrow) {
-          return ctx.reply('❌ No active escrow found in this group.');
+          return;
         }
         
         if (!escrow.sellerAddress) {
@@ -1043,8 +1045,9 @@ Address: <code>${escrow.sellerAddress}</code>
           status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release'] }
         });
         
+        // Silently ignore if no escrow found (command should only work in trade groups)
         if (!escrow) {
-          return ctx.reply('❌ No active escrow found in this group. Deposit must be made first.');
+          return;
         }
         
         // Calculate available balance

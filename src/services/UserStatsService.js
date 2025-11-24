@@ -256,25 +256,8 @@ class UserStatsService {
 <b>Last Deal:</b> No completed trades yet.`;
     }
 
-    // ALWAYS use telegramId for stats display - it should always be present in User model
-    // Get telegramId and ensure it's a valid number
-    let telegramId = userDoc.telegramId;
-    if (telegramId != null) {
-      telegramId = Number(telegramId);
-      // Only use if it's a valid positive number
-      if (!Number.isFinite(telegramId) || telegramId <= 0) {
-        telegramId = null;
-      }
-    } else {
-      telegramId = null;
-    }
-    
-    // ALWAYS show telegramId if available, NEVER show username in stats
-    const usernameLabel = telegramId && Number.isFinite(telegramId) && telegramId > 0
-      ? `User ${telegramId}`
-      : userDoc.username
-      ? `@${userDoc.username}`
-      : "Unknown User";
+    // Show username if available, otherwise show userId
+    const usernameLabel = this.formatUserLabel(userDoc.username, userDoc.telegramId);
     const totalBought = this.formatAmount(userDoc.totalBoughtVolume || 0);
     const totalSold = this.formatAmount(userDoc.totalSoldVolume || 0);
     const totalVolume = this.formatAmount(userDoc.totalTradedVolume || 0);

@@ -19,8 +19,9 @@ module.exports = async (ctx) => {
       status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'] }
     });
 
+    // Silently ignore if no escrow found (command should only work in trade groups)
     if (!escrow) {
-      return ctx.reply('❌ No active escrow found in this group.');
+      return;
     }
 
     // Check if deal is confirmed (dealConfirmedMessageId exists)

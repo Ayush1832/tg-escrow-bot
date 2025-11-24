@@ -17,8 +17,9 @@ module.exports = async (ctx) => {
       groupId: chatId.toString()
     });
 
+    // Silently ignore if no escrow found (command should only work in trade groups)
     if (!escrow) {
-      return ctx.reply('❌ No escrow found in this group.');
+      return;
     }
 
     // Check if user is authorized (buyer, seller, or admin)

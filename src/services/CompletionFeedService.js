@@ -29,12 +29,9 @@ class CompletionFeedService {
       return;
     }
     
-    console.log(`CompletionFeedService: Attempting to send completion feed for escrow ${escrow.escrowId}, amount: ${releaseAmount}, chatId: ${this.chatId}`);
-    
     // Validate chat access before attempting to send
     try {
       await telegram.getChat(this.chatId);
-      console.log(`CompletionFeedService: Chat ${this.chatId} is accessible`);
     } catch (chatError) {
       console.error(`CompletionFeedService: Cannot access chat ${this.chatId}. Error: ${chatError.message}`);
       console.error(`CompletionFeedService: Please ensure:`);
@@ -91,12 +88,10 @@ class CompletionFeedService {
 ${transactionLine}`;
 
     try {
-      console.log(`CompletionFeedService: Sending message to chat ${this.chatId}`);
       await telegram.sendMessage(this.chatId, message, {
         parse_mode: 'HTML',
         disable_web_page_preview: false
       });
-      console.log(`CompletionFeedService: Successfully sent completion feed message`);
     } catch (error) {
       // Handle specific Telegram errors
       if (error.response && error.response.error_code === 400) {
