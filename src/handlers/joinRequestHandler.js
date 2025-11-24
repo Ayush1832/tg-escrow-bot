@@ -337,6 +337,14 @@ async function joinRequestHandler(ctx) {
       return;
     }
 
+    // Mark the actual trade start time now that both parties are present
+    try {
+      escrow.tradeStartTime = new Date();
+      await escrow.save();
+    } catch (err) {
+      console.error('Failed to set trade start time:', err);
+    }
+
     // Send message that second user joined
     try {
       const joinedLabel = formatParticipant({ username: user.username || null, id: normalizedUserId }, 'User', { html: true });

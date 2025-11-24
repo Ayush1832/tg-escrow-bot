@@ -196,9 +196,14 @@ async function recycleGroupImmediately(escrow, telegram) {
       return;
     }
 
-    const group = await GroupPool.findOne({
+    let group = await GroupPool.findOne({
       assignedEscrowId: escrow.escrowId
     });
+
+    // Refund flows may have already cleared assignedEscrowId. Fallback by groupId.
+    if (!group && escrow.groupId) {
+      group = await GroupPool.findOne({ groupId: escrow.groupId });
+    }
 
     if (!group) {
       return;
