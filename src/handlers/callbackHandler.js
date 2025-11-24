@@ -2400,33 +2400,37 @@ Thank you for using our safe escrow system.`;
 
         // Send release confirmation message to the group (not as a reply to callback)
         try {
+          const chain = escrow.chain || 'BSC';
+          let explorerUrl = '';
+          if (releaseResult && releaseResult.transactionHash) {
+            if (chain.toUpperCase() === 'BSC' || chain.toUpperCase() === 'BNB') {
+              explorerUrl = `https://bscscan.com/tx/${releaseResult.transactionHash}`;
+            } else if (chain.toUpperCase() === 'ETH' || chain.toUpperCase() === 'ETHEREUM') {
+              explorerUrl = `https://etherscan.io/tx/${releaseResult.transactionHash}`;
+            } else if (chain.toUpperCase() === 'POLYGON' || chain.toUpperCase() === 'MATIC') {
+              explorerUrl = `https://polygonscan.com/tx/${releaseResult.transactionHash}`;
+            }
+          }
+          
+          const linkLine = releaseResult?.transactionHash
+            ? explorerUrl
+              ? `<a href="${explorerUrl}">Click Here</a>`
+              : `<code>${releaseResult.transactionHash}</code>`
+            : 'Not available';
+          
+          const releaseConfirmationCaption = `✅ <b>Release Confirmation</b>
+
+💰 Amount Released: ${amount.toFixed(5)} ${escrow.token}
+🔗 Transaction: ${linkLine}
+
+Trade completed successfully.`;
+          
           await ctx.telegram.sendPhoto(escrow.groupId, images.RELEASE_CONFIRMATION, {
-            caption: `✅ ${(amount - 0).toFixed(5)} ${escrow.token} released to buyer's address. Trade completed.`,
+            caption: releaseConfirmationCaption,
             parse_mode: 'HTML'
           });
         } catch (sendError) {
           console.error('Error sending release confirmation message:', sendError);
-        }
-        
-        // Send transaction explorer link if available
-        if (releaseResult && releaseResult.transactionHash) {
-          const chain = escrow.chain || 'BSC';
-          let explorerUrl = '';
-          if (chain.toUpperCase() === 'BSC' || chain.toUpperCase() === 'BNB') {
-            explorerUrl = `https://bscscan.com/tx/${releaseResult.transactionHash}`;
-          } else if (chain.toUpperCase() === 'ETH' || chain.toUpperCase() === 'ETHEREUM') {
-            explorerUrl = `https://etherscan.io/tx/${releaseResult.transactionHash}`;
-          } else if (chain.toUpperCase() === 'POLYGON' || chain.toUpperCase() === 'MATIC') {
-            explorerUrl = `https://polygonscan.com/tx/${releaseResult.transactionHash}`;
-          }
-          
-          if (explorerUrl) {
-            try {
-              await ctx.telegram.sendMessage(escrow.groupId, `🔗 Transaction: ${explorerUrl}`, { parse_mode: 'HTML' });
-            } catch (sendError) {
-              console.error('Error sending transaction link:', sendError);
-            }
-          }
         }
         
         // Ask buyer to confirm receipt of tokens
