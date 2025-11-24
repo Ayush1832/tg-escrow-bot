@@ -161,7 +161,12 @@ class EscrowBot {
   setupHandlers() {
     this.bot.use(async (ctx, next) => {
       try {
-        const chatId = ctx.chat.id;
+        const chat = ctx.chat;
+        const from = ctx.from;
+        if (!chat || !from) {
+          return next();
+        }
+        const chatId = chat.id;
         if (chatId > 0 || !ctx.message || !ctx.message.text) return next();
         
         if (ctx.message.text.startsWith('/')) return next();
@@ -176,7 +181,7 @@ class EscrowBot {
           return next();
         }
         
-        const userId = ctx.from.id;
+        const userId = from.id;
         const text = ctx.message.text.trim();
         
         if (!escrow.sellerId || escrow.sellerId !== userId) {
@@ -220,7 +225,12 @@ class EscrowBot {
     
     this.bot.use(async (ctx, next) => {
       try {
-        const chatId = ctx.chat.id;
+        const chat = ctx.chat;
+        const from = ctx.from;
+        if (!chat || !from) {
+          return next();
+        }
+        const chatId = chat.id;
         if (chatId > 0 || !ctx.message || !ctx.message.text) return next();
         
         if (ctx.message.text.startsWith('/')) return next();
@@ -235,7 +245,7 @@ class EscrowBot {
           return next();
         }
         
-        const userId = ctx.from.id;
+        const userId = from.id;
         const text = ctx.message.text.trim();
         
         // Silently ignore messages from users who aren't the buyer
@@ -277,7 +287,12 @@ class EscrowBot {
     
     this.bot.use(async (ctx, next) => {
       try {
-        const chatId = ctx.chat.id;
+        const chat = ctx.chat;
+        const from = ctx.from;
+        if (!chat || !from) {
+          return next();
+        }
+        const chatId = chat.id;
         if (chatId > 0 || !ctx.message || !ctx.message.text) return next();
         
         if (ctx.message.text.startsWith('/')) return next();
@@ -299,7 +314,7 @@ class EscrowBot {
         }
         
         const text = ctx.message.text.trim();
-        const userId = ctx.from.id;
+        const userId = from.id;
         
         if (escrow.sellerId !== userId) {
           return next();
@@ -587,7 +602,12 @@ Use /release After Fund Transfer to Seller
     
     this.bot.use(async (ctx, next) => {
       try {
-        const chatId = ctx.chat.id;
+        const chat = ctx.chat;
+        const from = ctx.from;
+        if (!chat || !from) {
+          return next();
+        }
+        const chatId = chat.id;
         if (chatId > 0 || !ctx.message || !ctx.message.text) return next();
         
         if (ctx.message.text.startsWith('/')) return next();
@@ -603,7 +623,7 @@ Use /release After Fund Transfer to Seller
         }
         
         const text = ctx.message.text.trim();
-        const userId = ctx.from.id;
+        const userId = from.id;
         
         // Silently ignore messages from users who aren't buyer or seller
         if (escrow.buyerId !== userId && escrow.sellerId !== userId) {

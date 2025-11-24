@@ -41,17 +41,45 @@ async function joinRequestHandler(ctx) {
     const normalizedUserId = Number(user.id);
     const lowercaseUsername = (user.username || '').toLowerCase();
 
+    // First, try to match by ID (most reliable)
     let participantIndex = participants.findIndex(
       p => p.id !== null && p.id === normalizedUserId
     );
 
+    // If no ID match, try to match by username
     if (participantIndex === -1 && lowercaseUsername) {
       participantIndex = participants.findIndex(
-        p => (p.username || '').toLowerCase() === lowercaseUsername
+        p => p.username && (p.username || '').toLowerCase() === lowercaseUsername
       );
     }
 
+    // If still no match, check if user is the creator (creatorId should always be set)
+    if (participantIndex === -1 && escrow.creatorId && Number(escrow.creatorId) === normalizedUserId) {
+      // Find the creator's slot (should be first participant)
+      participantIndex = 0;
+    }
+
+    // If still no match, check if there's an empty slot (null ID and null username)
+    // This handles cases where ID/username wasn't captured initially
     if (participantIndex === -1) {
+      const emptySlotIndex = participants.findIndex(
+        p => p.id === null && (p.username === null || p.username === '')
+      );
+      
+      // Only allow filling empty slot if:
+      // 1. There's exactly one empty slot
+      // 2. The other slot is already filled (has an ID)
+      const filledSlots = participants.filter(p => p.id !== null);
+      if (emptySlotIndex !== -1 && filledSlots.length === 1) {
+        participantIndex = emptySlotIndex;
+      }
+    }
+
+    if (participantIndex === -1) {
+      // Log for debugging - user doesn't match any participant
+      console.log(`Join request declined: User ${user.id} (@${user.username || 'no-username'}) doesn't match participants for escrow ${escrow.escrowId}. Participants:`, 
+        participants.map(p => ({ id: p.id, username: p.username }))
+      );
       try { await ctx.telegram.declineChatJoinRequest(chatId, user.id); } catch (_) {}
       return;
     }
