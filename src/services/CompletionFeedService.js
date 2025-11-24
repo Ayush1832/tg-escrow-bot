@@ -90,7 +90,7 @@ ${transactionLine}`;
     try {
       await telegram.sendMessage(this.chatId, message, {
         parse_mode: 'HTML',
-        disable_web_page_preview: false
+        disable_web_page_preview: true
       });
     } catch (error) {
       // Handle specific Telegram errors

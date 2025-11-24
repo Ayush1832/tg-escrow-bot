@@ -58,31 +58,7 @@ async function updateTradeStartedMessage(escrow, telegram, status, transactionHa
       Math.round((Date.now() - new Date(tradeStart)) / (60 * 1000))
     );
 
-    // Get transaction link
-    let transactionLink = '';
-    if (transactionHash && typeof transactionHash === 'string' && transactionHash.length > 0) {
-      const chainUpper = (escrow.chain || '').toUpperCase();
-      let explorerUrl = '';
-      if (chainUpper === 'BSC' || chainUpper === 'BNB') {
-        explorerUrl = `https://bscscan.com/tx/${transactionHash}`;
-      } else if (chainUpper === 'ETH' || chainUpper === 'ETHEREUM') {
-        explorerUrl = `https://etherscan.io/tx/${transactionHash}`;
-      } else if (chainUpper === 'POLYGON' || chainUpper === 'MATIC') {
-        explorerUrl = `https://polygonscan.com/tx/${transactionHash}`;
-      }
-      
-      if (explorerUrl) {
-        // Escape HTML in URL for safety
-        const escapedUrl = explorerUrl.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-        transactionLink = `\n🔗 <b>Transaction:</b> <a href="${escapedUrl}">View on Explorer</a>`;
-      } else {
-        // Safe substring with length check
-        const hashDisplay = transactionHash.length > 10 
-          ? `${transactionHash.substring(0, 10)}...` 
-          : transactionHash;
-        transactionLink = `\n🔗 <b>Transaction:</b> <code>${hashDisplay}</code>`;
-      }
-    }
+    // Transaction link removed per user request
 
     // Format amount - safely handle null/undefined/NaN
     let amount = 0;
@@ -115,7 +91,7 @@ async function updateTradeStartedMessage(escrow, telegram, status, transactionHa
 • Seller: ${sellerLabel}
 
 💰 <b>Amount:</b> ${amountDisplay}
-⏱️ <b>Time Taken:</b> ${minutesTaken} min(s)${transactionLink}`;
+⏱️ <b>Time Taken:</b> ${minutesTaken} min(s)`;
 
     await telegram.editMessageText(
       escrow.originChatId,
@@ -363,7 +339,7 @@ module.exports = async (ctx) => {
       });
       
       if (!escrow) {
-        await ctx.reply('❌ No active escrow found.');
+        await safeAnswerCbQuery(ctx, '❌ No active escrow found.');
         return;
       }
       
@@ -677,7 +653,8 @@ Once you’ve sent the amount, tap the button below.`;
       });
       
       if (!escrow) {
-        return ctx.reply('❌ No active escrow found.');
+        await safeAnswerCbQuery(ctx, '❌ No active escrow found.');
+        return;
       }
       
       // Only buyer or seller can select
@@ -743,7 +720,8 @@ Once you’ve sent the amount, tap the button below.`;
       });
       
       if (!escrow) {
-        return ctx.reply('❌ No active escrow found.');
+        await safeAnswerCbQuery(ctx, '❌ No active escrow found.');
+        return;
       }
       
       // Only buyer or seller can select
