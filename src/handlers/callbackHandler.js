@@ -673,7 +673,12 @@ Once you’ve sent the amount, tap the button below.`;
             }
           );
         } catch (err) {
-          console.error('Error updating chain selection:', err);
+          const description = err?.response?.description || err?.message || '';
+          if (description.includes('message is not modified')) {
+            // Safe to ignore - user clicked the same option again, message is already in correct state
+          } else {
+            console.error('Error updating chain selection:', err);
+          }
         }
       }
       
@@ -737,7 +742,12 @@ Once you’ve sent the amount, tap the button below.`;
             }
           );
         } catch (err) {
-          console.error('Error updating coin selection:', err);
+          const description = err?.response?.description || err?.message || '';
+          if (description.includes('message is not modified')) {
+            // Safe to ignore - user clicked the same option again, message is already in correct state
+          } else {
+            console.error('Error updating coin selection:', err);
+          }
         }
       }
       
