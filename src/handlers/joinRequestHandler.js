@@ -21,7 +21,7 @@ async function joinRequestHandler(ctx) {
     const username = (user.username || '').toLowerCase();
 
     // Find active escrow for this room with restricted usernames (from pool groups)
-    const escrow = await Escrow.findOne({
+    let escrow = await Escrow.findOne({
       groupId: chatId,
       status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'] },
       allowedUsernames: { $exists: true }
