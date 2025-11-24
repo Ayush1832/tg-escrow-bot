@@ -76,7 +76,7 @@ function formatParticipant(participant, fallbackLabel = 'Unknown', options = {})
     }
   }
 
-  if (html && hasId) {
+  if (html && hasId && !mask) {
     return `<a href="tg://user?id=${participant.id}">${escapeHtml(displayText)}</a>`;
   }
 

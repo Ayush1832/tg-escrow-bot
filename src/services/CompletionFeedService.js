@@ -76,7 +76,7 @@ class CompletionFeedService {
     const totalEscrowsLine = `${newTrades}`;
 
     const transactionLine = explorerLink
-      ? `🔗 Transaction Link: <a href="${explorerLink}">Link</a> (${this.escapeHtml(explorerLink)})`
+      ? `🔗 Transaction Link: <a href="${explorerLink}">Link</a>`
       : '🔗 Transaction Link: N/A';
 
     const message = `📍<b>NEW ESCROW DONE</b>
