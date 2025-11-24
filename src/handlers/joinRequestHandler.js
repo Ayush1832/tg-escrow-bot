@@ -49,14 +49,18 @@ async function joinRequestHandler(ctx) {
     // If no ID match, try to match by username
     if (participantIndex === -1 && lowercaseUsername) {
       participantIndex = participants.findIndex(
-        p => p.username && (p.username || '').toLowerCase() === lowercaseUsername
+        p => p.username && p.username.toLowerCase() === lowercaseUsername
       );
     }
 
     // If still no match, check if user is the creator (creatorId should always be set)
     if (participantIndex === -1 && escrow.creatorId && Number(escrow.creatorId) === normalizedUserId) {
-      // Find the creator's slot (should be first participant)
-      participantIndex = 0;
+      // Find the creator's slot - check if creatorId matches any participant's ID first
+      const creatorSlotIndex = participants.findIndex(
+        p => p.id !== null && Number(p.id) === Number(escrow.creatorId)
+      );
+      // If creator's ID is in participants, use that slot; otherwise default to first slot
+      participantIndex = creatorSlotIndex !== -1 ? creatorSlotIndex : 0;
     }
 
     // If still no match, check if there's an empty slot (null ID and null username)
@@ -360,10 +364,19 @@ async function joinRequestHandler(ctx) {
     }
 
     // Both approved → clean up origin invite and send started notice, then disclaimer + role selection
+    // Re-fetch escrow to get latest state (prevent race conditions when both users join simultaneously)
+    const freshEscrow = await Escrow.findOne({ escrowId: escrow.escrowId });
+    if (!freshEscrow) {
+      return; // Escrow was deleted, nothing to do
+    }
+    
     // Avoid sending twice
-    if (escrow.roleSelectionMessageId) {
+    if (freshEscrow.roleSelectionMessageId) {
       return;
     }
+    
+    // Use fresh escrow for the rest of the flow
+    escrow = freshEscrow;
 
     // Mark the actual trade start time now that both parties are present
     try {

@@ -16,6 +16,25 @@ const { getParticipants, formatParticipant, formatParticipantById } = require('.
 const groupRecyclingTimers = new Map();
 
 /**
+ * Safely answer a callback query, handling expired queries gracefully
+ */
+async function safeAnswerCbQuery(ctx, text = '') {
+  try {
+    await ctx.answerCbQuery(text);
+  } catch (error) {
+    // Ignore expired callback query errors - they're harmless
+    if (error.description?.includes('query is too old') || 
+        error.description?.includes('query ID is invalid') ||
+        error.response?.error_code === 400) {
+      // Silently ignore - query already expired or was already answered
+      return;
+    }
+    // Log other errors for debugging
+    console.error('Error answering callback query:', error);
+  }
+}
+
+/**
  * Update the "Trade started" message in the main group with completion details
  */
 async function updateTradeStartedMessage(escrow, telegram, status, transactionHash = null) {
@@ -335,7 +354,8 @@ module.exports = async (ctx) => {
     // Handle different callback types
     if (callbackData === 'select_role_buyer' || callbackData === 'select_role_seller') {
       const isBuyer = callbackData === 'select_role_buyer';
-      await ctx.answerCbQuery(isBuyer ? 'Buyer role selected' : 'Seller role selected');
+      // Answer callback query immediately to prevent timeout
+      await safeAnswerCbQuery(ctx, isBuyer ? 'Buyer role selected' : 'Seller role selected');
       
       const escrow = await Escrow.findOne({
         groupId: chatId.toString(),
@@ -343,27 +363,32 @@ module.exports = async (ctx) => {
       });
       
       if (!escrow) {
-        return ctx.reply('❌ No active escrow found.');
+        await ctx.reply('❌ No active escrow found.');
+        return;
       }
       
       // Prevent same user from being both buyer and seller
       if (isBuyer && escrow.sellerId && escrow.sellerId === userId) {
-        return ctx.answerCbQuery('❌ You cannot be both buyer and seller.');
+        await safeAnswerCbQuery(ctx, '❌ You cannot be both buyer and seller.');
+        return;
       }
       if (!isBuyer && escrow.buyerId && escrow.buyerId === userId) {
-        return ctx.answerCbQuery('❌ You cannot be both buyer and seller.');
+        await safeAnswerCbQuery(ctx, '❌ You cannot be both buyer and seller.');
+        return;
       }
       
       // Assign role
       if (isBuyer) {
         if (escrow.buyerId && escrow.buyerId !== userId) {
-          return ctx.answerCbQuery('❌ Buyer role already taken.');
+          await safeAnswerCbQuery(ctx, '❌ Buyer role already taken.');
+          return;
         }
         escrow.buyerId = userId;
         escrow.buyerUsername = ctx.from.username;
       } else {
         if (escrow.sellerId && escrow.sellerId !== userId) {
-          return ctx.answerCbQuery('❌ Seller role already taken.');
+          await safeAnswerCbQuery(ctx, '❌ Seller role already taken.');
+          return;
         }
         escrow.sellerId = userId;
         escrow.sellerUsername = ctx.from.username;
@@ -423,10 +448,10 @@ module.exports = async (ctx) => {
       
       return;
     } else if (callbackData === 'cancel_role_selection') {
-      await ctx.answerCbQuery('Cancelled');
+      await safeAnswerCbQuery(ctx, 'Cancelled');
       return;
     } else if (callbackData === 'approve_deal_summary') {
-      await ctx.answerCbQuery('Approving deal...');
+      await safeAnswerCbQuery(ctx, 'Approving deal...');
       
       const escrow = await Escrow.findOne({
         groupId: chatId.toString(),
@@ -443,7 +468,7 @@ module.exports = async (ctx) => {
       const isSeller = escrow.sellerId === userId;
       
       if (!isBuyer && !isSeller) {
-        return ctx.answerCbQuery('❌ Only buyer or seller can approve.');
+        return safeAnswerCbQuery(ctx,'❌ Only buyer or seller can approve.');
       }
       
       // Update approval status
@@ -643,7 +668,7 @@ Once you’ve sent the amount, tap the button below.`;
     } else if (callbackData.startsWith('step4_select_chain_')) {
       // Step 4: Blockchain selection
       const chain = callbackData.replace('step4_select_chain_', '').toUpperCase();
-      await ctx.answerCbQuery(`Selected ${chain}`);
+      await safeAnswerCbQuery(ctx,`Selected ${chain}`);
       
       const escrow = await Escrow.findOne({
         groupId: chatId.toString(),
@@ -657,7 +682,7 @@ Once you’ve sent the amount, tap the button below.`;
       
       // Only buyer or seller can select
       if (escrow.buyerId !== userId && escrow.sellerId !== userId) {
-        return ctx.answerCbQuery('❌ Only buyer or seller can select.');
+        return safeAnswerCbQuery(ctx,'❌ Only buyer or seller can select.');
       }
       
       escrow.chain = chain;
@@ -709,7 +734,7 @@ Once you’ve sent the amount, tap the button below.`;
     } else if (callbackData.startsWith('step4_select_coin_')) {
       // Step 4: Coin selection
       const coin = callbackData.replace('step4_select_coin_', '').toUpperCase();
-      await ctx.answerCbQuery(`Selected ${coin}`);
+      await safeAnswerCbQuery(ctx,`Selected ${coin}`);
       
       const escrow = await Escrow.findOne({
         groupId: chatId.toString(),
@@ -723,7 +748,7 @@ Once you’ve sent the amount, tap the button below.`;
       
       // Only buyer or seller can select
       if (escrow.buyerId !== userId && escrow.sellerId !== userId) {
-        return ctx.answerCbQuery('❌ Only buyer or seller can select.');
+        return safeAnswerCbQuery(ctx,'❌ Only buyer or seller can select.');
       }
       
       escrow.token = coin;
@@ -783,12 +808,12 @@ Once you’ve sent the amount, tap the button below.`;
       
       return;
     } else if (callbackData.startsWith('close_trade_')) {
-      await ctx.answerCbQuery('Closing trade...');
+      await safeAnswerCbQuery(ctx,'Closing trade...');
       const escrowId = callbackData.split('_')[2];
       const escrow = await Escrow.findOne({ escrowId });
       
       if (!escrow) {
-        return ctx.answerCbQuery('❌ Escrow not found.');
+        return safeAnswerCbQuery(ctx,'❌ Escrow not found.');
       }
 
       // Check if user is buyer, seller, or admin
@@ -798,12 +823,12 @@ Once you’ve sent the amount, tap the button below.`;
                       config.getAllAdminIds().includes(String(userId));
       
       if (!isBuyer && !isSeller && !isAdmin) {
-        return ctx.answerCbQuery('❌ Only buyer, seller, or admin can close this trade.');
+        return safeAnswerCbQuery(ctx,'❌ Only buyer, seller, or admin can close this trade.');
       }
 
       // Check if trade is completed or refunded
       if (escrow.status !== 'completed' && escrow.status !== 'refunded') {
-        return ctx.answerCbQuery('❌ Trade must be completed or refunded before closing.');
+        return safeAnswerCbQuery(ctx,'❌ Trade must be completed or refunded before closing.');
       }
 
       // Unpin the deal confirmed message
@@ -829,7 +854,7 @@ Once you’ve sent the amount, tap the button below.`;
       
       return;
     } else if (callbackData === 'confirm_sent_deposit') {
-      await ctx.answerCbQuery('Processing...');
+      await safeAnswerCbQuery(ctx,'Processing...');
       
       const escrow = await Escrow.findOne({
         groupId: chatId.toString(),
@@ -837,13 +862,13 @@ Once you’ve sent the amount, tap the button below.`;
       });
       
       if (!escrow || !escrow.depositAddress) {
-        return ctx.answerCbQuery('❌ No active deposit address found.');
+        return safeAnswerCbQuery(ctx,'❌ No active deposit address found.');
       }
       
       // Check if seller clicked the button
       const userId = ctx.from.id;
       if (escrow.sellerId !== userId) {
-        return ctx.answerCbQuery('❌ Only the seller can click SENT button.');
+        return safeAnswerCbQuery(ctx,'❌ Only the seller can click SENT button.');
       }
       
       // Ask seller to paste transaction hash or explorer link
@@ -857,7 +882,7 @@ Once you’ve sent the amount, tap the button below.`;
       
       return;
     } else if (callbackData === 'check_deposit') {
-      await ctx.answerCbQuery('Checking for your deposit...');
+      await safeAnswerCbQuery(ctx,'Checking for your deposit...');
       const chatId = ctx.chat.id;
       const escrow = await Escrow.findOne({
         groupId: chatId.toString(),
@@ -941,13 +966,13 @@ Once you’ve sent the amount, tap the button below.`;
         
         
         if (!escrow) {
-          await ctx.answerCbQuery('❌ No active escrow found.');
+          await safeAnswerCbQuery(ctx,'❌ No active escrow found.');
           console.log('❌ Escrow not found for:', escrowId);
           return;
         }
         
         if (escrow.buyerId !== userId) {
-          await ctx.answerCbQuery('❌ Only the buyer can confirm this.');
+          await safeAnswerCbQuery(ctx,'❌ Only the buyer can confirm this.');
           return;
         }
 
@@ -955,7 +980,7 @@ Once you’ve sent the amount, tap the button below.`;
       escrow.status = 'in_fiat_transfer';
       await escrow.save();
 
-      await ctx.answerCbQuery('✅ Noted.');
+      await safeAnswerCbQuery(ctx,'✅ Noted.');
         
         // Ask seller to confirm receipt - send to the group using groupId
         const sellerPrompt = await ctx.telegram.sendMessage(
@@ -976,12 +1001,12 @@ Once you’ve sent the amount, tap the button below.`;
         
       } catch (error) {
         console.error('❌ Error in fiat_sent_buyer handler:', error);
-        await ctx.answerCbQuery('❌ An error occurred. Please try again.');
+        await safeAnswerCbQuery(ctx,'❌ An error occurred. Please try again.');
       }
 
     } else if (callbackData.startsWith('fiat_received_seller_partial_')) {
       const escrowId = callbackData.replace('fiat_received_seller_partial_', '');
-      await ctx.answerCbQuery('⚠️ Partial payment noted');
+      await safeAnswerCbQuery(ctx,'⚠️ Partial payment noted');
       
       const escrow = await Escrow.findOne({
         escrowId: escrowId,
@@ -1014,26 +1039,26 @@ Once you’ve sent the amount, tap the button below.`;
       });
       
       if (!escrow) {
-        await ctx.answerCbQuery('❌ No active escrow found.');
+        await safeAnswerCbQuery(ctx,'❌ No active escrow found.');
         return;
       }
       
       if (escrow.buyerId !== userId) {
-        await ctx.answerCbQuery('❌ Only the buyer can confirm this.');
+        await safeAnswerCbQuery(ctx,'❌ Only the buyer can confirm this.');
         return;
       }
       
       const isYes = callbackData.includes('_yes_');
       
       if (isYes) {
-        await ctx.answerCbQuery('✅ Confirmed receipt of tokens.');
+        await safeAnswerCbQuery(ctx,'✅ Confirmed receipt of tokens.');
         await announceAndScheduleRecycling(
           escrow,
           ctx,
           '✅ Buyer confirmed receipt of tokens. Trade completed successfully! Group will be recycled in 5 minutes.'
         );
       } else {
-        await ctx.answerCbQuery('⚠️ Issue reported.');
+        await safeAnswerCbQuery(ctx,'⚠️ Issue reported.');
         const admins = (config.getAllAdminUsernames?.() || []).filter(Boolean);
         const adminMentions = admins.length ? admins.map(u => `@${u}`).join(' ') : 'Admin';
         await ctx.telegram.sendMessage(
@@ -1054,12 +1079,12 @@ Once you’ve sent the amount, tap the button below.`;
         status: { $in: ['in_fiat_transfer', 'deposited'] }
       });
       if (!escrow) {
-        await ctx.answerCbQuery('❌ No active escrow found.');
+        await safeAnswerCbQuery(ctx,'❌ No active escrow found.');
         return;
       }
       
       if (escrow.sellerId !== userId) {
-        await ctx.answerCbQuery('❌ Only the seller can confirm this.');
+        await safeAnswerCbQuery(ctx,'❌ Only the seller can confirm this.');
         return;
       }
 
@@ -1068,7 +1093,7 @@ Once you’ve sent the amount, tap the button below.`;
         escrow.sellerReceivedFiat = false;
         await escrow.save();
         
-        await ctx.answerCbQuery('❌ Marked as not received');
+        await safeAnswerCbQuery(ctx,'❌ Marked as not received');
         
         // Notify admins
         try {
@@ -1087,7 +1112,7 @@ Once you’ve sent the amount, tap the button below.`;
       // Step 1: seller selected full amount; ask for final confirmation in the same message
       escrow.sellerReceivedFiat = true;
       await escrow.save();
-      await ctx.answerCbQuery('✅ Full amount selected');
+      await safeAnswerCbQuery(ctx,'✅ Full amount selected');
       try {
         await ctx.editMessageText(
           '✅ Seller reported full amount received. Confirm to complete the trade and release funds to the buyer.',
@@ -1122,7 +1147,7 @@ Once you’ve sent the amount, tap the button below.`;
       });
       
       if (!escrow) {
-        return ctx.answerCbQuery('❌ No active escrow found.');
+        return safeAnswerCbQuery(ctx,'❌ No active escrow found.');
       }
       
       const userId = ctx.from.id;
@@ -1132,7 +1157,7 @@ Once you’ve sent the amount, tap the button below.`;
                       config.getAllAdminIds().includes(String(userId));
       
       if (!isBuyer && !isSeller && !isAdmin) {
-        return ctx.answerCbQuery('❌ Only buyer, seller, or admin can decline.');
+        return safeAnswerCbQuery(ctx,'❌ Only buyer, seller, or admin can decline.');
       }
       
       // Reset confirmations
@@ -1140,7 +1165,7 @@ Once you’ve sent the amount, tap the button below.`;
       escrow.sellerConfirmedRelease = false;
       await escrow.save();
       
-      await ctx.answerCbQuery('❎ Release cancelled');
+      await safeAnswerCbQuery(ctx,'❎ Release cancelled');
       try {
         await ctx.editMessageCaption(
           escrow.groupId,
@@ -1163,7 +1188,7 @@ Once you’ve sent the amount, tap the button below.`;
       });
       
       if (!escrow) {
-        return ctx.answerCbQuery('❌ No active escrow found.');
+        return safeAnswerCbQuery(ctx,'❌ No active escrow found.');
       }
       
       const userId = ctx.from.id;
@@ -1171,7 +1196,7 @@ Once you’ve sent the amount, tap the button below.`;
                       config.getAllAdminIds().includes(String(userId));
       
       if (!isAdmin) {
-        return ctx.answerCbQuery('❌ Only admin can cancel admin release.');
+        return safeAnswerCbQuery(ctx,'❌ Only admin can cancel admin release.');
       }
       
       // Reset confirmations
@@ -1179,7 +1204,7 @@ Once you’ve sent the amount, tap the button below.`;
       escrow.pendingReleaseAmount = null;
       await escrow.save();
       
-      await ctx.answerCbQuery('❎ Admin release cancelled');
+      await safeAnswerCbQuery(ctx,'❎ Admin release cancelled');
       try {
         await ctx.editMessageCaption(
           escrow.groupId,
@@ -1202,7 +1227,7 @@ Once you’ve sent the amount, tap the button below.`;
       });
 
       if (!escrow) {
-        return ctx.answerCbQuery('❌ No active escrow found.');
+        return safeAnswerCbQuery(ctx,'❌ No active escrow found.');
       }
 
       const userId = ctx.from.id;
@@ -1210,14 +1235,14 @@ Once you’ve sent the amount, tap the button below.`;
                       config.getAllAdminIds().includes(String(userId));
       
       if (!isAdmin) {
-        return ctx.answerCbQuery('❌ Only admin can confirm admin release.');
+        return safeAnswerCbQuery(ctx,'❌ Only admin can confirm admin release.');
       }
       
       // Admin confirmed - proceed with release immediately
       escrow.adminConfirmedRelease = true;
       await escrow.save();
       
-      await ctx.answerCbQuery('✅ Processing admin release...');
+      await safeAnswerCbQuery(ctx,'✅ Processing admin release...');
       
       // Reload to get latest state
       const updatedEscrow = await Escrow.findById(escrow._id);
@@ -1237,7 +1262,7 @@ Once you’ve sent the amount, tap the button below.`;
         : totalDeposited;
       
       if (!updatedEscrow.buyerAddress || totalDeposited <= 0) {
-        return ctx.answerCbQuery('❌ Cannot release funds: missing buyer address or zero amount.');
+        return safeAnswerCbQuery(ctx,'❌ Cannot release funds: missing buyer address or zero amount.');
       }
       
       // Use pending release amount (should be set for admin partial releases)
@@ -1247,11 +1272,11 @@ Once you’ve sent the amount, tap the button below.`;
       
       // Validate amount
       if (releaseAmount > formattedTotalDeposited) {
-        return ctx.answerCbQuery(`❌ Release amount exceeds available balance (${formattedTotalDeposited.toFixed(5)} ${updatedEscrow.token}).`);
+        return safeAnswerCbQuery(ctx,`❌ Release amount exceeds available balance (${formattedTotalDeposited.toFixed(5)} ${updatedEscrow.token}).`);
       }
       
       if (releaseAmount <= 0) {
-        return ctx.answerCbQuery('❌ Release amount must be greater than 0.');
+        return safeAnswerCbQuery(ctx,'❌ Release amount must be greater than 0.');
       }
       
       // Calculate wei amount for release
@@ -1461,7 +1486,7 @@ Thank you for using our safe escrow system.`;
       });
 
       if (!escrow) {
-        return ctx.answerCbQuery('❌ No active escrow found.');
+        return safeAnswerCbQuery(ctx,'❌ No active escrow found.');
       }
 
       const userId = ctx.from.id;
@@ -1471,7 +1496,7 @@ Thank you for using our safe escrow system.`;
                       config.getAllAdminIds().includes(String(userId));
       
       if (!isBuyer && !isSeller && !isAdmin) {
-        return ctx.answerCbQuery('❌ Only buyer, seller, or admin can approve release.');
+        return safeAnswerCbQuery(ctx,'❌ Only buyer, seller, or admin can approve release.');
       }
       
       // Update confirmation status
@@ -1549,9 +1574,9 @@ Both users must approve to release payment.`;
       
       // Give feedback to user
       if (updatedEscrow.buyerConfirmedRelease && updatedEscrow.sellerConfirmedRelease) {
-        await ctx.answerCbQuery('✅ Both parties approved. Processing release...');
+        await safeAnswerCbQuery(ctx,'✅ Both parties approved. Processing release...');
       } else {
-        await ctx.answerCbQuery('✅ Your approval has been recorded. Waiting for the other party...');
+        await safeAnswerCbQuery(ctx,'✅ Your approval has been recorded. Waiting for the other party...');
       }
       
       // Check if both have confirmed
@@ -1571,7 +1596,7 @@ Both users must approve to release payment.`;
           : totalDeposited;
         
         if (!updatedEscrow.buyerAddress || totalDeposited <= 0) {
-          return ctx.answerCbQuery('❌ Cannot release funds: missing buyer address or zero amount.');
+          return safeAnswerCbQuery(ctx,'❌ Cannot release funds: missing buyer address or zero amount.');
         }
         
         // Use pending release amount if set (partial release), otherwise use full amount
@@ -1581,12 +1606,12 @@ Both users must approve to release payment.`;
         
         // Validate amount doesn't exceed available balance (re-check to handle race conditions)
         if (releaseAmount > formattedTotalDeposited) {
-          return ctx.answerCbQuery(`❌ Release amount exceeds available balance (${formattedTotalDeposited.toFixed(5)} ${updatedEscrow.token}).`);
+          return safeAnswerCbQuery(ctx,`❌ Release amount exceeds available balance (${formattedTotalDeposited.toFixed(5)} ${updatedEscrow.token}).`);
         }
         
         // Validate minimum amount
         if (releaseAmount <= 0) {
-          return ctx.answerCbQuery('❌ Release amount must be greater than 0.');
+          return safeAnswerCbQuery(ctx,'❌ Release amount must be greater than 0.');
         }
         
         // Use epsilon for floating point comparison
@@ -1855,7 +1880,7 @@ Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${updatedEscr
           try {
             await ctx.editMessageText('❌ Release failed. Please try again or contact support.');
           } catch (e) {}
-          await ctx.answerCbQuery('❌ Release failed');
+          await safeAnswerCbQuery(ctx,'❌ Release failed');
           return;
         }
       }
@@ -1869,15 +1894,15 @@ Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${updatedEscr
       });
       
       if (!escrow) {
-        return ctx.answerCbQuery('❌ No active escrow found.');
+        return safeAnswerCbQuery(ctx,'❌ No active escrow found.');
       }
       
       // Only seller can click
       if (escrow.sellerId !== userId) {
-        return ctx.answerCbQuery('❌ Only the seller can choose this option.');
+        return safeAnswerCbQuery(ctx,'❌ Only the seller can choose this option.');
       }
       
-      await ctx.answerCbQuery('✅ Continuing with partial amount...');
+      await safeAnswerCbQuery(ctx,'✅ Continuing with partial amount...');
       
       // Update escrow to proceed with partial amount
       const partialAmount = escrow.accumulatedDepositAmount || escrow.depositAmount || 0;
@@ -1960,15 +1985,15 @@ Use /release After Fund Transfer to Seller
       });
       
       if (!escrow) {
-        return ctx.answerCbQuery('❌ No active escrow found.');
+        return safeAnswerCbQuery(ctx,'❌ No active escrow found.');
       }
       
       // Only seller can click
       if (escrow.sellerId !== userId) {
-        return ctx.answerCbQuery('❌ Only the seller can choose this option.');
+        return safeAnswerCbQuery(ctx,'❌ Only the seller can choose this option.');
       }
       
-      await ctx.answerCbQuery('💰 Please send the remaining amount...');
+      await safeAnswerCbQuery(ctx,'💰 Please send the remaining amount...');
       
       // Ensure status is 'awaiting_deposit' so next transaction hash can be processed
       escrow.status = 'awaiting_deposit';
@@ -2005,7 +2030,7 @@ Use /release After Fund Transfer to Seller
       
       return;
     } else if (callbackData.startsWith('fiat_release_cancel_')) {
-      await ctx.answerCbQuery('❎ Cancelled');
+      await safeAnswerCbQuery(ctx,'❎ Cancelled');
       try { await ctx.editMessageText('❎ Release cancelled. No action taken.'); } catch (e) {}
       return;
     } else if (callbackData.startsWith('refund_confirm_no_')) {
@@ -2016,7 +2041,7 @@ Use /release After Fund Transfer to Seller
       });
       
       if (!escrow) {
-        return ctx.answerCbQuery('❌ No active escrow found.');
+        return safeAnswerCbQuery(ctx,'❌ No active escrow found.');
       }
 
       // Check if user is admin
@@ -2024,7 +2049,7 @@ Use /release After Fund Transfer to Seller
                      config.getAllAdminIds().includes(String(ctx.from.id));
       
       if (!isAdmin) {
-        return ctx.answerCbQuery('❌ Only admin can cancel refund.');
+        return safeAnswerCbQuery(ctx,'❌ Only admin can cancel refund.');
       }
 
       // Delete confirmation message
@@ -2036,7 +2061,7 @@ Use /release After Fund Transfer to Seller
         await escrow.save();
       }
       
-      await ctx.answerCbQuery('❌ Refund cancelled.');
+      await safeAnswerCbQuery(ctx,'❌ Refund cancelled.');
       return;
     } else if (callbackData.startsWith('refund_confirm_yes_')) {
       const escrowId = callbackData.replace('refund_confirm_yes_', '');
@@ -2046,7 +2071,7 @@ Use /release After Fund Transfer to Seller
       });
       
       if (!escrow) {
-        return ctx.answerCbQuery('❌ No active escrow found.');
+        return safeAnswerCbQuery(ctx,'❌ No active escrow found.');
       }
 
       // Check if user is admin
@@ -2054,11 +2079,11 @@ Use /release After Fund Transfer to Seller
                      config.getAllAdminIds().includes(String(ctx.from.id));
       
       if (!isAdmin) {
-        return ctx.answerCbQuery('❌ Only admin can confirm refund.');
+        return safeAnswerCbQuery(ctx,'❌ Only admin can confirm refund.');
       }
 
       if (!escrow.sellerAddress) {
-        return ctx.answerCbQuery('❌ Seller address is not set.');
+        return safeAnswerCbQuery(ctx,'❌ Seller address is not set.');
       }
 
       // Calculate amount - use pendingRefundAmount if set, otherwise use full deposited amount
@@ -2077,7 +2102,7 @@ Use /release After Fund Transfer to Seller
         : totalDeposited;
 
       if (totalDeposited <= 0) {
-        return ctx.answerCbQuery('❌ No confirmed deposit found.');
+        return safeAnswerCbQuery(ctx,'❌ No confirmed deposit found.');
       }
 
       // Use pending refund amount if set (partial refund), otherwise use full amount
@@ -2087,12 +2112,12 @@ Use /release After Fund Transfer to Seller
 
       // Validate amount doesn't exceed available balance (re-check to handle race conditions)
       if (refundAmount > formattedTotalDeposited) {
-        return ctx.answerCbQuery(`❌ Refund amount exceeds available balance (${formattedTotalDeposited.toFixed(5)} ${escrow.token}).`);
+        return safeAnswerCbQuery(ctx,`❌ Refund amount exceeds available balance (${formattedTotalDeposited.toFixed(5)} ${escrow.token}).`);
       }
 
       // Validate minimum amount
       if (refundAmount <= 0) {
-        return ctx.answerCbQuery('❌ Refund amount must be greater than 0.');
+        return safeAnswerCbQuery(ctx,'❌ Refund amount must be greater than 0.');
       }
 
       // Use epsilon for floating point comparison
@@ -2130,7 +2155,7 @@ Use /release After Fund Transfer to Seller
         }
       }
 
-      await ctx.answerCbQuery('🔄 Processing refund...');
+      await safeAnswerCbQuery(ctx,'🔄 Processing refund...');
 
       try {
         // Refund funds to seller's address
@@ -2348,8 +2373,8 @@ Thank you for using our safe escrow system.`;
         escrowId,
         status: { $in: ['in_fiat_transfer', 'deposited', 'ready_to_release', 'disputed'] }
       });
-      if (!escrow) return ctx.answerCbQuery('❌ No active escrow found.');
-      if (escrow.sellerId !== userId) return ctx.answerCbQuery('❌ Only the seller can confirm release.');
+      if (!escrow) return safeAnswerCbQuery(ctx,'❌ No active escrow found.');
+      if (escrow.sellerId !== userId) return safeAnswerCbQuery(ctx,'❌ Only the seller can confirm release.');
       const decimals = BlockchainService.getTokenDecimals(escrow.token, escrow.chain);
       const amountWeiOverride = escrow.accumulatedDepositAmountWei && escrow.accumulatedDepositAmountWei !== '0'
         ? escrow.accumulatedDepositAmountWei
@@ -2366,7 +2391,7 @@ Thank you for using our safe escrow system.`;
       if (!escrow.buyerAddress || amount <= 0) {
         return ctx.reply('⚠️ Cannot proceed: missing buyer address or zero amount.');
       }
-      await ctx.answerCbQuery('🚀 Releasing...');
+      await safeAnswerCbQuery(ctx,'🚀 Releasing...');
       try { await ctx.editMessageText('🚀 Releasing funds to the buyer...'); } catch (e) {}
       try {
         const releaseResult = await BlockchainService.releaseFunds(
@@ -2503,20 +2528,20 @@ Trade completed successfully.`;
       });
 
       if (!escrow) {
-        return ctx.answerCbQuery('❌ No active escrow found.');
+        return safeAnswerCbQuery(ctx,'❌ No active escrow found.');
       }
 
       // Check if user is authorized
       if (role === 'buyer' && escrow.buyerId !== userId) {
-        return ctx.answerCbQuery('❌ Only the buyer can confirm this action.');
+        return safeAnswerCbQuery(ctx,'❌ Only the buyer can confirm this action.');
       }
       if (role === 'seller' && escrow.sellerId !== userId) {
-        return ctx.answerCbQuery('❌ Only the seller can confirm this action.');
+        return safeAnswerCbQuery(ctx,'❌ Only the seller can confirm this action.');
       }
 
       // Only release is supported (refunds require seller address which is no longer set)
       if (action === 'refund') {
-        return ctx.answerCbQuery('❌ Refund functionality requires seller address. Please contact admin for refunds.');
+        return safeAnswerCbQuery(ctx,'❌ Refund functionality requires seller address. Please contact admin for refunds.');
       }
 
       // Update confirmation status (only for release)
@@ -2675,13 +2700,13 @@ Approved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escro
         await ctx.reply(waitingText);
       }
 
-      await ctx.answerCbQuery('✅ Confirmation recorded');
+      await safeAnswerCbQuery(ctx,'✅ Confirmation recorded');
     } else if (callbackData.startsWith('reject_')) {
       const [, action] = callbackData.split('_');
       
       // Only release is supported, but handle both for safety
       if (action === 'refund') {
-        return ctx.answerCbQuery('❌ Refund functionality requires seller address. Please contact admin for refunds.');
+        return safeAnswerCbQuery(ctx,'❌ Refund functionality requires seller address. Please contact admin for refunds.');
       }
       
       // Find active escrow and reset confirmations
@@ -2698,24 +2723,16 @@ Approved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escro
         await escrow.save();
       }
       
-      await ctx.answerCbQuery('❌ Transaction rejected');
+      await safeAnswerCbQuery(ctx, '❌ Transaction rejected');
       await ctx.reply('❌ Transaction has been rejected by one of the parties. Please restart the process if needed.');
       
       return;
     }
 
-      } catch (error) {
+  } catch (error) {
     console.error('Error in callback handler:', error);
-    try {
-      await ctx.answerCbQuery('❌ An error occurred');
-    } catch (answerError) {
-      // Handle expired callback queries gracefully
-      if (answerError.description?.includes('query is too old') || 
-          answerError.description?.includes('query ID is invalid')) {
-      } else {
-        console.error('Error answering callback query:', answerError);
-      }
-    }
+    // Try to answer callback query - safeAnswerCbQuery handles expired queries internally
+    await safeAnswerCbQuery(ctx, '❌ An error occurred');
   }
 };
 
