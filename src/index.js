@@ -156,18 +156,52 @@ function parseFlexibleNumber(value) {
   if (isNegative) {
     str = str.slice(1);
   }
+  
   const lastComma = str.lastIndexOf(',');
   const lastDot = str.lastIndexOf('.');
+  
+  // Determine if separators are thousands separators or decimal separators
   let decimalSeparator = null;
-  if (lastComma > -1 && lastDot > -1) {
+  let hasBothSeparators = lastComma > -1 && lastDot > -1;
+  
+  if (hasBothSeparators) {
+    // Both comma and dot present - the last one is the decimal separator
     decimalSeparator = lastComma > lastDot ? ',' : '.';
   } else if (lastComma > -1) {
-    decimalSeparator = ',';
+    // Only comma present - check if it's thousands or decimal separator
+    const afterComma = str.slice(lastComma + 1);
+    // If comma is followed by exactly 3 digits and no more separators, it's likely thousands separator
+    // If comma is followed by 1-2 digits, it's likely decimal separator
+    if (afterComma.length === 3 && /^\d{3}$/.test(afterComma) && lastComma > 0) {
+      // Likely thousands separator (e.g., "15,000")
+      decimalSeparator = null;
+    } else if (afterComma.length <= 2 && /^\d{1,2}$/.test(afterComma)) {
+      // Likely decimal separator (e.g., "15,50")
+      decimalSeparator = ',';
+    } else {
+      // Default: treat as thousands separator if followed by 3+ digits
+      decimalSeparator = null;
+    }
   } else if (lastDot > -1) {
-    decimalSeparator = '.';
+    // Only dot present - check if it's thousands or decimal separator
+    const afterDot = str.slice(lastDot + 1);
+    // If dot is followed by exactly 3 digits and no more separators, it's likely thousands separator
+    // If dot is followed by 1-2 digits, it's likely decimal separator
+    if (afterDot.length === 3 && /^\d{3}$/.test(afterDot) && lastDot > 0) {
+      // Likely thousands separator (e.g., "15.000")
+      decimalSeparator = null;
+    } else if (afterDot.length <= 2 && /^\d{1,2}$/.test(afterDot)) {
+      // Likely decimal separator (e.g., "15.50")
+      decimalSeparator = '.';
+    } else {
+      // Default: treat as thousands separator if followed by 3+ digits
+      decimalSeparator = null;
+    }
   }
+  
   let normalized = str;
   if (decimalSeparator) {
+    // Has decimal separator - remove all other separators, then format with dot
     const otherSeparator = decimalSeparator === '.' ? ',' : '.';
     const otherSepRegex = new RegExp('\\' + otherSeparator, 'g');
     normalized = normalized.replace(otherSepRegex, '');
@@ -178,8 +212,10 @@ function parseFlexibleNumber(value) {
     const decimalPart = normalized.slice(lastDecimalIndex + 1);
     normalized = `${integerPart}.${decimalPart}`;
   } else {
+    // No decimal separator - remove all separators (they're thousands separators)
     normalized = normalized.replace(/[.,]/g, '');
   }
+  
   const parsed = parseFloat(normalized);
   if (Number.isNaN(parsed)) {
     return NaN;
