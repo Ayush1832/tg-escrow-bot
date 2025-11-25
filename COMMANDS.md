@@ -60,11 +60,11 @@
 
 `/admin_pool_delete_all` - Delete ALL groups from pool (dangerous)
 
-`/admin_recycle_groups` - Manually recycle groups for completed/refunded escrows
-
 `/admin_group_reset` - Reset group when no deposits were made (removes users, recycles group, deletes escrow)
 
 `/admin_reset_force` - Force reset group regardless of status (removes users, recycles group)
+
+`/admin_reset_all_groups` - Force reset ALL groups at once (ignores escrows, removes users, recycles all)
 
 ### Settlement Commands (Group Only)
 

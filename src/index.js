@@ -140,6 +140,54 @@ ${approvalStatus}`;
 }
 
 
+function parseFlexibleNumber(value) {
+  if (value === null || value === undefined) {
+    return NaN;
+  }
+  let str = String(value).trim();
+  if (!str) {
+    return NaN;
+  }
+  str = str.replace(/[^\d.,-]/g, '');
+  if (!str) {
+    return NaN;
+  }
+  const isNegative = str.startsWith('-');
+  if (isNegative) {
+    str = str.slice(1);
+  }
+  const lastComma = str.lastIndexOf(',');
+  const lastDot = str.lastIndexOf('.');
+  let decimalSeparator = null;
+  if (lastComma > -1 && lastDot > -1) {
+    decimalSeparator = lastComma > lastDot ? ',' : '.';
+  } else if (lastComma > -1) {
+    decimalSeparator = ',';
+  } else if (lastDot > -1) {
+    decimalSeparator = '.';
+  }
+  let normalized = str;
+  if (decimalSeparator) {
+    const otherSeparator = decimalSeparator === '.' ? ',' : '.';
+    const otherSepRegex = new RegExp('\\' + otherSeparator, 'g');
+    normalized = normalized.replace(otherSepRegex, '');
+    const lastDecimalIndex = normalized.lastIndexOf(decimalSeparator);
+    const integerPart = normalized
+      .slice(0, lastDecimalIndex)
+      .replace(new RegExp('\\' + decimalSeparator, 'g'), '');
+    const decimalPart = normalized.slice(lastDecimalIndex + 1);
+    normalized = `${integerPart}.${decimalPart}`;
+  } else {
+    normalized = normalized.replace(/[.,]/g, '');
+  }
+  const parsed = parseFloat(normalized);
+  if (Number.isNaN(parsed)) {
+    return NaN;
+  }
+  return isNegative ? -parsed : parsed;
+}
+
+
 class EscrowBot {
   constructor() {
     this.bot = new Telegraf(config.BOT_TOKEN);
@@ -634,9 +682,9 @@ Use /release After Fund Transfer to Seller
         const groupId = escrow.groupId;
         
         if (escrow.tradeDetailsStep === 'step1_amount') {
-          const amount = parseFloat(text);
+          const amount = parseFlexibleNumber(text);
           if (isNaN(amount) || amount <= 0) {
-            await ctx.reply('❌ Please enter a valid amount. Example: 1000');
+            await ctx.reply('❌ Please enter a valid amount. Examples: 1,500 or 1.500,50');
             return;
           }
           
@@ -652,9 +700,9 @@ Use /release After Fund Transfer to Seller
           return;
           
         } else if (escrow.tradeDetailsStep === 'step2_rate') {
-          const rate = parseFloat(text);
+          const rate = parseFlexibleNumber(text);
           if (isNaN(rate) || rate <= 0) {
-            await ctx.reply('❌ Please enter a valid rate. Example: 89.5');
+            await ctx.reply('❌ Please enter a valid rate. Examples: 89.5 or 89,50');
             return;
           }
           
@@ -783,9 +831,12 @@ Use /release After Fund Transfer to Seller
           return;
         }
         
-        const isAdmin = config.getAllAdminUsernames().includes(ctx.from.username) || 
+        const normalizedUsername = (ctx.from.username || '').toLowerCase();
+        const isAdmin = config.getAllAdminUsernames().some((name) => name && name.toLowerCase() === normalizedUsername) || 
                         config.getAllAdminIds().includes(String(userId));
-        const isSeller = Number(escrow.sellerId) === Number(userId);
+        const isSellerIdMatch = escrow.sellerId && Number(escrow.sellerId) === Number(userId);
+        const isSellerUsernameMatch = escrow.sellerUsername && escrow.sellerUsername.toLowerCase() === normalizedUsername;
+        const isSeller = Boolean(isSellerIdMatch || isSellerUsernameMatch);
         
         // For partial release, only admin can use
         const commandText = ctx.message.text.trim();
@@ -850,8 +901,9 @@ Use /release After Fund Transfer to Seller
         escrow.pendingRefundAmount = null; // Clear any pending refund
         
         // For admin partial releases, only admin confirmation is needed
-        // For full releases or seller releases, both buyer and seller need to approve
+        // For full releases or seller releases, adjust confirmation requirements
         const isPartialReleaseByAdmin = hasAmount && isAdmin;
+        const sellerInitiatedRelease = !isAdmin && isSeller && !hasAmount;
         
         if (isPartialReleaseByAdmin) {
           // Admin partial release: only admin needs to confirm
@@ -881,7 +933,7 @@ Total Deposited: ${formattedTotalDeposited.toFixed(5)} ${escrow.token}
           escrow.releaseConfirmationMessageId = releaseMsg.message_id;
           await escrow.save();
           } else {
-          // Full release or seller release: both buyer and seller need to approve
+          // Full release or seller release
           const buyerLabel = escrow.buyerUsername
             ? `@${escrow.buyerUsername}`
             : escrow.buyerId
@@ -889,12 +941,21 @@ Total Deposited: ${formattedTotalDeposited.toFixed(5)} ${escrow.token}
               : 'the buyer';
           
           // Reset confirmation flags
-          escrow.buyerConfirmedRelease = false;
-          escrow.sellerConfirmedRelease = false;
+          escrow.adminConfirmedRelease = false;
+          if (sellerInitiatedRelease) {
+            // Auto-confirm buyer; only seller needs to approve
+            escrow.buyerConfirmedRelease = true;
+            escrow.sellerConfirmedRelease = false;
+          } else {
+            escrow.buyerConfirmedRelease = false;
+            escrow.sellerConfirmedRelease = false;
+          }
           escrow.adminConfirmedRelease = false;
           await escrow.save();
-
-          const buyerLine = `⌛️ ${buyerLabel} - Waiting...`;
+          
+          const buyerLine = escrow.buyerConfirmedRelease
+            ? `✅ ${buyerLabel} - Confirmed`
+            : `⌛️ ${buyerLabel} - Waiting...`;
           const sellerLabel = escrow.sellerUsername
             ? `@${escrow.sellerUsername}`
             : escrow.sellerId
@@ -903,12 +964,15 @@ Total Deposited: ${formattedTotalDeposited.toFixed(5)} ${escrow.token}
           const sellerLine = `⌛️ ${sellerLabel} - Waiting...`;
           
           const releaseType = requestedAmount !== null ? 'Partial' : 'Full';
+          const approvalNote = sellerInitiatedRelease
+            ? 'Only the seller needs to approve to release payment.'
+            : 'Both users must approve to release payment.';
           const releaseCaption = `<b>Release Confirmation (${releaseType})</b>
 
 ${requestedAmount !== null ? `Amount: ${releaseAmount.toFixed(5)} ${escrow.token}\nTotal Deposited: ${formattedTotalDeposited.toFixed(5)} ${escrow.token}\n\n` : ''}${buyerLine}
 ${sellerLine}
 
-Both users must approve to release payment.`;
+${approvalNote}`;
           
           const releaseMsg = await ctx.replyWithPhoto(images.RELEASE_CONFIRMATION, {
             caption: releaseCaption,
@@ -1250,9 +1314,9 @@ This is the current available balance for this trade.`;
       adminAddressPool,
       adminInitAddresses,
       adminCleanupAddresses,
-      adminRecycleGroups,
       adminGroupReset,
-      adminResetForce
+      adminResetForce,
+      adminResetAllGroups
     } = adminHandler;
     this.bot.command('admin_stats', adminStats);
     this.bot.command('admin_pool', adminGroupPool);
@@ -1267,9 +1331,9 @@ This is the current available balance for this trade.`;
     this.bot.command('admin_address_pool', adminAddressPool);
     this.bot.command('admin_init_addresses', adminInitAddresses);
     this.bot.command('admin_cleanup_addresses', adminCleanupAddresses);
-    this.bot.command('admin_recycle_groups', adminRecycleGroups);
     this.bot.command('admin_group_reset', adminGroupReset);
     this.bot.command('admin_reset_force', adminResetForce);
+    this.bot.command('admin_reset_all_groups', adminResetAllGroups);
 
     this.bot.on('callback_query', callbackHandler);
     this.bot.on('chat_join_request', joinRequestHandler);

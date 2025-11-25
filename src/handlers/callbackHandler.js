@@ -1129,9 +1129,14 @@ Once you’ve sent the amount, tap the button below.`;
       }
       
       const userId = ctx.from.id;
-      const isBuyer = Number(escrow.buyerId) === Number(userId);
-      const isSeller = Number(escrow.sellerId) === Number(userId);
-      const isAdmin = config.getAllAdminUsernames().includes(ctx.from.username) ||
+      const normalizedUsername = (ctx.from.username || '').toLowerCase();
+      const isBuyerIdMatch = escrow.buyerId && Number(escrow.buyerId) === Number(userId);
+      const isBuyerUsernameMatch = escrow.buyerUsername && escrow.buyerUsername.toLowerCase() === normalizedUsername;
+      const isBuyer = Boolean(isBuyerIdMatch || isBuyerUsernameMatch);
+      const isSellerIdMatch = escrow.sellerId && Number(escrow.sellerId) === Number(userId);
+      const isSellerUsernameMatch = escrow.sellerUsername && escrow.sellerUsername.toLowerCase() === normalizedUsername;
+      const isSeller = Boolean(isSellerIdMatch || isSellerUsernameMatch);
+      const isAdmin = config.getAllAdminUsernames().some((name) => name && name.toLowerCase() === normalizedUsername) ||
                       config.getAllAdminIds().includes(String(userId));
       
       if (!isBuyer && !isSeller && !isAdmin) {
@@ -1513,12 +1518,19 @@ Thank you for using our safe escrow system.`;
         ? `✅ ${sellerLabel} - Confirmed`
         : `⌛️ ${sellerLabel} - Waiting...`;
       
+      const approvalNote = (!updatedEscrow.buyerConfirmedRelease && !updatedEscrow.sellerConfirmedRelease)
+        ? 'Both users must approve to release payment.'
+        : (!updatedEscrow.buyerConfirmedRelease && updatedEscrow.sellerConfirmedRelease)
+          ? 'Only the buyer still needs to approve to release payment.'
+          : (updatedEscrow.buyerConfirmedRelease && !updatedEscrow.sellerConfirmedRelease)
+            ? 'Only the seller needs to approve to release payment.'
+            : '✅ All approvals received. Processing release...';
       const releaseCaption = `<b>Release Confirmation</b>
 
 ${buyerLine}
 ${sellerLine}
 
-Both users must approve to release payment.`;
+${approvalNote}`;
       
       // Update the message
       if (updatedEscrow.releaseConfirmationMessageId) {

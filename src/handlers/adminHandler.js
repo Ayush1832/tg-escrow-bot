@@ -428,9 +428,9 @@ async function adminHelp(ctx) {
 • \`/admin_pool\` - View group pool status and statistics
 • \`/admin_pool_add <groupId>\` - Add group to pool
 • \`/admin_pool_list\` - List all groups in pool
-• \`/admin_recycle_groups\` - Manually recycle groups for completed/refunded escrows
 • \`/admin_group_reset\` - Reset group when no deposits were made (removes users, recycles group)
 • \`/admin_reset_force\` - Force reset group regardless of status (removes users, recycles group)
+• \`/admin_reset_all_groups\` - Force reset ALL groups at once (ignores escrows, removes users, recycles all)
 • \`/admin_pool_delete <groupId>\` - Delete specific group from pool
 • \`/admin_pool_delete_all\` - Delete ALL groups from pool (dangerous)
 
@@ -863,58 +863,6 @@ async function adminRecentTrades(ctx) {
 
 
 /**
- * Admin command to manually recycle groups that meet criteria
- * Recycles groups for escrows that are completed or refunded
- */
-async function adminRecycleGroups(ctx) {
-  try {
-    if (!isAdmin(ctx)) {
-      return ctx.reply('❌ Access denied. Admin privileges required.');
-    }
-
-    // Find escrows that should have their groups recycled
-    const escrowsToRecycle = await Escrow.find({
-      status: { $in: ['completed', 'refunded'] },
-      assignedFromPool: true, // Only pool groups
-      groupId: { $ne: null }
-    });
-
-    if (escrowsToRecycle.length === 0) {
-      return ctx.reply('✅ No groups eligible for recycling found.');
-    }
-
-    let recycledCount = 0;
-    let failedCount = 0;
-
-    for (const escrow of escrowsToRecycle) {
-      try {
-        // Recycle the group
-        await GroupPoolService.recycleGroupAfterCompletion(escrow, ctx.telegram);
-        recycledCount++;
-      } catch (error) {
-        console.error(`Error recycling group for escrow ${escrow.escrowId}:`, error);
-        failedCount++;
-      }
-    }
-
-    const message = `✅ Group Recycling Complete
-
-📊 Statistics:
-• Eligible groups: ${escrowsToRecycle.length}
-• Successfully recycled: ${recycledCount}
-• Failed: ${failedCount}
-
-${recycledCount > 0 ? '✅ Groups have been recycled and addresses released back to pool.' : ''}`;
-
-    await ctx.reply(message);
-
-  } catch (error) {
-    console.error('Error in admin recycle groups:', error);
-    ctx.reply('❌ Error recycling groups.');
-  }
-}
-
-/**
  * Admin group reset - Reset a group when no deposits were made
  * Only works if escrow has no deposits (status: draft, awaiting_details, or awaiting_deposit)
  * and depositAmount/confirmedAmount are 0
@@ -1267,6 +1215,234 @@ async function adminResetForce(ctx) {
   }
 }
 
+/**
+ * Admin reset all groups - Force reset ALL groups in the pool at once
+ * Ignores escrow status and deposits - resets everything
+ */
+async function adminResetAllGroups(ctx) {
+  try {
+    if (!isAdmin(ctx)) {
+      return ctx.reply('❌ Access denied. Admin privileges required.');
+    }
+
+    const processingMsg = await ctx.reply('🔄 Resetting all groups... This may take a while.');
+
+    try {
+      // Get all groups from pool
+      const allGroups = await GroupPool.find({});
+      
+      if (!allGroups || allGroups.length === 0) {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id,
+          processingMsg.message_id,
+          null,
+          '❌ No groups found in pool.'
+        );
+        setTimeout(async () => {
+          try {
+            await ctx.telegram.deleteMessage(ctx.chat.id, processingMsg.message_id);
+          } catch (e) {}
+        }, 60 * 1000);
+        return;
+      }
+
+      let successCount = 0;
+      let failCount = 0;
+      const results = [];
+
+      // Process each group
+      for (let i = 0; i < allGroups.length; i++) {
+        const group = allGroups[i];
+        const groupId = group.groupId;
+
+        try {
+          // Find associated escrow (if any)
+          let escrow = null;
+          if (group.assignedEscrowId) {
+            escrow = await Escrow.findOne({ escrowId: group.assignedEscrowId });
+          }
+          
+          if (!escrow) {
+            escrow = await Escrow.findOne({ groupId: groupId.toString() }).sort({ createdAt: -1 });
+          }
+
+          // Verify group exists in Telegram before attempting operations
+          let groupExists = false;
+          try {
+            await ctx.telegram.getChat(String(groupId));
+            groupExists = true;
+          } catch (chatError) {
+            console.log(`⚠️ Group ${groupId} does not exist in Telegram or bot has no access`);
+            // Group doesn't exist - just reset database entry and continue
+            groupExists = false;
+          }
+
+          // Remove users from group (only if group exists)
+          if (groupExists) {
+            if (escrow) {
+              try {
+                await GroupPoolService.removeUsersFromGroup(escrow, groupId, ctx.telegram);
+              } catch (removeError) {
+                // Continue even if user removal fails
+                console.log(`⚠️ Could not remove users from group ${groupId}:`, removeError.message);
+              }
+            } else {
+              // Try to remove users even without escrow (get admins and remove them)
+              try {
+                const chatId = String(groupId);
+                const adminUserId2 = config.ADMIN_USER_ID2 ? Number(config.ADMIN_USER_ID2) : null;
+                
+                // Get bot ID (cache it to avoid multiple calls)
+                let botId;
+                if (!adminResetAllGroups.botIdCache) {
+                  try {
+                    const botInfo = await ctx.telegram.getMe();
+                    botId = botInfo.id;
+                    adminResetAllGroups.botIdCache = botId;
+                  } catch (e) {
+                    botId = null;
+                    adminResetAllGroups.botIdCache = null;
+                  }
+                } else {
+                  botId = adminResetAllGroups.botIdCache;
+                }
+
+                // Get all chat administrators
+                let adminMembers = [];
+                try {
+                  const chatAdministrators = await ctx.telegram.getChatAdministrators(chatId);
+                  adminMembers = chatAdministrators.map(member => Number(member.user.id));
+                } catch (e) {
+                  // Continue with empty list - group might not have admins or bot lacks permission
+                }
+
+                // Remove all users except bot and ADMIN_USER_ID2
+                for (const userId of adminMembers) {
+                  if (userId === botId || (adminUserId2 && userId === adminUserId2)) {
+                    continue;
+                  }
+                  try {
+                    const untilDate = Math.floor(Date.now() / 1000) + 60;
+                    await ctx.telegram.kickChatMember(chatId, userId, untilDate);
+                    // Immediately unban so they can rejoin
+                    await ctx.telegram.unbanChatMember(chatId, userId);
+                  } catch (e) {
+                    // Ignore errors - user might have already left or bot lacks permission
+                  }
+                }
+              } catch (removeError) {
+                // Continue even if user removal fails
+                console.log(`⚠️ Could not remove users from group ${groupId}:`, removeError.message);
+              }
+            }
+          }
+
+          // Refresh invite link (has built-in 2 second delay) - only if group exists
+          if (groupExists) {
+            try {
+              await GroupPoolService.refreshInviteLink(groupId, ctx.telegram);
+            } catch (linkError) {
+              console.log(`⚠️ Could not refresh invite link for group ${groupId}:`, linkError.message);
+              // Continue anyway - group can still be reset
+            }
+          } else {
+            // Group doesn't exist - just clear the invite link in database
+            const freshGroupForLink = await GroupPool.findOne({ groupId: groupId });
+            if (freshGroupForLink && freshGroupForLink.inviteLink) {
+              freshGroupForLink.inviteLink = null;
+              freshGroupForLink.inviteLinkHasJoinRequest = false;
+              try {
+                await freshGroupForLink.save();
+              } catch (e) {
+                // Ignore save errors
+              }
+            }
+          }
+
+          // Reset group pool entry - re-fetch to ensure we have latest state
+          const freshGroup = await GroupPool.findOne({ groupId: groupId });
+          if (freshGroup) {
+            freshGroup.status = 'available';
+            freshGroup.assignedEscrowId = null;
+            freshGroup.assignedAt = null;
+            freshGroup.completedAt = null;
+            try {
+              await freshGroup.save();
+            } catch (saveError) {
+              console.error(`⚠️ Could not save group ${groupId}:`, saveError.message);
+              // Continue - try to reset next group
+            }
+          } else {
+            console.log(`⚠️ Group ${groupId} not found when trying to save - may have been deleted`);
+          }
+
+          // Optionally delete escrow (but don't fail if it doesn't exist)
+          if (escrow) {
+            try {
+              await Escrow.deleteOne({ escrowId: escrow.escrowId });
+            } catch (deleteError) {
+              // Continue anyway
+            }
+          }
+
+          successCount++;
+          results.push({ groupId, status: 'success' });
+        } catch (error) {
+          failCount++;
+          results.push({ groupId, status: 'failed', error: error.message });
+          console.error(`Error resetting group ${groupId}:`, error);
+        }
+
+        // Small delay between groups to avoid rate limiting
+        if (i < allGroups.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
+
+      // Update processing message with results
+      const summary = `✅ Reset Complete!
+
+📊 Results:
+• Total Groups: ${allGroups.length}
+• ✅ Successful: ${successCount}
+• ❌ Failed: ${failCount}
+
+All groups have been reset to 'available' status.`;
+
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        processingMsg.message_id,
+        null,
+        summary
+      );
+
+      // Delete summary message after 2 minutes
+      setTimeout(async () => {
+        try {
+          await ctx.telegram.deleteMessage(ctx.chat.id, processingMsg.message_id);
+        } catch (e) {}
+      }, 120 * 1000);
+
+    } catch (error) {
+      console.error('Error in admin reset all groups:', error);
+      await ctx.telegram.editMessageText(
+        ctx.chat.id,
+        processingMsg.message_id,
+        null,
+        `❌ Error resetting groups: ${error.message}`
+      );
+      setTimeout(async () => {
+        try {
+          await ctx.telegram.deleteMessage(ctx.chat.id, processingMsg.message_id);
+        } catch (e) {}
+      }, 60 * 1000);
+    }
+  } catch (error) {
+    console.error('Error in admin reset all groups:', error);
+    ctx.reply('❌ Error resetting all groups. Please check the logs.');
+  }
+}
+
 module.exports = {
   adminStats,
   adminGroupPool,
@@ -1281,7 +1457,7 @@ module.exports = {
   adminAddressPool,
   adminInitAddresses,
   adminCleanupAddresses,
-  adminRecycleGroups,
   adminGroupReset,
-  adminResetForce
+  adminResetForce,
+  adminResetAllGroups
 };

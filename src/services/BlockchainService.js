@@ -9,7 +9,8 @@ const ESCROW_VAULT_ABI = [
   'function feeWallet1() view returns (address)',
   'function feeWallet2() view returns (address)',
   'function release(address to, uint256 amount) external',
-  'function refund(address to, uint256 amount) external'
+  'function refund(address to, uint256 amount) external',
+  'function withdrawToken(address erc20Token, address to) external'
 ];
 
 const ERC20_ABI = [

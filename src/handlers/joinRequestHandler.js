@@ -1,5 +1,6 @@
 const Escrow = require('../models/Escrow');
 const { getParticipants, formatParticipant, formatParticipantById } = require('../utils/participant');
+const config = require('../../config');
 
 // Import timeout map from groupDealHandler to cancel timeouts when both join
 // We'll use a shared module pattern to access the timeout map
@@ -40,6 +41,12 @@ async function joinRequestHandler(ctx) {
 
     const normalizedUserId = Number(user.id);
     const lowercaseUsername = (user.username || '').toLowerCase();
+    const adminUsernames = (config.getAllAdminUsernames?.() || [])
+      .map(name => (typeof name === 'string' ? name.toLowerCase() : null))
+      .filter(Boolean);
+    const adminIds = (config.getAllAdminIds?.() || []).map(String);
+    const isAdminUser = adminIds.includes(String(normalizedUserId)) ||
+      (lowercaseUsername && adminUsernames.includes(lowercaseUsername));
 
     // First, try to match by ID (most reliable)
     let participantIndex = participants.findIndex(
@@ -80,10 +87,15 @@ async function joinRequestHandler(ctx) {
     }
 
     if (participantIndex === -1) {
-      // Log for debugging - user doesn't match any participant
-      console.log(`Join request declined: User ${user.id} (@${user.username || 'no-username'}) doesn't match participants for escrow ${escrow.escrowId}. Participants:`, 
-        participants.map(p => ({ id: p.id, username: p.username }))
-      );
+      if (isAdminUser) {
+        try {
+          await ctx.telegram.approveChatJoinRequest(chatId, user.id);
+          console.log(`Admin ${user.id} approved to join group ${chatId} for escrow ${escrow.escrowId}.`);
+        } catch (approveError) {
+          console.error(`Failed to approve admin ${user.id} for group ${chatId}:`, approveError);
+        }
+        return;
+      }
       try { await ctx.telegram.declineChatJoinRequest(chatId, user.id); } catch (_) {}
       return;
     }
