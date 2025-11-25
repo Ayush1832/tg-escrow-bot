@@ -170,31 +170,35 @@ function parseFlexibleNumber(value) {
   } else if (lastComma > -1) {
     // Only comma present - check if it's thousands or decimal separator
     const afterComma = str.slice(lastComma + 1);
-    // If comma is followed by exactly 3 digits and no more separators, it's likely thousands separator
-    // If comma is followed by 1-2 digits, it's likely decimal separator
+    // If comma is followed by exactly 3 digits, it's likely thousands separator
     if (afterComma.length === 3 && /^\d{3}$/.test(afterComma) && lastComma > 0) {
       // Likely thousands separator (e.g., "15,000")
       decimalSeparator = null;
-    } else if (afterComma.length <= 2 && /^\d{1,2}$/.test(afterComma)) {
-      // Likely decimal separator (e.g., "15,50")
+    } else if (afterComma.length === 2 && /^00$/.test(afterComma)) {
+      // "15,00" - two zeros, more likely thousands separator (1500) than decimal (15.00)
+      decimalSeparator = null;
+    } else if (afterComma.length <= 2 && /^\d{1,2}$/.test(afterComma) && !/^0+$/.test(afterComma)) {
+      // 1-2 digits with at least one non-zero - likely decimal separator (e.g., "15,50", "15,5")
+      decimalSeparator = ',';
+    } else if (afterComma.length === 1 && afterComma === '0') {
+      // Single zero after comma - likely decimal (e.g., "15,0")
       decimalSeparator = ',';
     } else {
-      // Default: treat as thousands separator if followed by 3+ digits
+      // Default: treat as thousands separator
       decimalSeparator = null;
     }
   } else if (lastDot > -1) {
     // Only dot present - check if it's thousands or decimal separator
     const afterDot = str.slice(lastDot + 1);
-    // If dot is followed by exactly 3 digits and no more separators, it's likely thousands separator
-    // If dot is followed by 1-2 digits, it's likely decimal separator
+    // If dot is followed by exactly 3 digits, it's likely thousands separator
     if (afterDot.length === 3 && /^\d{3}$/.test(afterDot) && lastDot > 0) {
       // Likely thousands separator (e.g., "15.000")
       decimalSeparator = null;
     } else if (afterDot.length <= 2 && /^\d{1,2}$/.test(afterDot)) {
-      // Likely decimal separator (e.g., "15.50")
+      // 1-2 digits after dot - typically decimal separator (e.g., "15.50", "15.5", "15.00", "15.0")
       decimalSeparator = '.';
     } else {
-      // Default: treat as thousands separator if followed by 3+ digits
+      // Default: treat as thousands separator
       decimalSeparator = null;
     }
   }
