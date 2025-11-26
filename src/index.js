@@ -974,12 +974,6 @@ Total Deposited: ${formattedTotalDeposited.toFixed(5)} ${escrow.token}
           await escrow.save();
           } else {
           // Full release or seller release
-          const buyerLabel = escrow.buyerUsername
-            ? `@${escrow.buyerUsername}`
-            : escrow.buyerId
-              ? `[${escrow.buyerId}]`
-              : 'the buyer';
-          
           // Reset confirmation flags
           escrow.adminConfirmedRelease = false;
           if (sellerInitiatedRelease) {
@@ -993,26 +987,41 @@ Total Deposited: ${formattedTotalDeposited.toFixed(5)} ${escrow.token}
           escrow.adminConfirmedRelease = false;
           await escrow.save();
           
-          const buyerLine = escrow.buyerConfirmedRelease
-            ? `✅ ${buyerLabel} - Confirmed`
-            : `⌛️ ${buyerLabel} - Waiting...`;
-          const sellerLabel = escrow.sellerUsername
-            ? `@${escrow.sellerUsername}`
-            : escrow.sellerId
-              ? `[${escrow.sellerId}]`
-              : 'the seller';
-          const sellerLine = `⌛️ ${sellerLabel} - Waiting...`;
+          // Get usernames from escrow (exact same format as DEAL CONFIRMED message)
+          // At this point, buyerId and sellerId should always be set (deal must be confirmed to reach this status)
+          const buyerTag = escrow.buyerUsername ? `@${escrow.buyerUsername}` : `[${escrow.buyerId}]`;
+          const sellerTag = escrow.sellerUsername ? `@${escrow.sellerUsername}` : `[${escrow.sellerId}]`;
           
           const releaseType = requestedAmount !== null ? 'Partial' : 'Full';
           const approvalNote = sellerInitiatedRelease
             ? 'Only the seller needs to approve to release payment.'
             : 'Both users must approve to release payment.';
-          const releaseCaption = `<b>Release Confirmation (${releaseType})</b>
+          
+          // Build caption based on whether seller initiated
+          let releaseCaption;
+          if (sellerInitiatedRelease) {
+            // Only show seller line when seller initiates
+            const sellerLine = `⌛️ ${sellerTag} - Waiting...`;
+            releaseCaption = `<b>Release Confirmation (${releaseType})</b>
+
+${requestedAmount !== null ? `Amount: ${releaseAmount.toFixed(5)} ${escrow.token}\nTotal Deposited: ${formattedTotalDeposited.toFixed(5)} ${escrow.token}\n\n` : ''}${sellerLine}
+
+${approvalNote}`;
+          } else {
+            // Show both lines when admin initiates
+            const buyerLine = escrow.buyerConfirmedRelease
+              ? `✅ ${buyerTag} - Confirmed`
+              : `⌛️ ${buyerTag} - Waiting...`;
+            const sellerLine = escrow.sellerConfirmedRelease
+              ? `✅ ${sellerTag} - Confirmed`
+              : `⌛️ ${sellerTag} - Waiting...`;
+            releaseCaption = `<b>Release Confirmation (${releaseType})</b>
 
 ${requestedAmount !== null ? `Amount: ${releaseAmount.toFixed(5)} ${escrow.token}\nTotal Deposited: ${formattedTotalDeposited.toFixed(5)} ${escrow.token}\n\n` : ''}${buyerLine}
 ${sellerLine}
 
 ${approvalNote}`;
+          }
           
           const releaseMsg = await ctx.replyWithPhoto(images.RELEASE_CONFIRMATION, {
             caption: releaseCaption,
