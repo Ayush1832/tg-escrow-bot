@@ -1482,9 +1482,6 @@ Thank you for using our safe escrow system.`;
         return safeAnswerCbQuery(ctx,'❌ Only buyer, seller, or admin can approve release.');
       }
       
-      // Check if this was seller-initiated BEFORE updating (buyer already confirmed, seller not)
-      const wasSellerInitiated = escrow.buyerConfirmedRelease && !escrow.sellerConfirmedRelease;
-      
       // Update confirmation status
       if (isBuyer) {
           escrow.buyerConfirmedRelease = true;
@@ -1505,50 +1502,19 @@ Thank you for using our safe escrow system.`;
       // Update message with current confirmation status
       // Get usernames from escrow (exact same format as DEAL CONFIRMED message)
       // At this point, buyerId and sellerId should always be set (deal must be confirmed to reach this status)
-      const buyerTag = updatedEscrow.buyerUsername ? `@${updatedEscrow.buyerUsername}` : `[${updatedEscrow.buyerId}]`;
       const sellerTag = updatedEscrow.sellerUsername ? `@${updatedEscrow.sellerUsername}` : `[${updatedEscrow.sellerId}]`;
       
-      // Use the original seller-initiated state
-      const isSellerInitiated = wasSellerInitiated;
-      
-      // Build caption based on whether seller initiated
-      let releaseCaption;
-      if (isSellerInitiated) {
-        // Only show seller line when seller initiates
-        const sellerLine = updatedEscrow.sellerConfirmedRelease
-          ? `✅ ${sellerTag} - Confirmed`
-          : `⌛️ ${sellerTag} - Waiting...`;
-        const approvalNote = updatedEscrow.sellerConfirmedRelease
-          ? '✅ All approvals received. Processing release...'
-          : 'Only the seller needs to approve to release payment.';
-        releaseCaption = `<b>Release Confirmation</b>
+      const sellerLine = updatedEscrow.sellerConfirmedRelease
+        ? `✅ ${sellerTag} - Confirmed`
+        : `⌛️ ${sellerTag} - Waiting...`;
+      const approvalNote = updatedEscrow.sellerConfirmedRelease
+        ? '✅ All approvals received. Processing release...'
+        : 'Only the seller needs to approve to release payment.';
+      const releaseCaption = `<b>Release Confirmation</b>
 
 ${sellerLine}
 
 ${approvalNote}`;
-      } else {
-        // Show both lines when admin initiates or both need to confirm
-        const buyerLine = updatedEscrow.buyerConfirmedRelease
-          ? `✅ ${buyerTag} - Confirmed`
-          : `⌛️ ${buyerTag} - Waiting...`;
-        const sellerLine = updatedEscrow.sellerConfirmedRelease
-          ? `✅ ${sellerTag} - Confirmed`
-          : `⌛️ ${sellerTag} - Waiting...`;
-        
-        const approvalNote = (!updatedEscrow.buyerConfirmedRelease && !updatedEscrow.sellerConfirmedRelease)
-          ? 'Both users must approve to release payment.'
-          : (!updatedEscrow.buyerConfirmedRelease && updatedEscrow.sellerConfirmedRelease)
-            ? 'Only the buyer still needs to approve to release payment.'
-            : (updatedEscrow.buyerConfirmedRelease && !updatedEscrow.sellerConfirmedRelease)
-              ? 'Only the seller needs to approve to release payment.'
-              : '✅ All approvals received. Processing release...';
-        releaseCaption = `<b>Release Confirmation</b>
-
-${buyerLine}
-${sellerLine}
-
-${approvalNote}`;
-      }
       
       // Update the message
       if (updatedEscrow.releaseConfirmationMessageId) {
@@ -1584,7 +1550,7 @@ ${approvalNote}`;
       if (updatedEscrow.buyerConfirmedRelease && updatedEscrow.sellerConfirmedRelease) {
         await safeAnswerCbQuery(ctx,'✅ Both parties approved. Processing release...');
       } else {
-        await safeAnswerCbQuery(ctx,'✅ Your approval has been recorded. Waiting for the other party...');
+        await safeAnswerCbQuery(ctx,'✅ Your approval has been recorded. Waiting for the seller...');
       }
       
       // Check if both have confirmed
