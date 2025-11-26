@@ -11,6 +11,7 @@ const images = require('../config/images');
 const UserStatsService = require('../services/UserStatsService');
 const CompletionFeedService = require('../services/CompletionFeedService');
 const { getParticipants, formatParticipant, formatParticipantById } = require('../utils/participant');
+const findGroupEscrow = require('../utils/findGroupEscrow');
 
 // Track scheduled group recycling timeouts to avoid duplicate timers
 const groupRecyclingTimers = new Map();
@@ -333,10 +334,10 @@ module.exports = async (ctx) => {
       // Answer callback query immediately to prevent timeout
       await safeAnswerCbQuery(ctx, isBuyer ? 'Buyer role selected' : 'Seller role selected');
       
-      const escrow = await Escrow.findOne({
-        groupId: chatId.toString(),
-        status: { $in: ['draft', 'awaiting_details'] }
-      });
+      const escrow = await findGroupEscrow(
+        chatId,
+        ['draft', 'awaiting_details']
+      );
       
       if (!escrow) {
         await safeAnswerCbQuery(ctx, '❌ No active escrow found.');
@@ -429,11 +430,11 @@ module.exports = async (ctx) => {
     } else if (callbackData === 'approve_deal_summary') {
       await safeAnswerCbQuery(ctx, 'Approving deal...');
       
-      const escrow = await Escrow.findOne({
-        groupId: chatId.toString(),
-        status: { $in: ['draft', 'awaiting_details'] },
-        dealSummaryMessageId: { $exists: true }
-      });
+      const escrow = await findGroupEscrow(
+        chatId,
+        ['draft', 'awaiting_details'],
+        { dealSummaryMessageId: { $exists: true } }
+      );
       
       if (!escrow) {
         return ctx.reply('❌ No active deal summary found.');
@@ -646,11 +647,11 @@ Once you’ve sent the amount, tap the button below.`;
       const chain = callbackData.replace('step4_select_chain_', '').toUpperCase();
       await safeAnswerCbQuery(ctx,`Selected ${chain}`);
       
-      const escrow = await Escrow.findOne({
-        groupId: chatId.toString(),
-        status: { $in: ['draft', 'awaiting_details'] },
-        tradeDetailsStep: 'step4_chain_coin'
-      });
+      const escrow = await findGroupEscrow(
+        chatId,
+        ['draft', 'awaiting_details'],
+        { tradeDetailsStep: 'step4_chain_coin' }
+      );
       
       if (!escrow) {
         await safeAnswerCbQuery(ctx, '❌ No active escrow found.');
@@ -713,11 +714,11 @@ Once you’ve sent the amount, tap the button below.`;
       const coin = callbackData.replace('step4_select_coin_', '').toUpperCase();
       await safeAnswerCbQuery(ctx,`Selected ${coin}`);
       
-      const escrow = await Escrow.findOne({
-        groupId: chatId.toString(),
-        status: { $in: ['draft', 'awaiting_details'] },
-        tradeDetailsStep: 'step4_chain_coin'
-      });
+      const escrow = await findGroupEscrow(
+        chatId,
+        ['draft', 'awaiting_details'],
+        { tradeDetailsStep: 'step4_chain_coin' }
+      );
       
       if (!escrow) {
         await safeAnswerCbQuery(ctx, '❌ No active escrow found.');
@@ -834,10 +835,10 @@ Once you’ve sent the amount, tap the button below.`;
     } else if (callbackData === 'confirm_sent_deposit') {
       await safeAnswerCbQuery(ctx,'Processing...');
       
-      const escrow = await Escrow.findOne({
-        groupId: chatId.toString(),
-        status: { $in: ['awaiting_deposit', 'deposited'] }
-      });
+      const escrow = await findGroupEscrow(
+        chatId,
+        ['awaiting_deposit', 'deposited']
+      );
       
       if (!escrow || !escrow.depositAddress) {
         return safeAnswerCbQuery(ctx,'❌ No active deposit address found.');
@@ -862,10 +863,10 @@ Once you’ve sent the amount, tap the button below.`;
     } else if (callbackData === 'check_deposit') {
       await safeAnswerCbQuery(ctx,'Checking for your deposit...');
       const chatId = ctx.chat.id;
-      const escrow = await Escrow.findOne({
-        groupId: chatId.toString(),
-        status: { $in: ['awaiting_deposit', 'deposited'] }
-      });
+      const escrow = await findGroupEscrow(
+        chatId,
+        ['awaiting_deposit', 'deposited']
+      );
       if (!escrow || !escrow.depositAddress) {
         return ctx.reply('❌ No active deposit address found.');
       }
@@ -2496,10 +2497,10 @@ Trade completed successfully.`;
       const [, action, role, amount] = callbackData.split('_');
       
       // Find active escrow
-      const escrow = await Escrow.findOne({
-        groupId: chatId.toString(),
-        status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
-      });
+      const escrow = await findGroupEscrow(
+        chatId,
+        ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed']
+      );
 
       if (!escrow) {
         return safeAnswerCbQuery(ctx,'❌ No active escrow found.');
@@ -2684,10 +2685,10 @@ Approved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escro
       }
       
       // Find active escrow and reset confirmations
-      const escrow = await Escrow.findOne({
-        groupId: chatId.toString(),
-        status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
-      });
+      const escrow = await findGroupEscrow(
+        chatId,
+        ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed']
+      );
       
       if (escrow) {
         escrow.buyerConfirmedRelease = false;

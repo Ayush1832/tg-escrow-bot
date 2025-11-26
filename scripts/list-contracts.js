@@ -14,7 +14,6 @@ async function main() {
 
   await mongoose.connect(MONGODB_URI);
 
-  
   const contracts = await ContractModel.find({ name: 'EscrowVault' }).sort({ 
     token: 1, 
     network: 1, 

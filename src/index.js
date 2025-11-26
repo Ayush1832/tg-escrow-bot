@@ -18,6 +18,7 @@ const GroupPoolService = require('./services/GroupPoolService');
 const verifyHandler = require('./handlers/verifyHandler');
 const images = require('./config/images');
 const UserStatsService = require('./services/UserStatsService');
+const findGroupEscrow = require('./utils/findGroupEscrow');
 
 /**
  * RPC Rate Limiting Queue
@@ -259,11 +260,11 @@ class EscrowBot {
         
         if (ctx.message.text.startsWith('/')) return next();
         
-        const escrow = await Escrow.findOne({
-          groupId: chatId.toString(),
-          tradeDetailsStep: 'step6_seller_address',
-          status: { $in: ['draft', 'awaiting_details'] }
-        });
+        const escrow = await findGroupEscrow(
+          chatId,
+          ['draft', 'awaiting_details'],
+          { tradeDetailsStep: 'step6_seller_address' }
+        );
         
         if (!escrow) {
           return next();
@@ -323,11 +324,11 @@ class EscrowBot {
         
         if (ctx.message.text.startsWith('/')) return next();
         
-        const escrow = await Escrow.findOne({
-          groupId: chatId.toString(),
-          tradeDetailsStep: 'step5_buyer_address',
-          status: { $in: ['draft', 'awaiting_details'] }
-        });
+        const escrow = await findGroupEscrow(
+          chatId,
+          ['draft', 'awaiting_details'],
+          { tradeDetailsStep: 'step5_buyer_address' }
+        );
         
         if (!escrow) {
           return next();
@@ -385,11 +386,11 @@ class EscrowBot {
         
         if (ctx.message.text.startsWith('/')) return next();
         
-        const escrow = await Escrow.findOne({
-          groupId: chatId.toString(),
-          status: { $in: ['awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'] },
-          transactionHashMessageId: { $exists: true }
-        });
+        const escrow = await findGroupEscrow(
+          chatId,
+          ['awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'],
+          { transactionHashMessageId: { $exists: true } }
+        );
         
         if (!escrow) {
           return next();
@@ -700,11 +701,11 @@ Use /release After Fund Transfer to Seller
         
         if (ctx.message.text.startsWith('/')) return next();
         
-        const escrow = await Escrow.findOne({
-          groupId: chatId.toString(),
-          tradeDetailsStep: { $in: ['step1_amount', 'step2_rate', 'step3_payment'] },
-          status: { $in: ['draft', 'awaiting_details'] }
-        });
+        const escrow = await findGroupEscrow(
+          chatId,
+          ['draft', 'awaiting_details'],
+          { tradeDetailsStep: { $in: ['step1_amount', 'step2_rate', 'step3_payment'] } }
+        );
         
         if (!escrow) {
           return next();
@@ -861,10 +862,10 @@ Use /release After Fund Transfer to Seller
         }
 
         // Find active escrow (including disputed trades so admins can resolve)
-        const escrow = await Escrow.findOne({
-          groupId: chatId.toString(),
-          status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
-        });
+        const escrow = await findGroupEscrow(
+          chatId,
+          ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed']
+        );
         
         // Silently ignore if no escrow found (command should only work in trade groups)
         if (!escrow) {
@@ -1027,18 +1028,20 @@ ${approvalNote}`;
         }
         
         // Check if user is admin
-        const isAdmin = config.getAllAdminUsernames().includes(ctx.from.username) || 
-                       config.getAllAdminIds().includes(String(userId));
+        const normalizedUsername = (ctx.from.username || '').toLowerCase();
+        const isAdmin = config.getAllAdminUsernames()
+          .some((name) => name && name.toLowerCase() === normalizedUsername) ||
+          config.getAllAdminIds().includes(String(userId));
         
         if (!isAdmin) {
           return ctx.reply('❌ Only admins can use this command.');
         }
         
         // Find active escrow (including disputed trades so admins can resolve)
-        const escrow = await Escrow.findOne({ 
-          groupId: chatId.toString(), 
-          status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
-        });
+        const escrow = await findGroupEscrow(
+          chatId,
+          ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed']
+        );
         
         // Silently ignore if no escrow found (command should only work in trade groups)
         if (!escrow) {
@@ -1145,10 +1148,10 @@ Address: <code>${escrow.sellerAddress}</code>
         }
         
         // Find active escrow
-        const escrow = await Escrow.findOne({
-          groupId: chatId.toString(),
-          status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release'] }
-        });
+        const escrow = await findGroupEscrow(
+          chatId,
+          ['deposited', 'in_fiat_transfer', 'ready_to_release']
+        );
         
         // Silently ignore if no escrow found (command should only work in trade groups)
         if (!escrow) {
