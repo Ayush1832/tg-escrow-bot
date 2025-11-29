@@ -131,14 +131,42 @@ async function joinRequestHandler(ctx) {
       return;
     }
 
-    escrow.allowedUserIds = updatedIds;
-    escrow.allowedUsernames = updatedUsernames;
-
-    // Track approvals
-    const approved = new Set(escrow.approvedUserIds || []);
-    approved.add(normalizedUserId);
-    escrow.approvedUserIds = Array.from(approved);
-    await escrow.save();
+    // Use atomic update to avoid race conditions
+    try {
+      await Escrow.findOneAndUpdate(
+        { _id: escrow._id },
+        {
+          $set: {
+            allowedUserIds: updatedIds,
+            allowedUsernames: updatedUsernames
+          },
+          $addToSet: {
+            approvedUserIds: normalizedUserId
+          }
+        },
+        { new: true }
+      );
+    } catch (saveError) {
+      // If atomic update fails, try one more time with atomic operation (handles edge cases)
+      try {
+        await Escrow.findOneAndUpdate(
+          { _id: escrow._id },
+          {
+            $set: {
+              allowedUserIds: updatedIds,
+              allowedUsernames: updatedUsernames
+            },
+            $addToSet: {
+              approvedUserIds: normalizedUserId
+            }
+          }
+        );
+      } catch (retryError) {
+        // If retry also fails, silently continue - the user was already approved via Telegram API
+        // The database will be updated on the next operation or when the other user joins
+        console.error('Error updating escrow (non-critical, user already approved):', retryError.message);
+      }
+    }
 
     // Re-fetch escrow to get latest state (important for race conditions when both users join simultaneously)
     const currentEscrow = await Escrow.findOne({ escrowId: escrow.escrowId });
@@ -200,9 +228,32 @@ async function joinRequestHandler(ctx) {
               approvedUserIdsSet.add(allowedId);
             }
           }
-          // Update escrow with any missing approved IDs
-          escrow.approvedUserIds = Array.from(approvedUserIdsSet);
-          await escrow.save();
+          // Update escrow with any missing approved IDs using atomic update
+          try {
+            await Escrow.findOneAndUpdate(
+              { _id: escrow._id },
+              {
+                $set: {
+                  approvedUserIds: Array.from(approvedUserIdsSet)
+                }
+              }
+            );
+          } catch (updateError) {
+            // If update fails, try one more atomic update
+            try {
+              await Escrow.findOneAndUpdate(
+                { _id: escrow._id },
+                {
+                  $set: {
+                    approvedUserIds: Array.from(approvedUserIdsSet)
+                  }
+                }
+              );
+            } catch (retryError) {
+              // Non-critical - the IDs will be updated on next operation
+              console.error('Error updating approvedUserIds (non-critical):', retryError.message);
+            }
+          }
         }
       }
     }
@@ -294,8 +345,24 @@ async function joinRequestHandler(ctx) {
             `⏳ Waiting for ${waitingLabel} to join...`,
             { parse_mode: 'HTML' }
           );
-          escrow.waitingForUserMessageId = waitingMsg.message_id;
-          await escrow.save();
+          // Use atomic update to set waiting message ID
+          try {
+            await Escrow.findOneAndUpdate(
+              { _id: escrow._id },
+              { $set: { waitingForUserMessageId: waitingMsg.message_id } }
+            );
+          } catch (updateError) {
+            // If update fails, try one more atomic update
+            try {
+              await Escrow.findOneAndUpdate(
+                { _id: escrow._id },
+                { $set: { waitingForUserMessageId: waitingMsg.message_id } }
+              );
+            } catch (retryError) {
+              // Non-critical - message ID will be set on next operation
+              console.error('Error setting waitingForUserMessageId (non-critical):', retryError.message);
+            }
+          }
         } else {
           // Fallback: If we can't identify the waiting participant, still send a generic message
           // This can happen if participant data is incomplete
@@ -304,8 +371,24 @@ async function joinRequestHandler(ctx) {
             `⏳ Waiting for the other participant to join...`,
             { parse_mode: 'HTML' }
           );
-          escrow.waitingForUserMessageId = waitingMsg.message_id;
-          await escrow.save();
+          // Use atomic update to set waiting message ID
+          try {
+            await Escrow.findOneAndUpdate(
+              { _id: escrow._id },
+              { $set: { waitingForUserMessageId: waitingMsg.message_id } }
+            );
+          } catch (updateError) {
+            // If update fails, try one more atomic update
+            try {
+              await Escrow.findOneAndUpdate(
+                { _id: escrow._id },
+                { $set: { waitingForUserMessageId: waitingMsg.message_id } }
+              );
+            } catch (retryError) {
+              // Non-critical - message ID will be set on next operation
+              console.error('Error setting waitingForUserMessageId (non-critical):', retryError.message);
+            }
+          }
         }
         
         // Set timeout to reset group if second user doesn't join within 5 minutes
@@ -453,10 +536,21 @@ async function joinRequestHandler(ctx) {
 
     // Mark the actual trade start time now that both parties are present
     try {
-      escrow.tradeStartTime = new Date();
-      await escrow.save();
+      await Escrow.findOneAndUpdate(
+        { _id: escrow._id },
+        { $set: { tradeStartTime: new Date() } }
+      );
     } catch (err) {
-      console.error('Failed to set trade start time:', err);
+      // If update fails, try one more atomic update
+      try {
+        await Escrow.findOneAndUpdate(
+          { _id: escrow._id },
+          { $set: { tradeStartTime: new Date() } }
+        );
+      } catch (retryError) {
+        // Non-critical - will be set on next operation
+        console.error('Failed to set trade start time (non-critical):', retryError.message);
+      }
     }
 
     // Send message that second user joined
@@ -475,8 +569,24 @@ async function joinRequestHandler(ctx) {
     if (escrow.waitingForUserMessageId) {
       try {
         await ctx.telegram.deleteMessage(chatId, escrow.waitingForUserMessageId);
-        escrow.waitingForUserMessageId = null;
-        await escrow.save();
+        // Use atomic update to clear waiting message ID
+        try {
+          await Escrow.findOneAndUpdate(
+            { _id: escrow._id },
+            { $unset: { waitingForUserMessageId: "" } }
+          );
+        } catch (updateError) {
+          // If update fails, try one more atomic update
+          try {
+            await Escrow.findOneAndUpdate(
+              { _id: escrow._id },
+              { $unset: { waitingForUserMessageId: "" } }
+            );
+          } catch (retryError) {
+            // Non-critical - will be cleared on next operation
+            console.error('Error clearing waitingForUserMessageId (non-critical):', retryError.message);
+          }
+        }
       } catch (_) {
         // Message may already be deleted, ignore
       }
@@ -505,8 +615,24 @@ async function joinRequestHandler(ctx) {
           { parse_mode: 'HTML' }
         );
         // Store message ID for later editing (don't delete - will be updated with completion details)
-        escrow.tradeStartedMessageId = startedMsg.message_id;
-        await escrow.save();
+        // Use atomic update to avoid race conditions
+        try {
+          await Escrow.findOneAndUpdate(
+            { _id: escrow._id },
+            { $set: { tradeStartedMessageId: startedMsg.message_id } }
+          );
+        } catch (updateError) {
+          // If update fails, try one more atomic update
+          try {
+            await Escrow.findOneAndUpdate(
+              { _id: escrow._id },
+              { $set: { tradeStartedMessageId: startedMsg.message_id } }
+            );
+          } catch (retryError) {
+            // Non-critical - will be set on next operation
+            console.error('Error setting tradeStartedMessageId (non-critical):', retryError.message);
+          }
+        }
       } catch (e) {
         console.error('Error sending trade started message:', e);
       }
@@ -553,8 +679,24 @@ async function joinRequestHandler(ctx) {
         }
       });
       // Store message ID for later editing
-      escrow.roleSelectionMessageId = roleSelectionMsg.message_id;
-      await escrow.save();
+      // Use atomic update to avoid race conditions
+      try {
+        await Escrow.findOneAndUpdate(
+          { _id: escrow._id },
+          { $set: { roleSelectionMessageId: roleSelectionMsg.message_id } }
+        );
+      } catch (updateError) {
+        // If update fails, try one more atomic update
+        try {
+          await Escrow.findOneAndUpdate(
+            { _id: escrow._id },
+            { $set: { roleSelectionMessageId: roleSelectionMsg.message_id } }
+          );
+        } catch (retryError) {
+          // Non-critical - will be set on next operation
+          console.error('Error setting roleSelectionMessageId (non-critical):', retryError.message);
+        }
+      }
     } catch (msgError) {
       console.error('Failed to send disclaimer/role selection:', msgError);
       // Non-critical - users can still proceed

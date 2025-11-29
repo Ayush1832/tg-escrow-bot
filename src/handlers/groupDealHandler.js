@@ -3,6 +3,7 @@ const GroupPool = require("../models/GroupPool");
 const GroupPoolService = require("../services/GroupPoolService");
 const config = require("../../config");
 const joinRequestHandler = require("./joinRequestHandler");
+const findGroupEscrow = require('../utils/findGroupEscrow');
 const {
   formatParticipant,
   formatParticipantByIndex,
@@ -20,6 +21,18 @@ module.exports = async (ctx) => {
     // Must be called from a group/supergroup
     if (chatId > 0) {
       return ctx.reply("❌ This command can only be used inside a group.");
+    }
+
+    // Check if this is a trade group (has an active escrow with this groupId)
+    // Use findGroupEscrow to check for any active escrow (any status)
+    const tradeGroupEscrow = await findGroupEscrow(
+      chatId,
+      null // No status filter - check for any escrow
+    );
+
+    if (tradeGroupEscrow) {
+      // This is a trade group, command should not work here
+      return ctx.reply("❌ This command can only be used in the main group, not in trade groups.");
     }
 
     const text = ctx.message?.text || "";

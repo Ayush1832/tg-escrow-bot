@@ -1454,6 +1454,42 @@ Thank you for using our safe escrow system.`;
             'completed',
             releaseResult?.transactionHash || null
           );
+          
+          // Schedule automatic user removal after 5 minutes (same as refund)
+          const settleAndRecycleGroup = async (escrow, telegram) => {
+            try {
+              const group = await GroupPool.findOne({ 
+                assignedEscrowId: escrow.escrowId 
+              });
+              
+              if (group) {
+                const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, telegram);
+                
+                if (allUsersRemoved) {
+                  const freshEscrow = await Escrow.findOne({ escrowId: escrow.escrowId });
+                  if (freshEscrow && freshEscrow.inviteLink) {
+                    freshEscrow.inviteLink = null;
+                    await freshEscrow.save();
+                  }
+                  
+                  await GroupPoolService.refreshInviteLink(group.groupId, telegram);
+                  
+                  group.status = 'available';
+                  group.assignedEscrowId = null;
+                  group.assignedAt = null;
+                  group.completedAt = null;
+                  await group.save();
+                }
+              }
+            } catch (error) {
+              console.error('Error settling and recycling group:', error);
+            }
+          };
+          
+          // Delay user removal by 5 minutes (300,000 milliseconds)
+          setTimeout(async () => {
+            await settleAndRecycleGroup(finalEscrow, ctx.telegram);
+          }, 5 * 60 * 1000);
         }
         
       } catch (releaseError) {
@@ -1754,8 +1790,12 @@ ${approvalNote}`;
               : `<code>${releaseResult.transactionHash}</code>`
             : 'Not available';
           
+          // Reload escrow to get latest status after save
+          const reloadedEscrow = await Escrow.findById(updatedEscrow._id);
+          const isActuallyFullRelease = reloadedEscrow.status === 'completed';
+          
           // Only show completion message and close trade option for full release
-          if (!isPartialRelease) {
+          if (isActuallyFullRelease) {
             const completionText = `🎉 <b>Deal Complete!</b> ✅
 
 ⏱️ <b>Time Taken:</b> ${minutesTaken} mins
@@ -1806,6 +1846,42 @@ Thank you for using our safe escrow system.`;
               'completed',
               releaseResult?.transactionHash || null
             );
+            
+            // Schedule automatic user removal after 5 minutes (same as refund)
+            const settleAndRecycleGroup = async (escrow, telegram) => {
+              try {
+                const group = await GroupPool.findOne({ 
+                  assignedEscrowId: escrow.escrowId 
+                });
+                
+                if (group) {
+                  const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, telegram);
+                  
+                  if (allUsersRemoved) {
+                    const freshEscrow = await Escrow.findOne({ escrowId: escrow.escrowId });
+                    if (freshEscrow && freshEscrow.inviteLink) {
+                      freshEscrow.inviteLink = null;
+                      await freshEscrow.save();
+                    }
+                    
+                    await GroupPoolService.refreshInviteLink(group.groupId, telegram);
+                    
+                    group.status = 'available';
+                    group.assignedEscrowId = null;
+                    group.assignedAt = null;
+                    group.completedAt = null;
+                    await group.save();
+                  }
+                }
+              } catch (error) {
+                console.error('Error settling and recycling group:', error);
+              }
+            };
+            
+            // Delay user removal by 5 minutes (300,000 milliseconds)
+            setTimeout(async () => {
+              await settleAndRecycleGroup(reloadedEscrow, ctx.telegram);
+            }, 5 * 60 * 1000);
           } else {
             // Partial release: send success message
             const partialReleaseText = `✅ Partial Release Complete!
@@ -2302,7 +2378,7 @@ Thank you for using our safe escrow system.`;
             console.error('Error sending refund completion summary:', sendError);
           }
           
-          // Remove users and recycle group
+          // Remove users and recycle group after 5 minutes delay
           const settleAndRecycleGroup = async (escrow, telegram) => {
             try {
               const group = await GroupPool.findOne({ 
@@ -2333,7 +2409,10 @@ Thank you for using our safe escrow system.`;
             }
           };
           
-          await settleAndRecycleGroup(finalEscrow, ctx.telegram);
+          // Delay user removal by 5 minutes (300,000 milliseconds)
+          setTimeout(async () => {
+            await settleAndRecycleGroup(finalEscrow, ctx.telegram);
+          }, 5 * 60 * 1000);
         }
         
       } catch (error) {
@@ -2484,8 +2563,44 @@ Trade completed successfully.`;
         );
         
         
-        // Note: Group recycling will happen after buyer confirms receipt and both parties close the trade
-        // This is handled in the close_trade callback with a 5-minute delay
+        // Reload escrow to get latest state
+        const finalEscrowForFiat = await Escrow.findById(escrow._id);
+        
+        // Schedule automatic user removal after 5 minutes (same as other completion flows)
+        const settleAndRecycleGroup = async (escrow, telegram) => {
+          try {
+            const group = await GroupPool.findOne({ 
+              assignedEscrowId: escrow.escrowId 
+            });
+            
+            if (group) {
+              const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, telegram);
+              
+              if (allUsersRemoved) {
+                const freshEscrow = await Escrow.findOne({ escrowId: escrow.escrowId });
+                if (freshEscrow && freshEscrow.inviteLink) {
+                  freshEscrow.inviteLink = null;
+                  await freshEscrow.save();
+                }
+                
+                await GroupPoolService.refreshInviteLink(group.groupId, telegram);
+                
+                group.status = 'available';
+                group.assignedEscrowId = null;
+                group.assignedAt = null;
+                group.completedAt = null;
+                await group.save();
+              }
+            }
+          } catch (error) {
+            console.error('Error settling and recycling group:', error);
+          }
+        };
+        
+        // Delay user removal by 5 minutes (300,000 milliseconds)
+        setTimeout(async () => {
+          await settleAndRecycleGroup(finalEscrowForFiat, ctx.telegram);
+        }, 5 * 60 * 1000);
   } catch (error) {
         console.error('Auto-release error:', error);
         await ctx.reply('❌ Error releasing funds. Please contact admin.');
@@ -2666,6 +2781,45 @@ Approved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escro
           
           escrow.closeTradeMessageId = closeMsg.message_id;
           await escrow.save();
+          
+          // Reload escrow to get latest state
+          const finalEscrow = await Escrow.findById(escrow._id);
+          
+          // Schedule automatic user removal after 5 minutes (same as refund)
+          const settleAndRecycleGroup = async (escrow, telegram) => {
+            try {
+              const group = await GroupPool.findOne({ 
+                assignedEscrowId: escrow.escrowId 
+              });
+              
+              if (group) {
+                const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, telegram);
+                
+                if (allUsersRemoved) {
+                  const freshEscrow = await Escrow.findOne({ escrowId: escrow.escrowId });
+                  if (freshEscrow && freshEscrow.inviteLink) {
+                    freshEscrow.inviteLink = null;
+                    await freshEscrow.save();
+                  }
+                  
+                  await GroupPoolService.refreshInviteLink(group.groupId, telegram);
+                  
+                  group.status = 'available';
+                  group.assignedEscrowId = null;
+                  group.assignedAt = null;
+                  group.completedAt = null;
+                  await group.save();
+                }
+              }
+            } catch (error) {
+              console.error('Error settling and recycling group:', error);
+            }
+          };
+          
+          // Delay user removal by 5 minutes (300,000 milliseconds)
+          setTimeout(async () => {
+            await settleAndRecycleGroup(finalEscrow, ctx.telegram);
+          }, 5 * 60 * 1000);
       } catch (error) {
           console.error('Error executing transaction:', error);
           await ctx.reply('❌ Error executing transaction. Please try again or contact support.');

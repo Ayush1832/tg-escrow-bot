@@ -1,6 +1,7 @@
 const Escrow = require('../models/Escrow');
 const DisputeService = require('../services/DisputeService');
 const config = require('../../config');
+const findGroupEscrow = require('../utils/findGroupEscrow');
 
 module.exports = async (ctx) => {
   try {
@@ -12,14 +13,15 @@ module.exports = async (ctx) => {
       return ctx.reply('❌ This command can only be used in a trade group.');
     }
 
-    // Find active escrow in this group
-    const escrow = await Escrow.findOne({
-      groupId: chatId.toString()
-    });
+    // Find active escrow in this group (use findGroupEscrow to get the correct escrow)
+    let escrow = await findGroupEscrow(
+      chatId,
+      ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed']
+    );
 
-    // Silently ignore if no escrow found (command should only work in trade groups)
+    // Return error if no escrow found (don't silently ignore)
     if (!escrow) {
-      return;
+      return ctx.reply('❌ No active escrow found in this group. This command can only be used in trade groups.');
     }
 
     // Check if user is authorized (buyer, seller, or admin)
@@ -48,9 +50,24 @@ module.exports = async (ctx) => {
       );
     }
 
-    // Mark escrow as disputed
-    escrow.status = 'disputed';
-    await escrow.save();
+    // Mark escrow as disputed using atomic update to prevent race conditions
+    try {
+      const updatedEscrow = await Escrow.findOneAndUpdate(
+        { _id: escrow._id },
+        { $set: { status: 'disputed' } },
+        { new: true }
+      );
+      
+      if (!updatedEscrow) {
+        throw new Error('Failed to update escrow status');
+      }
+      
+      // Use the updated escrow for notification
+      escrow = updatedEscrow;
+    } catch (saveError) {
+      console.error('Error updating escrow status to disputed:', saveError);
+      return ctx.reply('❌ Failed to update escrow status. Please try again or contact an admin.');
+    }
     
     // Send dispute notification
     const result = await DisputeService.sendDisputeNotification(
@@ -70,11 +87,15 @@ module.exports = async (ctx) => {
         { parse_mode: 'HTML' }
       );
     } else {
-      // Escape error message for HTML display
+      // Even if notification fails, the status is already updated
+      // Log the error but still confirm to user that dispute was recorded
+      console.error('Dispute notification failed but status updated:', result.error);
       const escapeHtml = (text) => String(text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
       await ctx.reply(
-        '❌ Failed to report dispute. Please contact an admin directly.\n\n' +
-        'Error: ' + escapeHtml(result.error || 'Unknown error'),
+        '⚠️ <b>Dispute status updated, but notification failed.</b>\n\n' +
+        'Your dispute has been recorded. Please contact an admin directly.\n\n' +
+        '<b>Reason:</b> ' + escapeHtml(reason) + '\n\n' +
+        '<b>Error:</b> ' + escapeHtml(result.error || 'Unknown error'),
         { parse_mode: 'HTML' }
       );
     }
