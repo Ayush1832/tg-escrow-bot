@@ -356,13 +356,13 @@ ${lastTradeSummary}`;
     // Optionally append top buyers/sellers sections
     if (extraStats && (extraStats.topBuyers?.length || extraStats.topSellers?.length)) {
       const topBuyersSection = this.formatLeaderboardSection(
-        "\n👑 <b>Top Buyers (by volume)</b>",
+        "\n👑 <b>Top Buyers</b>",
         extraStats.topBuyers || [],
         (u) => u.totalBoughtVolume
       );
 
       const topSellersSection = this.formatLeaderboardSection(
-        "\n💰 <b>Top Sellers (by volume)</b>",
+        "\n💰 <b>Top Sellers</b>",
         extraStats.topSellers || [],
         (u) => u.totalSoldVolume
       );
