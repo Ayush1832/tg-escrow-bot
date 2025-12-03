@@ -1316,7 +1316,11 @@ This is the current available balance for this trade.`;
         }
         
         const topUsers = await UserStatsService.getLeaderboard(5);
-        const leaderboardMessage = UserStatsService.formatLeaderboard(topUsers);
+        const { topBuyers, topSellers } = await UserStatsService.getTopBuyersAndSellers(3);
+        const leaderboardMessage = UserStatsService.formatLeaderboard(topUsers, {
+          topBuyers,
+          topSellers
+        });
         await ctx.reply(leaderboardMessage, { parse_mode: 'HTML' });
       } catch (error) {
         console.error('Error in leaderboard command:', error);

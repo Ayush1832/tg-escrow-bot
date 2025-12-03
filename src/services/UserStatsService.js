@@ -304,7 +304,39 @@ ${lastTradeSummary}`;
       .lean();
   }
 
-  formatLeaderboard(users) {
+  /**
+   * Get top buyers and sellers by volume
+   */
+  async getTopBuyersAndSellers(limit = 3) {
+    const [topBuyers, topSellers] = await Promise.all([
+      User.find({ totalBoughtVolume: { $gt: 0 } })
+        .sort({ totalBoughtVolume: -1 })
+        .limit(limit)
+        .lean(),
+      User.find({ totalSoldVolume: { $gt: 0 } })
+        .sort({ totalSoldVolume: -1 })
+        .limit(limit)
+        .lean(),
+    ]);
+
+    return { topBuyers, topSellers };
+  }
+
+  formatLeaderboardSection(title, users, getAmountFn) {
+    if (!users || users.length === 0) {
+      return `${title}\nNo data yet.`;
+    }
+
+    const lines = users.map((user, index) => {
+      const label = this.formatUserLabel(user.username, user.telegramId);
+      const amount = this.formatAmount(getAmountFn(user) || 0);
+      return `${index + 1}. ${label} – ${amount} USDT`;
+    });
+
+    return `${title}\n${lines.join("\n")}`;
+  }
+
+  formatLeaderboard(users, extraStats = null) {
     if (!users || users.length === 0) {
       return "🏆 <b>Leaderboard</b>\n\nNo completed trades yet.";
     }
@@ -319,7 +351,26 @@ ${lastTradeSummary}`;
       }. ${label} – ${totalVolume} USDT (Bought ${bought} / Sold ${sold})`;
     });
 
-    return `🏆 <b>Top Traders</b>\n\n${lines.join("\n")}`;
+    let message = `🏆 <b>Top Traders</b>\n\n${lines.join("\n")}`;
+
+    // Optionally append top buyers/sellers sections
+    if (extraStats && (extraStats.topBuyers?.length || extraStats.topSellers?.length)) {
+      const topBuyersSection = this.formatLeaderboardSection(
+        "\n👑 <b>Top Buyers (by volume)</b>",
+        extraStats.topBuyers || [],
+        (u) => u.totalBoughtVolume
+      );
+
+      const topSellersSection = this.formatLeaderboardSection(
+        "\n💰 <b>Top Sellers (by volume)</b>",
+        extraStats.topSellers || [],
+        (u) => u.totalSoldVolume
+      );
+
+      message += `\n\n${topBuyersSection}\n\n${topSellersSection}`;
+    }
+
+    return message;
   }
 }
 
