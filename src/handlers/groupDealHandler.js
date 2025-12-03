@@ -324,6 +324,9 @@ module.exports = async (ctx) => {
     const inviteMsg = await ctx.replyWithPhoto(images.DEAL_ROOM_CREATED, {
       caption: message,
       parse_mode: "HTML",
+      // Protect this message so it cannot be forwarded or saved
+      // This prevents users from forwarding the private room link and scamming others
+      protect_content: true,
     });
     // Save origin message id to remove later once both join
     try {

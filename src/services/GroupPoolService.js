@@ -72,39 +72,64 @@ class GroupPoolService {
         throw new Error('Telegram API instance is required for generating invite links');
       }
 
-      // Find the group in pool
+      // Find the group in pool (reload to get latest state)
       const group = await GroupPool.findOne({ groupId });
       if (!group) {
         throw new Error('Group not found in pool');
       }
 
       const chatId = String(groupId);
+      
+      // If forceRefresh is true, ensure we clear any existing link first
+      // This is a safety measure in case the link wasn't cleared in refreshInviteLink
+      // NOTE: refreshInviteLink() already clears the link before calling this function,
+      // but this check ensures we handle any edge cases or race conditions
+      if (options.forceRefresh && group.inviteLink) {
+        try {
+          await telegram.revokeChatInviteLink(chatId, group.inviteLink);
+        } catch (revokeError) {
+          // Link might already be revoked - ignore
+        }
+        group.inviteLink = null;
+        group.inviteLinkHasJoinRequest = false;
+        await group.save();
+      }
 
       // IMPORTANT: If join request approval is required, we MUST create a new link with creates_join_request: true
       // Primary invite links (from exportChatInviteLink) do NOT support join request approval
       // They allow direct joining without verification, which is a security issue
       if (options.creates_join_request === true) {
         // If we already have a link with join request approval, try to reuse it
-        // This prevents invalidating links that were just created during recycling
-        // IMPORTANT: Links with join request approval are created after recycling (after users are unbanned)
-        // So reusing them is safe and allows previously removed users to rejoin
-        if (group.inviteLink && group.inviteLinkHasJoinRequest) {
-          // Verify the link is still valid by checking if we can access the chat
+        // But if refreshInviteLink was called (forceRefresh=true), we should always create a new link
+        // Only reuse if explicitly requested (not during refresh)
+        // NOTE: When forceRefresh=true, group.inviteLink should be null (cleared above or in refreshInviteLink),
+        // so this condition will be false and we'll skip to creating a new link
+        if (group.inviteLink && group.inviteLinkHasJoinRequest && !options.forceRefresh) {
+          // Verify the chat is accessible - if chat is accessible, assume link is valid
+          // Note: We can't directly validate invite links via API without the invite link object
+          // So we verify chat accessibility and trust that if chat is accessible, link should work
+          // If link is expired, users will get an error and we'll refresh it when needed
           try {
             await telegram.getChat(chatId);
-            // Link exists and chat is accessible - reuse it
-            // This is important: reusing the link allows previously removed users to rejoin
-            // The link was created after recycling (after users were unbanned), so it should work
+            // Chat is accessible - reuse the link
+            // If the link is expired, users will report it and we'll refresh it
             return group.inviteLink;
           } catch (verifyError) {
-            // Link might be invalid or chat might have issues
-            // Clear it and create a new one
+            // Chat might have issues - clear link and create new one
+            console.log(`Chat verification failed for ${groupId}: ${verifyError.message}`);
+            try {
+              if (group.inviteLink) {
+                await telegram.revokeChatInviteLink(chatId, group.inviteLink);
+              }
+            } catch (revokeError) {
+              // Ignore revoke errors
+            }
             group.inviteLink = null;
             group.inviteLinkHasJoinRequest = false;
             await group.save();
           }
         } else if (group.inviteLink) {
-          // We have a link but it doesn't have join request approval
+          // We have a link but it doesn't have join request approval or forceRefresh is true
           // Revoke it and create a new one with join request approval
           try {
             await telegram.revokeChatInviteLink(chatId, group.inviteLink);
@@ -765,6 +790,7 @@ class GroupPoolService {
         } catch (revokeError) {
           // Link might already be revoked or invalid - continue to create new one
           // Error is non-critical - we'll create a new link anyway
+          console.log(`Could not revoke old invite link for ${groupId}: ${revokeError.message}`);
         }
         group.inviteLink = null;
         group.inviteLinkHasJoinRequest = false;
@@ -778,8 +804,11 @@ class GroupPoolService {
 
       // Create a new permanent invite link with join request approval
       // This new link will work for previously removed users after they are unbanned
-      // We force creation by passing creates_join_request and ensuring no existing link
-      const newLink = await this.generateInviteLink(groupId, telegram, { creates_join_request: true });
+      // We force creation by passing creates_join_request and forceRefresh flag
+      const newLink = await this.generateInviteLink(groupId, telegram, { 
+        creates_join_request: true,
+        forceRefresh: true // Force creation of new link, don't reuse existing
+      });
       
       // Verify the link was created and saved correctly
       const updatedGroup = await GroupPool.findOne({ groupId });
@@ -798,6 +827,8 @@ class GroupPoolService {
       
       return newLink;
     } catch (error) {
+      // Log error for debugging
+      console.error(`Error refreshing invite link for ${groupId}:`, error);
       // Non-critical error - group can still be recycled, link will be created when needed
       return null;
     }
