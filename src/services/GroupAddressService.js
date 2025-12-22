@@ -9,9 +9,6 @@ class GroupAddressService {
   }
 
   init() {
-    // Ensure private key has 0x prefix
-    // Note: HOT_WALLET_PRIVATE_KEY is used for address generation seed, but actual addresses
-    // are derived deterministically from groupId + token + network, not from this key
     if (!config.HOT_WALLET_PRIVATE_KEY) {
       console.warn('HOT_WALLET_PRIVATE_KEY not set in config. Address generation will still work.');
       this.masterPrivateKey = null;
@@ -22,7 +19,6 @@ class GroupAddressService {
       ? config.HOT_WALLET_PRIVATE_KEY 
       : '0x' + config.HOT_WALLET_PRIVATE_KEY;
     
-    // Store the private key for HD derivation (currently not used, but kept for future use)
     this.masterPrivateKey = privateKey;
   }
 
@@ -35,19 +31,14 @@ class GroupAddressService {
     const normalizedNetwork = (network || 'BSC').toUpperCase();
     const cacheKey = `${groupId}_${normalizedToken}_${normalizedNetwork}`;
 
-    // Check cache first
     if (this.addressCache.has(cacheKey)) {
       return this.addressCache.get(cacheKey);
     }
 
-    // Generate deterministic address using keccak256 hash
-    // Combine groupId, token, and network to create unique seed
     const seed = `${groupId}_${normalizedToken}_${normalizedNetwork}`;
     const hash = ethers.keccak256(ethers.toUtf8Bytes(seed));
     
-    // Use the hash to derive a private key (deterministic)
-    // Take first 32 bytes of hash as private key
-    const derivedPrivateKey = '0x' + hash.slice(2, 66); // 32 bytes = 64 hex chars
+    const derivedPrivateKey = '0x' + hash.slice(2, 66);
     
     // Create wallet from derived private key
     const wallet = new ethers.Wallet(derivedPrivateKey);

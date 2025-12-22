@@ -4,37 +4,111 @@ const Contract = require('../models/Contract');
 const BlockchainService = require('../services/BlockchainService');
 const GroupPoolService = require('../services/GroupPoolService');
 const AddressAssignmentService = require('../services/AddressAssignmentService');
-// TradeTimeoutService removed - no longer needed
 const { isAdmin } = require('../middleware/adminAuth');
 const config = require('../../config');
+const { ethers } = require('ethers');
 
 /**
- * Admin stats - view escrow statistics
+ * Format a number to avoid scientific notation and ensure proper decimal places
+ * Handles very large numbers by converting scientific notation to fixed decimal format
+ * @param {number|string} num - The number to format
+ * @param {number} decimals - Number of decimal places (default: 2)
+ * @returns {string} Formatted number string
  */
+function formatNumber(num, decimals = 2) {
+  if (num === null || num === undefined || isNaN(num)) {
+    return '0.' + '0'.repeat(decimals);
+  }
+  
+  let value = typeof num === 'string' ? parseFloat(num) : num;
+  
+  if (isNaN(value)) {
+    return '0.' + '0'.repeat(decimals);
+  }
+  
+  if (value === 0) {
+    return '0.' + '0'.repeat(decimals);
+  }
+  
+  const sign = value < 0 ? '-' : '';
+  const absValue = Math.abs(value);
+  const numStr = absValue.toString();
+  
+  let fixedStr;
+  if (numStr.includes('e') || numStr.includes('E')) {
+    const match = numStr.toLowerCase().match(/([\d.]+)e([+-]?\d+)/);
+    if (match) {
+      const base = parseFloat(match[1]);
+      const exponent = parseInt(match[2]);
+      const baseStr = Math.abs(base).toString().replace('.', '');
+      const baseDecimalPos = Math.abs(base).toString().indexOf('.');
+      const baseDecimals = baseDecimalPos === -1 ? 0 : (Math.abs(base).toString().length - baseDecimalPos - 1);
+      
+      let resultDigits = baseStr;
+      let decimalPosition = baseDecimals;
+      
+      if (exponent > 0) {
+        decimalPosition = baseDecimals - exponent;
+        if (decimalPosition <= 0) {
+          resultDigits = baseStr + '0'.repeat(-decimalPosition);
+          decimalPosition = -1;
+        }
+      } else if (exponent < 0) {
+        decimalPosition = baseDecimals - exponent;
+        if (decimalPosition >= resultDigits.length) {
+          resultDigits = '0'.repeat(decimalPosition - resultDigits.length) + resultDigits;
+          decimalPosition = resultDigits.length;
+        }
+      }
+      
+      if (decimalPosition === -1 || decimalPosition >= resultDigits.length) {
+        fixedStr = resultDigits;
+      } else {
+        fixedStr = resultDigits.substring(0, decimalPosition) + '.' + resultDigits.substring(decimalPosition);
+      }
+    } else {
+      fixedStr = absValue.toFixed(decimals);
+    }
+  } else {
+    fixedStr = absValue.toFixed(decimals);
+  }
+  
+  const parts = fixedStr.split('.');
+  let integerPart = parts[0] || '0';
+  let fractionalPart = parts[1] || '';
+  
+  if (fractionalPart.length < decimals) {
+    fractionalPart = fractionalPart + '0'.repeat(decimals - fractionalPart.length);
+  } else if (fractionalPart.length > decimals) {
+    fractionalPart = fractionalPart.substring(0, decimals);
+  }
+  
+  integerPart = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const formatted = fractionalPart ? `${integerPart}.${fractionalPart}` : integerPart;
+  
+  return sign + formatted;
+}
+
 async function adminStats(ctx) {
   try {
     if (!isAdmin(ctx)) {
       return ctx.reply('❌ Access denied. Admin privileges required.');
     }
 
-    // Count active escrows (ongoing/pending trades)
     const activeEscrows = await Escrow.countDocuments({ 
       status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'] }
     });
 
-    // Only count fully completed escrows (with transaction hashes proving actual completion)
     const completedEscrows = await Escrow.countDocuments({ 
       status: 'completed',
       releaseTransactionHash: { $exists: true, $ne: null, $ne: '' }
     });
 
-    // Only count fully refunded escrows (with transaction hashes proving actual refund)
     const refundedEscrows = await Escrow.countDocuments({ 
       status: 'refunded',
       refundTransactionHash: { $exists: true, $ne: null, $ne: '' }
     });
 
-    // Total = only completed + refunded (fully finished trades)
     const totalEscrows = completedEscrows + refundedEscrows;
 
     const statsMessage = `
@@ -55,9 +129,6 @@ async function adminStats(ctx) {
   }
 }
 
-/**
- * Admin group pool management
- */
 async function adminGroupPool(ctx) {
   try {
     const stats = await GroupPoolService.getPoolStats();
@@ -86,9 +157,6 @@ async function adminGroupPool(ctx) {
   }
 }
 
-/**
- * Add group to pool
- */
 async function adminPoolAdd(ctx) {
   try {
     const groupId = ctx.message.text.split(' ')[1];
@@ -107,9 +175,6 @@ async function adminPoolAdd(ctx) {
   }
 }
 
-/**
- * List groups in pool
- */
 async function adminPoolList(ctx) {
   try {
     const availableGroups = await GroupPoolService.getGroupsByStatus('available');
@@ -262,7 +327,6 @@ async function adminInitAddresses(ctx) {
 
     const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
     
-    // Find all deployed EscrowVault contracts
     const contracts = await Contract.find({ 
       name: 'EscrowVault',
       status: 'deployed'
@@ -277,7 +341,6 @@ async function adminInitAddresses(ctx) {
       );
     }
 
-    // Group contracts by network and filter by fee
     const contractsByNetwork = {};
     const requiredTokens = ['USDT', 'USDC'];
     
@@ -291,7 +354,6 @@ async function adminInitAddresses(ctx) {
     let message = `📋 **CONTRACT VERIFICATION**\n\n`;
     message += `💰 Fee Percent: ${desiredFeePercent}%\n\n`;
     
-    // Check BSC contracts specifically
     const bscContracts = contracts.filter(c => c.network === 'BSC' && c.feePercent === desiredFeePercent);
     const bscTokens = bscContracts.map(c => c.token);
     
@@ -306,7 +368,6 @@ async function adminInitAddresses(ctx) {
       });
     }
     
-    // Check for missing required tokens
     const missingTokens = requiredTokens.filter(token => !bscTokens.includes(token));
     if (missingTokens.length > 0) {
       message += `\n⚠️ **Missing Tokens:** ${missingTokens.join(', ')}\n`;
@@ -315,7 +376,6 @@ async function adminInitAddresses(ctx) {
       message += `\n✅ All required tokens (${requiredTokens.join(', ')}) are deployed.\n`;
     }
 
-    // Show contracts for other networks if any
     const otherNetworks = Object.keys(contractsByNetwork).filter(n => n !== 'BSC');
     if (otherNetworks.length > 0) {
       message += `\n📡 **Other Networks:**\n`;
@@ -335,13 +395,6 @@ async function adminInitAddresses(ctx) {
   }
 }
 
-/**
- * Admin command to show timeout statistics
- */
-
-/**
- * Admin command to cleanup abandoned addresses
- */
 async function adminCleanupAddresses(ctx) {
   try {
     if (!isAdmin(ctx)) {
@@ -441,6 +494,7 @@ async function adminHelp(ctx) {
 • \`/admin_address_pool\` - View address pool status
 • \`/admin_init_addresses\` - Verify deployed EscrowVault contracts
 • \`/admin_cleanup_addresses\` - Cleanup abandoned addresses
+• \`/admin_withdraw_bsc_usdt\` - Withdraw excess USDT from BSC escrow contracts to admin wallet (private chat only)
 
 📋 **AUTOMATIC FEATURES:**
 ✅ **Group Recycling**: Automatic 15-minute delayed recycling after trade completion
@@ -481,52 +535,52 @@ async function adminTradeStats(ctx) {
       return ctx.reply('❌ Access denied. Admin privileges required.');
     }
 
-    // Get all fully completed and refunded escrows
-    // Include all trades marked as completed/refunded (we'll filter for valid amounts later)
-    // Prefer trades with transaction hashes, but include all completed/refunded trades
     const completedEscrows = await Escrow.find({
       status: { $in: ['completed', 'refunded'] }
     });
 
-    // Get all contracts to understand fee structures
     const Contract = require('../models/Contract');
     const contracts = await Contract.find({ name: 'EscrowVault' });
 
-    // Helper function to get the settled amount for a completed/refunded escrow
-    // For completed/refunded trades, deposit amounts are zeroed, so we use quantity as source of truth
     const getSettledAmount = (escrow) => {
-      // For completed/refunded trades, use quantity (the original agreed amount)
-      // This is the most reliable since deposit amounts are zeroed after completion
+      let amount = 0;
+      
       if (escrow.status === 'completed' || escrow.status === 'refunded') {
         const q = parseFloat(escrow.quantity);
         if (!isNaN(q) && q > 0) {
-          return q;
+          amount = q;
         }
       }
-      // Fallback for edge cases (shouldn't happen for completed/refunded with transaction hashes)
+      
+      if (amount === 0) {
       const c = parseFloat(escrow.confirmedAmount);
       const d = parseFloat(escrow.depositAmount);
       const q = parseFloat(escrow.quantity);
-      return (!isNaN(c) && c > 0)
+        amount = (!isNaN(c) && c > 0)
         ? c
         : (!isNaN(d) && d > 0)
           ? d
           : (!isNaN(q) && q > 0)
             ? q
             : 0;
+      }
+      
+      if (amount > 1e15) {
+        const token = escrow.token || 'USDT';
+        const chain = escrow.chain || 'BSC';
+        const decimals = BlockchainService.getTokenDecimals(token, chain);
+        amount = amount / Math.pow(10, decimals);
+      }
+      
+      return amount;
     };
 
-    // Filter out escrows with zero or invalid amounts (only count actual completed trades)
-    // Also prefer trades with transaction hashes (proving actual blockchain completion)
-    // This must be done before the fee percentage loop
     const validCompletedEscrows = completedEscrows.filter(escrow => {
       const amt = getSettledAmount(escrow);
       if (amt <= 0) {
-        return false; // Exclude escrows with invalid amounts
+        return false;
       }
       
-      // Prefer trades with transaction hashes (more reliable)
-      // But include all trades with valid amounts to ensure we don't miss any
       const hasReleaseHash = escrow.status === 'completed' && 
                              escrow.releaseTransactionHash && 
                              escrow.releaseTransactionHash.trim() !== '';
@@ -534,11 +588,9 @@ async function adminTradeStats(ctx) {
                             escrow.refundTransactionHash && 
                             escrow.refundTransactionHash.trim() !== '';
       
-      // Include if it has a transaction hash OR if it has a valid quantity (for edge cases)
       return hasReleaseHash || hasRefundHash || (escrow.quantity && escrow.quantity > 0);
     });
 
-    // Group contracts by fee percentage
     const contractsByFee = {};
     contracts.forEach(contract => {
       const feePercent = contract.feePercent || 0;
@@ -548,7 +600,6 @@ async function adminTradeStats(ctx) {
       contractsByFee[feePercent].push(contract);
     });
 
-    // Get escrow statistics by fee percentage
     const statsByFee = {};
     const allTokens = new Set();
     const allNetworks = new Set();
@@ -556,17 +607,12 @@ async function adminTradeStats(ctx) {
     for (const [feePercent, contractList] of Object.entries(contractsByFee)) {
       const contractAddresses = contractList.map(c => c.address.toLowerCase());
       
-      // Find escrows that used contracts with this fee percentage
-      // Use validCompletedEscrows instead of completedEscrows to ensure we only count valid trades
       const escrowsWithFee = validCompletedEscrows.filter(escrow => {
-        // This is a simplified approach - in reality, you'd need to track which contract was used
-        // For now, we'll use the current ESCROW_FEE_PERCENT from config
         const currentFee = Number(config.ESCROW_FEE_PERCENT || 0);
         return currentFee.toString() === feePercent;
       });
 
       const totalTrades = escrowsWithFee.length;
-      // Use getSettledAmount helper for consistent amount calculation
       const totalAmount = escrowsWithFee.reduce((sum, escrow) => {
         return sum + getSettledAmount(escrow);
       }, 0);
@@ -594,7 +640,6 @@ async function adminTradeStats(ctx) {
       };
     }
 
-    // Calculate overall statistics using only valid completed escrows
     const totalTrades = validCompletedEscrows.length;
     const totalAmount = validCompletedEscrows.reduce((sum, escrow) => {
       return sum + getSettledAmount(escrow);
@@ -603,40 +648,37 @@ async function adminTradeStats(ctx) {
     const completedCount = validCompletedEscrows.filter(e => e.status === 'completed').length;
     const refundedCount = validCompletedEscrows.filter(e => e.status === 'refunded').length;
 
-    // Build the statistics message
     let statsMessage = `📊 **COMPREHENSIVE TRADE STATISTICS**
 
 🎯 **OVERALL SUMMARY:**
 • **Total Trades:** ${totalTrades}
-• **Total Volume:** ${totalAmount.toFixed(2)} tokens
+• **Total Volume:** ${formatNumber(totalAmount)} tokens
 • **Completed:** ${completedCount} trades
 • **Refunded:** ${refundedCount} trades
-• **Success Rate:** ${totalTrades > 0 ? ((completedCount / totalTrades) * 100).toFixed(1) : 0}%
+• **Success Rate:** ${totalTrades > 0 ? formatNumber((completedCount / totalTrades) * 100, 1) : 0}%
 
 📈 **BY FEE PERCENTAGE:**`;
 
-    // Add statistics for each fee percentage
     const sortedFees = Object.keys(statsByFee).sort((a, b) => parseFloat(a) - parseFloat(b));
     
     for (const feePercent of sortedFees) {
       const stats = statsByFee[feePercent];
       const feeDisplay = feePercent === '0' ? '0% (Free)' : `${feePercent}%`;
+      const avgPerTrade = stats.totalTrades > 0 ? stats.totalAmount / stats.totalTrades : 0;
       
       statsMessage += `\n\n💰 **${feeDisplay} FEE STRUCTURE:**
 • **Trades:** ${stats.totalTrades}
-• **Volume:** ${stats.totalAmount.toFixed(2)} tokens
-• **Avg per Trade:** ${stats.totalTrades > 0 ? (stats.totalAmount / stats.totalTrades).toFixed(2) : 0} tokens`;
+• **Volume:** ${formatNumber(stats.totalAmount)} tokens
+• **Avg per Trade:** ${formatNumber(avgPerTrade)} tokens`;
 
-      // Add token breakdown if there are trades
       if (stats.totalTrades > 0) {
         statsMessage += `\n• **Token Breakdown:**`;
         Object.entries(stats.tokenBreakdown).forEach(([token, data]) => {
-          statsMessage += `\n  - ${token}: ${data.count} trades, ${data.amount.toFixed(2)} tokens`;
+          statsMessage += `\n  - ${token}: ${data.count} trades, ${formatNumber(data.amount)} tokens`;
         });
       }
     }
 
-    // Add system information
     statsMessage += `📅 **Last Updated:** ${new Date().toLocaleString()}`;
 
     await ctx.reply(statsMessage, { parse_mode: 'Markdown' });
@@ -1479,6 +1521,317 @@ All groups have been reset to 'available' status.`;
   }
 }
 
+async function adminWithdrawExcess(ctx) {
+  try {
+    if (!isAdmin(ctx)) {
+      return ctx.reply('❌ Access denied. Admin privileges required.');
+    }
+
+    const chatId = ctx.chat.id;
+
+    if (chatId <= 0) {
+      return ctx.reply('❌ This command can only be used in a private chat with the bot.');
+    }
+
+    const activeEscrows = await Escrow.countDocuments({
+      status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'] }
+    });
+
+    const assignedGroups = await GroupPool.countDocuments({
+      status: 'assigned'
+    });
+
+    const hasActiveTrades = activeEscrows > 0 || assignedGroups > 0;
+
+    if (hasActiveTrades) {
+      const warningMessage = `⚠️ **WARNING: Active Trades Detected**
+
+📊 **Status:**
+• Active Escrows: ${activeEscrows}
+• Assigned Groups: ${assignedGroups}
+
+🔴 **Proceeding with withdrawal while trades are active may result in user funds being withdrawn!**
+
+Please wait until all trades are completed, or proceed at your own risk.
+
+**Choose an action:**`;
+
+      const { Markup } = require('telegraf');
+      const keyboard = Markup.inlineKeyboard([
+        [
+          Markup.button.callback('❌ Cancel', 'withdraw_cancel')
+        ],
+        [
+          Markup.button.callback('⚠️ Proceed Anyway', 'withdraw_proceed')
+        ]
+      ]);
+
+      await ctx.reply(warningMessage, {
+        parse_mode: 'Markdown',
+        ...keyboard
+      });
+
+      return;
+    }
+
+    await requestWithdrawConfirmation(ctx);
+
+  } catch (error) {
+    console.error('Error in admin withdraw excess:', error);
+    ctx.reply('❌ Error processing withdrawal request. Please check the logs.');
+  }
+}
+
+async function requestWithdrawConfirmation(ctx) {
+  try {
+    const adminWallet = config.ADMIN_WALLET;
+    
+    if (!adminWallet) {
+      return ctx.reply('❌ ADMIN_WALLET is not set in environment variables.');
+    }
+
+    const confirmationMessage = `⚠️ **CONFIRM WITHDRAWAL**
+
+📋 **Withdrawal Details:**
+• Target Wallet: \`${adminWallet}\`
+• Token: USDT (BSC)
+• Reserve Amount: ${config.CONTRACT_USDT_RESERVE} USDT per contract
+
+This will withdraw excess USDT from all escrow contracts (above reserve amount) to the admin wallet.
+
+⚠️ **This action cannot be undone!**
+
+Please confirm to proceed:`;
+
+    const { Markup } = require('telegraf');
+    const keyboard = Markup.inlineKeyboard([
+      [
+        Markup.button.callback('❌ Cancel', 'withdraw_cancel')
+      ],
+      [
+        Markup.button.callback('✅ Confirm Withdrawal', 'withdraw_confirm')
+      ]
+    ]);
+
+    await ctx.reply(confirmationMessage, {
+      parse_mode: 'Markdown',
+      ...keyboard
+    });
+
+  } catch (error) {
+    console.error('Error requesting withdrawal confirmation:', error);
+    ctx.reply('❌ Error requesting confirmation.');
+  }
+}
+
+async function executeWithdrawExcess(ctx) {
+  try {
+    const {
+      MONGODB_URI,
+      BSC_RPC_URL,
+      HOT_WALLET_PRIVATE_KEY,
+      ADMIN_WALLET,
+      CONTRACT_USDT_RESERVE
+    } = config;
+
+    if (!MONGODB_URI) {
+      throw new Error('MONGODB_URI missing');
+    }
+    if (!BSC_RPC_URL) {
+      throw new Error('BSC_RPC_URL missing');
+    }
+    if (!HOT_WALLET_PRIVATE_KEY) {
+      throw new Error('HOT_WALLET_PRIVATE_KEY missing');
+    }
+    if (!ADMIN_WALLET) {
+      throw new Error('ADMIN_WALLET missing');
+    }
+
+    const reserveAmount = CONTRACT_USDT_RESERVE;
+    if (!Number.isFinite(reserveAmount) || reserveAmount < 0) {
+      throw new Error('Invalid reserve amount');
+    }
+
+    const tokenAddress = config.USDT_BSC;
+    if (!tokenAddress || !ethers.isAddress(tokenAddress)) {
+      throw new Error('USDT_BSC address missing/invalid in config');
+    }
+
+    if (!ethers.isAddress(ADMIN_WALLET)) {
+      throw new Error('ADMIN_WALLET address is invalid');
+    }
+
+    const chatId = ctx.chat?.id || ctx.callbackQuery?.message?.chat?.id;
+    if (!chatId || chatId <= 0) {
+      throw new Error('Invalid chat context - command must be used in private chat');
+    }
+
+    const processingMsg = await ctx.reply('🔄 Processing withdrawal... This may take a few minutes.');
+
+    const mongoose = require('mongoose');
+
+    const ESCROW_VAULT_ABI = [
+      'function owner() view returns (address)',
+      'function withdrawToken(address erc20Token, address to) external'
+    ];
+
+    const ERC20_ABI = [
+      'function balanceOf(address account) view returns (uint256)',
+      'function decimals() view returns (uint8)',
+      'function symbol() view returns (string)',
+      'function transfer(address to, uint256 amount) returns (bool)'
+    ];
+
+    const provider = new ethers.JsonRpcProvider(BSC_RPC_URL);
+    const privateKey = HOT_WALLET_PRIVATE_KEY.startsWith('0x')
+      ? HOT_WALLET_PRIVATE_KEY
+      : `0x${HOT_WALLET_PRIVATE_KEY}`;
+    const wallet = new ethers.Wallet(privateKey, provider);
+
+    console.log(`👤 Hot wallet: ${wallet.address}`);
+    console.log(`👤 Admin wallet: ${ADMIN_WALLET}`);
+    console.log(`🔄 Target reserve per contract: ${reserveAmount} USDT\n`);
+
+    await mongoose.connect(MONGODB_URI);
+
+    const ContractModel = require('../models/Contract');
+    const contracts = await ContractModel.find({
+      name: 'EscrowVault',
+      token: 'USDT',
+      network: 'BSC',
+      status: 'deployed'
+    }).sort({ createdAt: 1 });
+
+    if (!contracts.length) {
+      try {
+        await ctx.telegram.editMessageText(
+          chatId,
+          processingMsg.message_id,
+          null,
+          '❌ No USDT EscrowVault contracts found.'
+        );
+      } catch (editError) {
+        // Fallback to reply if edit fails
+        await ctx.reply('❌ No USDT EscrowVault contracts found.');
+      }
+      await mongoose.disconnect();
+      return;
+    }
+
+    const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+    const tokenWithSigner = tokenContract.connect(wallet);
+    const decimals = await tokenContract.decimals();
+    const decimalsNum = Number(decimals);
+    const reserveWei = ethers.parseUnits(reserveAmount.toString(), decimals);
+    const epsilon = Number(1 / 10 ** Math.min(decimalsNum, 8));
+
+    let processed = 0;
+    let skipped = 0;
+    let totalWithdrawn = 0n;
+
+    for (const contract of contracts) {
+      const contractAddress = contract.address;
+
+      const vaultContract = new ethers.Contract(contractAddress, ESCROW_VAULT_ABI, wallet);
+      const owner = await vaultContract.owner();
+      if (owner.toLowerCase() !== wallet.address.toLowerCase()) {
+        console.log(`⚠️  Skipping ${contractAddress}: wallet is not the owner`);
+        skipped += 1;
+        continue;
+      }
+
+      const balanceRaw = await tokenContract.balanceOf(contractAddress);
+      const balance = Number(ethers.formatUnits(balanceRaw, decimals));
+
+      if (balance <= reserveAmount + epsilon) {
+        console.log(`ℹ️  Balance within reserve threshold, skipping ${contractAddress}`);
+        skipped += 1;
+        continue;
+      }
+
+      // Calculate excess amount (BigInt subtraction)
+      const excessRaw = balanceRaw - reserveWei;
+      if (excessRaw <= 0n) {
+        skipped += 1;
+        continue;
+      }
+
+        console.log(`💰 Balance: ${balance.toFixed(6)} USDT`);
+        console.log(`🚀 Withdrawing full balance to hot wallet, then sending excess to admin wallet...`);
+        
+        try {
+          const withdrawTx = await vaultContract.withdrawToken(tokenAddress, wallet.address);
+          console.log(`⏳ Waiting for withdrawal tx ${withdrawTx.hash}...`);
+          await withdrawTx.wait();
+          console.log('✅ Full withdrawal confirmed');
+
+          console.log(`💸 Transferring ${ethers.formatUnits(excessRaw, decimals)} USDT to admin wallet...`);
+          const transferTx = await tokenWithSigner.transfer(ADMIN_WALLET, excessRaw);
+          console.log(`⏳ Waiting for transfer tx ${transferTx.hash}...`);
+          await transferTx.wait();
+          console.log('✅ Transfer to admin wallet confirmed');
+
+          console.log(`🔄 Re-depositing ${reserveAmount} USDT back to contract...`);
+        const depositTx = await tokenWithSigner.transfer(contractAddress, reserveWei);
+        console.log(`⏳ Waiting for deposit tx ${depositTx.hash}...`);
+        await depositTx.wait();
+        console.log('✅ Reserve deposit confirmed');
+
+        totalWithdrawn += excessRaw;
+        processed += 1;
+
+        // Small delay to avoid nonce contention
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      } catch (error) {
+        console.error(`❌ Error processing ${contractAddress}:`, error.message);
+        skipped += 1;
+      }
+    }
+
+    await mongoose.disconnect();
+
+    const totalWithdrawnFormatted = totalWithdrawn > 0n ? ethers.formatUnits(totalWithdrawn, decimals) : '0';
+    const summary = `✅ **WITHDRAWAL COMPLETE**
+
+📊 **Summary:**
+• Contracts processed: ${processed}
+• Contracts skipped: ${skipped}
+• Total withdrawn: ${parseFloat(totalWithdrawnFormatted).toFixed(6)} USDT
+• Sent to: \`${ADMIN_WALLET}\`
+
+All excess funds have been withdrawn successfully.`;
+
+    try {
+      await ctx.telegram.editMessageText(
+        chatId,
+        processingMsg.message_id,
+        null,
+        summary,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (editError) {
+      // Fallback to reply if edit fails (message might have been deleted)
+      await ctx.reply(summary, { parse_mode: 'Markdown' });
+    }
+
+  } catch (error) {
+    console.error('❌ Error executing withdrawal:', error);
+    try {
+      await ctx.reply(`❌ Error executing withdrawal: ${error.message}`);
+    } catch (replyError) {
+      console.error('Error sending error message:', replyError);
+    }
+    // Ensure mongoose is disconnected on error
+    try {
+      if (mongoose.connection.readyState === 1) {
+        await mongoose.disconnect();
+      }
+    } catch (disconnectError) {
+      console.error('Error disconnecting mongoose:', disconnectError);
+    }
+  }
+}
+
 module.exports = {
   adminStats,
   adminGroupPool,
@@ -1495,5 +1848,8 @@ module.exports = {
   adminCleanupAddresses,
   adminGroupReset,
   adminResetForce,
-  adminResetAllGroups
+  adminResetAllGroups,
+  adminWithdrawExcess,
+  requestWithdrawConfirmation,
+  executeWithdrawExcess
 };

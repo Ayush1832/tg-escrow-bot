@@ -18,11 +18,9 @@ const GroupPoolService = require('./services/GroupPoolService');
 const verifyHandler = require('./handlers/verifyHandler');
 const images = require('./config/images');
 const UserStatsService = require('./services/UserStatsService');
+const { isValidAddress, getAddressErrorMessage, getAddressExample } = require('./utils/addressValidation');
 const findGroupEscrow = require('./utils/findGroupEscrow');
 
-/**
- * RPC Rate Limiting Queue
- */
 class RPCRateLimiter {
   constructor(maxConcurrent = 5, delayBetweenRequests = 100) {
     this.queue = [];
@@ -47,7 +45,6 @@ class RPCRateLimiter {
     this.active++;
     const { fn, resolve, reject } = this.queue.shift();
 
-    // Rate limiting: ensure minimum delay between requests
     const now = Date.now();
     const timeSinceLastRequest = now - this.lastRequestTime;
     if (timeSinceLastRequest < this.delayBetweenRequests) {
@@ -69,9 +66,6 @@ class RPCRateLimiter {
 
 const rpcRateLimiter = new RPCRateLimiter(5, 200);
 
-/**
- * Execute RPC call with rate limiting and retry logic
- */
 async function executeRPCWithRetry(fn, maxRetries = 3) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -94,9 +88,6 @@ async function executeRPCWithRetry(fn, maxRetries = 3) {
   }
 }
 
-/**
- * Build OTC Deal Summary text
- */
 async function buildDealSummary(escrow) {
   const amount = escrow.quantity || 0;
   const rate = escrow.rate || 0;
@@ -161,52 +152,37 @@ function parseFlexibleNumber(value) {
   const lastComma = str.lastIndexOf(',');
   const lastDot = str.lastIndexOf('.');
   
-  // Determine if separators are thousands separators or decimal separators
   let decimalSeparator = null;
   let hasBothSeparators = lastComma > -1 && lastDot > -1;
   
   if (hasBothSeparators) {
-    // Both comma and dot present - the last one is the decimal separator
     decimalSeparator = lastComma > lastDot ? ',' : '.';
   } else if (lastComma > -1) {
-    // Only comma present - check if it's thousands or decimal separator
     const afterComma = str.slice(lastComma + 1);
-    // If comma is followed by exactly 3 digits, it's likely thousands separator
     if (afterComma.length === 3 && /^\d{3}$/.test(afterComma) && lastComma > 0) {
-      // Likely thousands separator (e.g., "15,000")
       decimalSeparator = null;
     } else if (afterComma.length === 2 && /^00$/.test(afterComma)) {
-      // "15,00" - two zeros, more likely thousands separator (1500) than decimal (15.00)
       decimalSeparator = null;
     } else if (afterComma.length <= 2 && /^\d{1,2}$/.test(afterComma) && !/^0+$/.test(afterComma)) {
-      // 1-2 digits with at least one non-zero - likely decimal separator (e.g., "15,50", "15,5")
       decimalSeparator = ',';
     } else if (afterComma.length === 1 && afterComma === '0') {
-      // Single zero after comma - likely decimal (e.g., "15,0")
       decimalSeparator = ',';
     } else {
-      // Default: treat as thousands separator
       decimalSeparator = null;
     }
   } else if (lastDot > -1) {
-    // Only dot present - check if it's thousands or decimal separator
     const afterDot = str.slice(lastDot + 1);
-    // If dot is followed by exactly 3 digits, it's likely thousands separator
     if (afterDot.length === 3 && /^\d{3}$/.test(afterDot) && lastDot > 0) {
-      // Likely thousands separator (e.g., "15.000")
       decimalSeparator = null;
     } else if (afterDot.length <= 2 && /^\d{1,2}$/.test(afterDot)) {
-      // 1-2 digits after dot - typically decimal separator (e.g., "15.50", "15.5", "15.00", "15.0")
       decimalSeparator = '.';
     } else {
-      // Default: treat as thousands separator
       decimalSeparator = null;
     }
   }
   
   let normalized = str;
   if (decimalSeparator) {
-    // Has decimal separator - remove all other separators, then format with dot
     const otherSeparator = decimalSeparator === '.' ? ',' : '.';
     const otherSepRegex = new RegExp('\\' + otherSeparator, 'g');
     normalized = normalized.replace(otherSepRegex, '');
@@ -217,7 +193,6 @@ function parseFlexibleNumber(value) {
     const decimalPart = normalized.slice(lastDecimalIndex + 1);
     normalized = `${integerPart}.${decimalPart}`;
   } else {
-    // No decimal separator - remove all separators (they're thousands separators)
     normalized = normalized.replace(/[.,]/g, '');
   }
   
@@ -280,8 +255,8 @@ class EscrowBot {
         const telegram = ctx.telegram;
         const groupId = escrow.groupId;
         
-        if (!text.startsWith('0x') || text.length !== 42 || !/^0x[a-fA-F0-9]{40}$/.test(text)) {
-          await ctx.reply('❌ Invalid address format. Address must start with 0x and be 42 characters (0x + 40 hexadecimal characters).');
+        if (!isValidAddress(text, escrow.chain)) {
+          await ctx.reply(getAddressErrorMessage(escrow.chain));
           return;
         }
         
@@ -337,16 +312,15 @@ class EscrowBot {
         const userId = from.id;
         const text = ctx.message.text.trim();
         
-        // Silently ignore messages from users who aren't the buyer
         if (!escrow.buyerId || escrow.buyerId !== userId) {
-          return; // Silently ignore - don't send error message
+          return;
         }
         
         const telegram = ctx.telegram;
         const groupId = escrow.groupId;
         
-        if (!text.startsWith('0x') || text.length !== 42 || !/^0x[a-fA-F0-9]{40}$/.test(text)) {
-          await ctx.reply('❌ Invalid address format. Address must start with 0x and be 42 characters (0x + 40 hexadecimal characters).');
+        if (!isValidAddress(text, escrow.chain)) {
+          await ctx.reply(getAddressErrorMessage(escrow.chain));
           return;
         }
         
@@ -367,7 +341,7 @@ class EscrowBot {
         escrow.step6SellerAddressMessageId = step6Msg.message_id;
         await escrow.save();
         
-        return; // Don't continue to next handlers
+        return;
       } catch (e) {
         console.error('Step 5 buyer address error', e);
       }
@@ -396,8 +370,6 @@ class EscrowBot {
           return next();
         }
         
-        // If escrow is waiting for button clicks (not text input), ignore text messages
-        // Only process text when status is 'awaiting_deposit' (waiting for transaction hash)
         if (escrow.status !== 'awaiting_deposit') {
           return next();
         }
@@ -428,16 +400,22 @@ class EscrowBot {
           }
         }
         
-        if (!/^(0x)?[a-fA-F0-9]{64}$/.test(txHash)) {
-          await ctx.reply('❌ Invalid transaction hash format. Please provide a valid transaction hash or explorer link.');
-          return;
+        const txChainUpper = (escrow.chain || '').toUpperCase();
+        if (txChainUpper === 'TRON' || txChainUpper === 'TRX') {
+          if (!/^[a-fA-F0-9]{64}$/.test(txHash)) {
+            await ctx.reply('❌ Invalid TRON transaction hash format. Please provide a valid transaction hash or explorer link.');
+            return;
+          }
+        } else {
+          if (!/^(0x)?[a-fA-F0-9]{64}$/.test(txHash)) {
+            await ctx.reply('❌ Invalid transaction hash format. Please provide a valid transaction hash or explorer link.');
+            return;
+          }
+          if (['BSC', 'ETH', 'SEPOLIA'].includes(txChainUpper) && !txHash.startsWith('0x')) {
+            txHash = '0x' + txHash;
+          }
         }
         
-        if (escrow.chain && ['BSC', 'ETH', 'SEPOLIA'].includes(escrow.chain.toUpperCase()) && !txHash.startsWith('0x')) {
-          txHash = '0x' + txHash;
-        }
-        
-        // Check if this transaction hash was already used in any escrow
         const existingEscrow = await Escrow.findOne({
           $or: [
             { transactionHash: txHash },
@@ -450,15 +428,91 @@ class EscrowBot {
           return;
         }
         
-        // Check if this transaction was already submitted for this escrow
         if (escrow.transactionHash === txHash || (escrow.partialTransactionHashes && escrow.partialTransactionHashes.includes(txHash))) {
             await ctx.reply('❌ This transaction has already been submitted for this trade. Please wait for confirmation or contact support if there\'s an issue.');
           return;
         }
         
-        const provider = BlockchainService.providers[escrow.chain?.toUpperCase()] || BlockchainService.providers['BSC'];
+        const chainUpper = (escrow.chain || '').toUpperCase();
         
-        try {
+        if (chainUpper === 'TRON' || chainUpper === 'TRX') {
+          try {
+            const TronService = require('./services/TronService');
+            const tokenAddress = BlockchainService.getTokenAddress(escrow.token, escrow.chain);
+            if (!tokenAddress) {
+              await ctx.reply('❌ Token address not found. Please contact admin.');
+              return;
+            }
+            
+            await TronService.init();
+            const tronWeb = TronService.tronWeb;
+            const tx = await tronWeb.trx.getTransaction(txHash);
+            
+            if (!tx || !tx.ret) {
+              await ctx.reply('❌ Transaction not found or not confirmed. Please check the transaction hash.');
+              return;
+            }
+            
+            const txInfo = await tronWeb.trx.getTransactionInfo(txHash);
+            if (!txInfo || !txInfo.log) {
+              await ctx.reply('❌ Transaction info not found. Transaction may still be pending.');
+              return;
+            }
+            
+            const depositAddr = escrow.depositAddress;
+            let transferLog = null;
+            const decimals = BlockchainService.getTokenDecimals(escrow.token, escrow.chain);
+            let amount = 0;
+            let amountWeiBigInt = 0n;
+            let fromAddr = null;
+            let toAddr = null;
+            
+            for (const log of txInfo.log || []) {
+              try {
+                const logContractAddr = tronWeb.address.fromHex(log.address);
+                if (logContractAddr.toLowerCase() !== tokenAddress.toLowerCase()) {
+                  continue;
+                }
+                
+                if (log.topics && log.topics.length >= 3) {
+                  const transferEventSig = 'ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+                  if (log.topics[0] === transferEventSig || log.topics[0].toLowerCase() === transferEventSig) {
+                    fromAddr = tronWeb.address.fromHex('41' + log.topics[1].slice(-40));
+                    toAddr = tronWeb.address.fromHex('41' + log.topics[2].slice(-40));
+                    
+                    const valueHex = log.data || '0';
+                    const value = BigInt('0x' + valueHex);
+                    
+                    if (toAddr.toLowerCase() === depositAddr.toLowerCase()) {
+                      transferLog = { from: fromAddr, to: toAddr, value };
+                      amountWeiBigInt = value;
+                      amount = Number(amountWeiBigInt) / Math.pow(10, decimals);
+                      break;
+                    }
+                  }
+                }
+              } catch (e) {
+                console.error('Error parsing TRON log:', e);
+                continue;
+              }
+            }
+            
+            if (!transferLog) {
+              await ctx.reply('❌ No transfer to deposit address found in this transaction.');
+              return;
+            }
+            
+            from = fromAddr;
+            to = toAddr;
+          } catch (error) {
+            console.error('Error processing TRON transaction:', error);
+            await ctx.reply('❌ Error processing TRON transaction. Please check the transaction hash and try again.');
+            return;
+          }
+        } else {
+          const provider = BlockchainService.providers[escrow.chain?.toUpperCase()] || BlockchainService.providers['BSC'];
+          
+          try {
             const tx = await executeRPCWithRetry(async () => {
               return await provider.getTransaction(txHash);
             });
@@ -477,107 +531,126 @@ class EscrowBot {
               return;
             }
           
-          const tokenAddress = BlockchainService.getTokenAddress(escrow.token, escrow.chain);
-          if (!tokenAddress) {
-            await ctx.reply('❌ Token address not found. Please contact admin.');
-            return;
-          }
-          
-          const iface = new ethers.Interface(['event Transfer(address indexed from, address indexed to, uint256 value)']);
-          const logs = receipt.logs.filter(log => log.address.toLowerCase() === tokenAddress.toLowerCase());
-          
-          if (logs.length === 0) {
-            await ctx.reply('❌ No token transfer found in this transaction.');
-            return;
-          }
-          
-          const depositAddr = escrow.depositAddress.toLowerCase();
-          let transferLog = null;
-          const decimals = BlockchainService.getTokenDecimals(escrow.token, escrow.chain);
-          let amount = 0;
-          let amountWeiBigInt = 0n;
-          let fromAddr = null;
-          let toAddr = null;
-          
-          for (const log of logs) {
-            try {
-              const parsed = iface.parseLog({
-                topics: log.topics,
-                data: log.data
-              });
-              if (parsed && parsed.name === 'Transfer') {
-                fromAddr = parsed.args[0];
-                toAddr = parsed.args[1];
-                const value = parsed.args[2];
-                
-                if (toAddr.toLowerCase() === depositAddr) {
-                  transferLog = parsed;
-                  amountWeiBigInt = BigInt(value.toString());
-                  amount = Number(amountWeiBigInt) / Math.pow(10, decimals);
-                  break;
-                }
-              }
-            } catch (e) {
-              continue;
+            const tokenAddress = BlockchainService.getTokenAddress(escrow.token, escrow.chain);
+            if (!tokenAddress) {
+              await ctx.reply('❌ Token address not found. Please contact admin.');
+              return;
             }
-          }
-          
-          if (!transferLog) {
-            await ctx.reply('❌ No transfer to deposit address found in this transaction.');
+            
+            const iface = new ethers.Interface(['event Transfer(address indexed from, address indexed to, uint256 value)']);
+            const logs = receipt.logs.filter(log => log.address.toLowerCase() === tokenAddress.toLowerCase());
+            
+            if (logs.length === 0) {
+              await ctx.reply('❌ No token transfer found in this transaction.');
+              return;
+            }
+            
+            const depositAddr = escrow.depositAddress.toLowerCase();
+            let transferLog = null;
+            const decimals = BlockchainService.getTokenDecimals(escrow.token, escrow.chain);
+            let amount = 0;
+            let amountWeiBigInt = 0n;
+            let fromAddr = null;
+            let toAddr = null;
+            
+            for (const log of logs) {
+              try {
+                const parsed = iface.parseLog({
+                  topics: log.topics,
+                  data: log.data
+                });
+                if (parsed && parsed.name === 'Transfer') {
+                  fromAddr = parsed.args[0];
+                  toAddr = parsed.args[1];
+                  const value = parsed.args[2];
+                  
+                  if (toAddr.toLowerCase() === depositAddr) {
+                    transferLog = parsed;
+                    amountWeiBigInt = BigInt(value.toString());
+                    amount = Number(amountWeiBigInt) / Math.pow(10, decimals);
+                    break;
+                  }
+                }
+              } catch (e) {
+                continue;
+              }
+            }
+            
+            if (!transferLog) {
+              await ctx.reply('❌ No transfer to deposit address found in this transaction.');
+              return;
+            }
+            
+            from = fromAddr;
+            to = toAddr;
+          } catch (err) {
+            console.error('Error fetching transaction:', err);
+            await ctx.reply('❌ Error fetching transaction details. Please check the transaction hash and try again.');
             return;
           }
-          
-          const from = fromAddr;
-          const to = toAddr;
-          const expectedAmount = escrow.quantity || 0;
-          const tolerance = 0.01;
-          
-          // Get fresh escrow to check current accumulated amount
-          const freshEscrow = await Escrow.findById(escrow._id);
-          
-          // Calculate accumulated amount (including this new transaction)
-          const currentAccumulated = freshEscrow.accumulatedDepositAmount || 0;
-          const newAccumulated = currentAccumulated + amount;
-          const remainingAmount = expectedAmount - newAccumulated;
-          
-          // Check if this transaction was already added
-          if (freshEscrow.transactionHash === txHash || (freshEscrow.partialTransactionHashes && freshEscrow.partialTransactionHashes.includes(txHash))) {
-              await ctx.reply('❌ This transaction has already been submitted for this trade. Please wait for confirmation.');
-            return;
-          }
-          
-          // Update accumulated amount (decimal and wei) and transaction hashes
-          freshEscrow.accumulatedDepositAmount = newAccumulated;
-          const currentAccumulatedWei = BigInt(freshEscrow.accumulatedDepositAmountWei || '0');
-          const newAccumulatedWei = currentAccumulatedWei + amountWeiBigInt;
-          freshEscrow.accumulatedDepositAmountWei = newAccumulatedWei.toString();
-          
-          // If this is the first transaction, store it in transactionHash, otherwise add to partialTransactionHashes
-          if (!freshEscrow.transactionHash) {
+        }
+        
+        const expectedAmount = escrow.quantity || 0;
+        const tolerance = 0.01;
+        
+        const freshEscrow = await Escrow.findById(escrow._id);
+        
+        const currentAccumulated = freshEscrow.accumulatedDepositAmount || 0;
+        const newAccumulated = currentAccumulated + amount;
+        const remainingAmount = expectedAmount - newAccumulated;
+        
+        if (freshEscrow.transactionHash === txHash || (freshEscrow.partialTransactionHashes && freshEscrow.partialTransactionHashes.includes(txHash))) {
+          await ctx.reply('❌ This transaction has already been submitted for this trade. Please wait for confirmation.');
+          return;
+        }
+        
+        freshEscrow.accumulatedDepositAmount = newAccumulated;
+        const currentAccumulatedWei = BigInt(freshEscrow.accumulatedDepositAmountWei || '0');
+        const newAccumulatedWei = currentAccumulatedWei + amountWeiBigInt;
+        freshEscrow.accumulatedDepositAmountWei = newAccumulatedWei.toString();
+        
+        if (!freshEscrow.transactionHash) {
           freshEscrow.transactionHash = txHash;
           freshEscrow.depositTransactionFromAddress = from;
-          } else {
-            if (!freshEscrow.partialTransactionHashes) {
-              freshEscrow.partialTransactionHashes = [];
-            }
-            freshEscrow.partialTransactionHashes.push(txHash);
+        } else {
+          if (!freshEscrow.partialTransactionHashes) {
+            freshEscrow.partialTransactionHashes = [];
           }
-          
-          freshEscrow.depositAmount = newAccumulated;
-          // Ensure status is 'awaiting_deposit' for partial payments to allow next transaction
-          if (freshEscrow.status !== 'awaiting_deposit') {
-            freshEscrow.status = 'awaiting_deposit';
+          freshEscrow.partialTransactionHashes.push(txHash);
+        }
+        
+        freshEscrow.depositAmount = newAccumulated;
+        if (freshEscrow.status !== 'awaiting_deposit') {
+          freshEscrow.status = 'awaiting_deposit';
+        }
+        await freshEscrow.save();
+        
+        if (newAccumulated < expectedAmount - tolerance) {
+          try {
+            const CompletionFeedService = require('./services/CompletionFeedService');
+            await CompletionFeedService.handlePartialDeposit({
+              escrow: freshEscrow,
+              partialAmount: amount,
+              transactionHash: txHash,
+              telegram: ctx.telegram
+            });
+          } catch (partialLogError) {
+            console.error('Error logging partial deposit:', partialLogError);
           }
-          await freshEscrow.save();
-          
-          // Check if full amount (or more) has been received
-          // If amount is >= expected amount (with tolerance), proceed to confirmation
-          if (newAccumulated >= expectedAmount - tolerance) {
-            // Full amount received - proceed to confirmation
+        }
+        
+        if (newAccumulated >= expectedAmount - tolerance) {
+          // Delete previous transaction hash details message if we have its ID
+          if (freshEscrow.transactionHashMessageId) {
           try {
             await ctx.telegram.deleteMessage(chatId, freshEscrow.transactionHashMessageId);
           } catch (e) {
+              const desc = e?.response?.description || e?.message || '';
+              // Ignore cases where message is already gone or id is invalid
+              if (!desc.includes('message identifier is not specified') && !desc.includes('message to delete not found')) {
             console.error('Failed to delete transaction hash message:', e);
+              }
+            }
           }
           
           try {
@@ -587,21 +660,21 @@ class EscrowBot {
           }
           
           const txHashShort = txHash.substring(0, 10) + '...';
-            const totalTxCount = 1 + (freshEscrow.partialTransactionHashes ? freshEscrow.partialTransactionHashes.length : 0);
-            const fromAddress = freshEscrow.depositTransactionFromAddress || from || 'N/A';
-            const depositAddress = freshEscrow.depositAddress || 'N/A';
-            const expectedAmountDisplay = (freshEscrow.quantity || 0).toFixed(2);
-            const overDelivered = expectedAmount > 0 && (newAccumulated - expectedAmount) > tolerance;
-            
-            freshEscrow.confirmedAmount = newAccumulated;
-            freshEscrow.status = 'deposited';
-            await freshEscrow.save();
-            
-            const statusLine = overDelivered
-              ? `🟢 Extra ${freshEscrow.token} received (expected ${expectedAmount.toFixed(2)}, got ${newAccumulated.toFixed(2)})`
-              : `🟢 Exact ${freshEscrow.token} found`;
-            
-            let confirmedTxText = `<b>P2P MM Bot 🤖</b>
+          const totalTxCount = 1 + (freshEscrow.partialTransactionHashes ? freshEscrow.partialTransactionHashes.length : 0);
+          const fromAddress = freshEscrow.depositTransactionFromAddress || from || 'N/A';
+          const depositAddress = freshEscrow.depositAddress || 'N/A';
+          const expectedAmountDisplay = (freshEscrow.quantity || 0).toFixed(2);
+          const overDelivered = expectedAmount > 0 && (newAccumulated - expectedAmount) > tolerance;
+          
+          freshEscrow.confirmedAmount = newAccumulated;
+          freshEscrow.status = 'deposited';
+          await freshEscrow.save();
+          
+          const statusLine = overDelivered
+            ? `🟢 Extra ${freshEscrow.token} received (expected ${expectedAmount.toFixed(2)}, got ${newAccumulated.toFixed(2)})`
+            : `🟢 Exact ${freshEscrow.token} found`;
+          
+          let confirmedTxText = `<b>P2P MM Bot 🤖</b>
 
 ${statusLine}
 
@@ -610,35 +683,35 @@ ${statusLine}
 <b>From:</b> <code>${fromAddress}</code>
 <b>To:</b> <code>${depositAddress}</code>
 <b>Main Tx:</b> <code>${txHashShort}</code>`;
-            
-            if (overDelivered) {
-              confirmedTxText += `\n<b>Original Deal Amount:</b> ${expectedAmountDisplay} ${freshEscrow.token}`;
-            }
-            
-            if (totalTxCount > 1) {
-              confirmedTxText += `\n\n✅ Full amount received through ${totalTxCount} transaction(s)`;
-            }
           
-            const txDetailsMsg = await ctx.telegram.sendPhoto(
+          if (overDelivered) {
+            confirmedTxText += `\n<b>Original Deal Amount:</b> ${expectedAmountDisplay} ${freshEscrow.token}`;
+          }
+          
+          if (totalTxCount > 1) {
+            confirmedTxText += `\n\n✅ Full amount received through ${totalTxCount} transaction(s)`;
+          }
+        
+          const txDetailsMsg = await ctx.telegram.sendPhoto(
             chatId,
-              images.DEPOSIT_FOUND,
-              {
-                caption: confirmedTxText,
-                parse_mode: 'HTML'
+            images.DEPOSIT_FOUND,
+            {
+              caption: confirmedTxText,
+              parse_mode: 'HTML'
             }
           );
-          
+        
           freshEscrow.transactionHashMessageId = txDetailsMsg.message_id;
           await freshEscrow.save();
-            
-            if (freshEscrow.buyerId) {
-              const buyerMention = freshEscrow.buyerUsername
-                ? `@${freshEscrow.buyerUsername}`
-                : freshEscrow.buyerId
-                  ? `[${freshEscrow.buyerId}]`
-                  : 'Buyer';
+          
+          if (freshEscrow.buyerId) {
+            const buyerMention = freshEscrow.buyerUsername
+              ? `@${freshEscrow.buyerUsername}`
+              : freshEscrow.buyerId
+                ? `[${freshEscrow.buyerId}]`
+                : 'Buyer';
 
-              const buyerInstruction = `✅ Payment Received!
+            const buyerInstruction = `✅ Payment Received!
 
 Use /release After Fund Transfer to Seller
 
@@ -646,41 +719,32 @@ Use /release After Fund Transfer to Seller
 • Don't share payment details on private chat
 • Please share all deals in group`;
 
-              await ctx.telegram.sendMessage(chatId, buyerInstruction);
-            }
-          
-          return;
-          } else {
-            // Partial deposit - only show this if amount is actually less than expected
-            // (This should only happen if newAccumulated < expectedAmount - tolerance)
-            if (newAccumulated < expectedAmount - tolerance) {
-              const remainingFormatted = remainingAmount.toFixed(2);
-              const partialMessage = await ctx.reply(
-                `✅ Partial deposit received: ${amount.toFixed(2)} ${escrow.token}\n\n` +
-                `📊 Total received so far: ${newAccumulated.toFixed(2)} ${escrow.token}\n` +
-                `💰 Remaining amount needed: ${remainingFormatted} ${escrow.token}\n\n` +
-                `Please choose an option:`,
-                {
-                  parse_mode: 'HTML',
-                  reply_markup: Markup.inlineKeyboard([
-                    [
-                      Markup.button.callback('✅ Continue with this amount', `partial_continue_${freshEscrow.escrowId}`),
-                      Markup.button.callback('💰 Pay remaining amount', `partial_pay_remaining_${freshEscrow.escrowId}`)
-                    ]
-                  ]).reply_markup
-                }
-              );
-              
-              // Store partial payment message ID for potential updates
-              freshEscrow.partialPaymentMessageId = partialMessage.message_id;
-              await freshEscrow.save();
-            }
-            // If somehow we get here with excess amount, it should have been caught above
-            return;
+            await ctx.telegram.sendMessage(chatId, buyerInstruction);
           }
-        } catch (err) {
-          console.error('Error fetching transaction:', err);
-          await ctx.reply('❌ Error fetching transaction details. Please check the transaction hash and try again.');
+        
+          return;
+        } else {
+          if (newAccumulated < expectedAmount - tolerance) {
+            const remainingFormatted = remainingAmount.toFixed(2);
+            const partialMessage = await ctx.reply(
+              `✅ Partial deposit received: ${amount.toFixed(2)} ${escrow.token}\n\n` +
+              `📊 Total received so far: ${newAccumulated.toFixed(2)} ${escrow.token}\n` +
+              `💰 Remaining amount needed: ${remainingFormatted} ${escrow.token}\n\n` +
+              `Please choose an option:`,
+              {
+                parse_mode: 'HTML',
+                reply_markup: Markup.inlineKeyboard([
+                  [
+                    Markup.button.callback('✅ Continue with this amount', `partial_continue_${freshEscrow.escrowId}`),
+                    Markup.button.callback('💰 Pay remaining amount', `partial_pay_remaining_${freshEscrow.escrowId}`)
+                  ]
+                ]).reply_markup
+              }
+            );
+            
+            freshEscrow.partialPaymentMessageId = partialMessage.message_id;
+            await freshEscrow.save();
+          }
           return;
         }
       } catch (e) {
@@ -714,7 +778,6 @@ Use /release After Fund Transfer to Seller
         const text = ctx.message.text.trim();
         const userId = from.id;
         
-        // Silently ignore messages from users who aren't buyer or seller
         if (escrow.buyerId !== userId && escrow.sellerId !== userId) {
           return; // Silently ignore
         }
@@ -778,7 +841,8 @@ Use /release After Fund Transfer to Seller
             reply_markup: {
               inline_keyboard: [
                 [
-                  { text: 'BSC', callback_data: 'step4_select_chain_BSC' }
+                  { text: 'BSC', callback_data: 'step4_select_chain_BSC' },
+                  { text: 'TRON', callback_data: 'step4_select_chain_TRON' }
                 ]
               ]
             }
@@ -795,30 +859,24 @@ Use /release After Fund Transfer to Seller
     });
     
 
-    // Helper function to settle and recycle group
     const settleAndRecycleGroup = async (escrow, telegram) => {
       try {
-        // Find the group in pool
         const group = await GroupPool.findOne({ 
           assignedEscrowId: escrow.escrowId 
         });
         
         if (group) {
-          // Remove buyer and seller from group
           const allUsersRemoved = await GroupPoolService.removeUsersFromGroup(escrow, group.groupId, telegram);
           
           if (allUsersRemoved) {
-            // Clear escrow invite link (but keep group invite link - it's permanent)
             const freshEscrow = await Escrow.findOne({ escrowId: escrow.escrowId });
             if (freshEscrow && freshEscrow.inviteLink) {
               freshEscrow.inviteLink = null;
               await freshEscrow.save();
             }
             
-            // Refresh invite link (revoke old and create new) so removed users can rejoin
             await GroupPoolService.refreshInviteLink(group.groupId, telegram);
             
-            // Recycle group back to pool
             group.status = 'available';
             group.assignedEscrowId = null;
             group.assignedAt = null;
@@ -836,38 +894,26 @@ Use /release After Fund Transfer to Seller
       }
     };
     
-    // Restrict interaction: only allow /deal in groups
     this.bot.command('deal', groupDealHandler);
-    
-    // Verify address command (main group only)
     this.bot.command('verify', verifyHandler);
-    
-    // Restart trade command (trade groups only)
     const restartHandler = require('./handlers/restartHandler');
     this.bot.command('restart', restartHandler);
-    
-    // Dispute command (trade groups only)
     const disputeHandler = require('./handlers/disputeHandler');
     this.bot.command('dispute', disputeHandler);
-    
-    // Admin/seller release command (with confirmation)
     this.bot.command('release', async (ctx) => {
       try {
         const chatId = ctx.chat.id;
         const userId = ctx.from.id;
         
-        // Must be in a group
         if (chatId > 0) {
           return ctx.reply('❌ This command can only be used in a group chat.');
         }
 
-        // Find active escrow (including disputed trades so admins can resolve)
         const escrow = await findGroupEscrow(
           chatId,
           ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed']
         );
         
-        // Silently ignore if no escrow found (command should only work in trade groups)
         if (!escrow) {
           return;
         }
@@ -879,7 +925,6 @@ Use /release After Fund Transfer to Seller
         const isSellerUsernameMatch = escrow.sellerUsername && escrow.sellerUsername.toLowerCase() === normalizedUsername;
         const isSeller = Boolean(isSellerIdMatch || isSellerUsernameMatch);
         
-        // For partial release, only admin can use
         const commandText = ctx.message.text.trim();
         const parts = commandText.split(/\s+/);
         const hasAmount = parts.length > 1;
@@ -896,7 +941,6 @@ Use /release After Fund Transfer to Seller
           return ctx.reply('❌ Buyer address is not set.');
         }
         
-        // Parse amount from command (e.g., /release -50 or /release 50)
         let requestedAmount = null;
         
         if (hasAmount) {
@@ -925,10 +969,8 @@ Use /release After Fund Transfer to Seller
           return ctx.reply('❌ No confirmed deposit found.');
         }
         
-        // Determine release amount
         const releaseAmount = requestedAmount !== null ? requestedAmount : formattedTotalDeposited;
         
-        // Validate amount - check against available balance
         if (releaseAmount > formattedTotalDeposited) {
           return ctx.reply(`❌ Release amount (${releaseAmount.toFixed(5)}) exceeds available balance (${formattedTotalDeposited.toFixed(5)} ${escrow.token}).`);
         }
@@ -937,16 +979,11 @@ Use /release After Fund Transfer to Seller
           return ctx.reply('❌ Release amount must be greater than 0.');
         }
         
-        // Store pending release amount
         escrow.pendingReleaseAmount = requestedAmount !== null ? releaseAmount : null;
-        escrow.pendingRefundAmount = null; // Clear any pending refund
-        
-        // For admin partial releases, only admin confirmation is needed
-        // For full releases or seller releases, adjust confirmation requirements
+        escrow.pendingRefundAmount = null;
         const isPartialReleaseByAdmin = hasAmount && isAdmin;
         
         if (isPartialReleaseByAdmin) {
-          // Admin partial release: only admin needs to confirm
           escrow.adminConfirmedRelease = false;
           escrow.buyerConfirmedRelease = false;
           escrow.sellerConfirmedRelease = false;
@@ -973,20 +1010,14 @@ Total Deposited: ${formattedTotalDeposited.toFixed(5)} ${escrow.token}
           escrow.releaseConfirmationMessageId = releaseMsg.message_id;
           await escrow.save();
         } else {
-          // Full release (admin or seller) – only seller approval required
           escrow.adminConfirmedRelease = false;
-          escrow.buyerConfirmedRelease = true; // Auto-confirm buyer for full release
+          escrow.buyerConfirmedRelease = true;
           escrow.sellerConfirmedRelease = false;
           await escrow.save();
           
-          // Get usernames from escrow (exact same format as DEAL CONFIRMED message)
-          // At this point, buyerId and sellerId should always be set (deal must be confirmed to reach this status)
           const sellerTag = escrow.sellerUsername ? `@${escrow.sellerUsername}` : `[${escrow.sellerId}]`;
-          
           const releaseType = requestedAmount !== null ? 'Partial' : 'Full';
           const approvalNote = 'Only the seller needs to approve to release payment.';
-          
-          // Build caption based on whether seller initiated
           const sellerLine = escrow.sellerConfirmedRelease
             ? `✅ ${sellerTag} - Confirmed`
             : `⌛️ ${sellerTag} - Waiting...`;
@@ -1022,12 +1053,10 @@ ${approvalNote}`;
         const chatId = ctx.chat.id;
         const userId = ctx.from.id;
         
-        // Must be in a group
         if (chatId > 0) {
           return ctx.reply('❌ This command can only be used in a group chat.');
         }
         
-        // Check if user is admin
         const normalizedUsername = (ctx.from.username || '').toLowerCase();
         const isAdmin = config.getAllAdminUsernames()
           .some((name) => name && name.toLowerCase() === normalizedUsername) ||
@@ -1037,13 +1066,11 @@ ${approvalNote}`;
           return ctx.reply('❌ Only admins can use this command.');
         }
         
-        // Find active escrow (including disputed trades so admins can resolve)
         const escrow = await findGroupEscrow(
           chatId,
           ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed']
         );
         
-        // Silently ignore if no escrow found (command should only work in trade groups)
         if (!escrow) {
           return;
         }
@@ -1052,7 +1079,6 @@ ${approvalNote}`;
           return ctx.reply('❌ Seller address is not set.');
         }
         
-        // Parse amount from command (e.g., /refund -50 or /refund 50)
         const commandText = ctx.message.text.trim();
         const parts = commandText.split(/\s+/);
         let requestedAmount = null;
@@ -1065,9 +1091,6 @@ ${approvalNote}`;
           }
         }
         
-        // Use accumulatedDepositAmount first (actual amount received from all transactions)
-        // Then fall back to depositAmount, then confirmedAmount
-        // NEVER use quantity as that's the expected amount, not the actual received amount
         const decimals = BlockchainService.getTokenDecimals(escrow.token, escrow.chain);
         const amountWeiOverride = escrow.accumulatedDepositAmountWei && escrow.accumulatedDepositAmountWei !== '0'
           ? escrow.accumulatedDepositAmountWei
@@ -1086,10 +1109,8 @@ ${approvalNote}`;
           return ctx.reply('❌ No confirmed deposit found.');
         }
         
-        // Determine refund amount
         const refundAmount = requestedAmount !== null ? requestedAmount : formattedTotalDeposited;
         
-        // Validate amount - check against available balance
         if (refundAmount > formattedTotalDeposited) {
           return ctx.reply(`❌ Refund amount (${refundAmount.toFixed(5)}) exceeds available balance (${formattedTotalDeposited.toFixed(5)} ${escrow.token}).`);
         }
@@ -1098,11 +1119,9 @@ ${approvalNote}`;
           return ctx.reply('❌ Refund amount must be greater than 0.');
         }
         
-        // Store pending refund amount
         escrow.pendingRefundAmount = refundAmount;
         escrow.pendingReleaseAmount = null; // Clear any pending release
         
-        // Send refund confirmation message
         const sellerLabel = escrow.sellerUsername
           ? `@${escrow.sellerUsername}`
           : escrow.sellerId
@@ -1142,23 +1161,19 @@ Address: <code>${escrow.sellerAddress}</code>
       try {
         const chatId = ctx.chat.id;
         
-        // Must be in a group
         if (chatId > 0) {
           return ctx.reply('❌ This command can only be used in a group chat.');
         }
         
-        // Find active escrow
         const escrow = await findGroupEscrow(
           chatId,
           ['deposited', 'in_fiat_transfer', 'ready_to_release']
         );
         
-        // Silently ignore if no escrow found (command should only work in trade groups)
         if (!escrow) {
           return;
         }
         
-        // Calculate available balance
         const decimals = BlockchainService.getTokenDecimals(escrow.token, escrow.chain);
         const amountWeiOverride = escrow.accumulatedDepositAmountWei && escrow.accumulatedDepositAmountWei !== '0'
           ? escrow.accumulatedDepositAmountWei
@@ -1177,10 +1192,8 @@ Address: <code>${escrow.sellerAddress}</code>
           return ctx.reply('❌ No available balance found.');
         }
         
-        // Format network name
         const networkName = (escrow.chain || 'BSC').toUpperCase();
         
-        // Build balance message
         const balanceMessage = `<b>💰 Available Balance</b>
 
 <b>Amount:</b> ${availableBalance.toFixed(5)} ${escrow.token}
@@ -1221,7 +1234,6 @@ This is the current available balance for this trade.`;
           username: targetUsername
         });
         
-        // Helper to get telegramId from escrows by username
         let foundTelegramIdFromEscrow = null;
         if (targetUsername) {
           const Escrow = require('./models/Escrow');
@@ -1239,7 +1251,6 @@ This is the current available balance for this trade.`;
           }
         }
         
-        // If not found by username and username was provided, try searching by Telegram ID from escrow
         if (!userStats && foundTelegramIdFromEscrow) {
           userStats = await UserStatsService.getUserStats({
             telegramId: foundTelegramIdFromEscrow,
@@ -1247,18 +1258,12 @@ This is the current available balance for this trade.`;
           });
         }
         
-        // Always prioritize telegramId: from userStats first, then escrow, then target
         let finalTelegramId = null;
         if (userStats) {
-          // Convert Mongoose document to plain object if needed
           const userStatsObj = userStats.toObject ? userStats.toObject() : userStats;
-          // Get telegramId - User model should ALWAYS have it (required field)
-          // Check both userStatsObj.telegramId and userStats.telegramId (in case toObject() loses it)
           const userTelegramId = userStatsObj.telegramId || userStats.telegramId;
-          // Prioritize telegramId from User model (most reliable), then escrow, then target
           finalTelegramId = userTelegramId || foundTelegramIdFromEscrow || targetTelegramId;
           
-          // Debug: Log if telegramId is missing (should never happen for User model)
           if (!userTelegramId && userStats) {
             console.log('WARNING: User found but telegramId is missing!', {
               hasTelegramId: !!userStatsObj.telegramId,
@@ -1267,11 +1272,9 @@ This is the current available balance for this trade.`;
               foundTelegramIdFromEscrow
             });
           }
-          // CRITICAL: Force set telegramId to ensure it's always present
           userStatsObj.telegramId = finalTelegramId;
           userStats = userStatsObj;
         } else {
-          // If still no stats found, create a default stats object with 0 trades
           finalTelegramId = foundTelegramIdFromEscrow || targetTelegramId;
           userStats = {
             telegramId: finalTelegramId || null,
@@ -1286,14 +1289,12 @@ This is the current available balance for this trade.`;
           };
         }
         
-        // CRITICAL: Final safety check - ensure telegramId is ALWAYS set and is a valid number
         if (userStats) {
           if (!userStats.telegramId || userStats.telegramId === null || userStats.telegramId === undefined) {
             if (finalTelegramId) {
               userStats.telegramId = finalTelegramId;
             }
           }
-          // Ensure it's a number
           if (userStats.telegramId) {
             userStats.telegramId = Number(userStats.telegramId);
           }
@@ -1344,7 +1345,8 @@ This is the current available balance for this trade.`;
       adminCleanupAddresses,
       adminGroupReset,
       adminResetForce,
-      adminResetAllGroups
+      adminResetAllGroups,
+      adminWithdrawExcess
     } = adminHandler;
     this.bot.command('admin_stats', adminStats);
     this.bot.command('admin_pool', adminGroupPool);
@@ -1362,13 +1364,10 @@ This is the current available balance for this trade.`;
     this.bot.command('admin_group_reset', adminGroupReset);
     this.bot.command('admin_reset_force', adminResetForce);
     this.bot.command('admin_reset_all_groups', adminResetAllGroups);
+    this.bot.command('admin_withdraw_bsc_usdt', adminWithdrawExcess);
 
     this.bot.on('callback_query', callbackHandler);
     this.bot.on('chat_join_request', joinRequestHandler);
-    
-    // Remove generic welcome on new chat members; join flow handled via join requests
-    
-    // Remove menu command
   }
 
   setupErrorHandling() {

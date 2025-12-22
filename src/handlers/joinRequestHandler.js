@@ -21,24 +21,18 @@ async function joinRequestHandler(ctx) {
     const user = request.from;
     const username = (user.username || '').toLowerCase();
 
-    // Find active escrow for this room with restricted usernames (from pool groups)
     let escrow = await Escrow.findOne({
       groupId: chatId,
-      status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release'] },
+      status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] },
       allowedUsernames: { $exists: true }
     });
 
     if (!escrow) {
-      // No restriction set — decline by default for safety
-      try { await ctx.telegram.declineChatJoinRequest(chatId, user.id); } catch (_) {}
-      return;
+      escrow = await Escrow.findOne({
+        groupId: chatId,
+        status: { $in: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
+      });
     }
-
-    const participants = getParticipants(escrow);
-    while (participants.length < 2) {
-      participants.push({ username: null, id: null });
-    }
-
     const normalizedUserId = Number(user.id);
     const lowercaseUsername = (user.username || '').toLowerCase();
     const adminUsernames = (config.getAllAdminUsernames?.() || [])
@@ -47,6 +41,25 @@ async function joinRequestHandler(ctx) {
     const adminIds = (config.getAllAdminIds?.() || []).map(String);
     const isAdminUser = adminIds.includes(String(normalizedUserId)) ||
       (lowercaseUsername && adminUsernames.includes(lowercaseUsername));
+
+    if (!escrow) {
+      if (isAdminUser) {
+        try {
+          await ctx.telegram.approveChatJoinRequest(chatId, user.id);
+          console.log(`Admin ${user.id} approved to join group ${chatId} (no escrow found).`);
+        } catch (approveError) {
+          console.error(`Failed to approve admin ${user.id} for group ${chatId}:`, approveError);
+        }
+      } else {
+        try { await ctx.telegram.declineChatJoinRequest(chatId, user.id); } catch (_) {}
+      }
+      return;
+    }
+
+    const participants = getParticipants(escrow);
+    while (participants.length < 2) {
+      participants.push({ username: null, id: null });
+    }
 
     // First, try to match by ID (most reliable)
     let participantIndex = participants.findIndex(

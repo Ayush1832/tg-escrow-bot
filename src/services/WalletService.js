@@ -11,44 +11,40 @@ class WalletService {
     this.init();
   }
 
-  // Get token decimals for a specific token-network pair
   getTokenDecimals(token, network) {
-    // Most tokens use 18 decimals, but some have different decimals
     const decimalsMap = {
-      'USDT_SEPOLIA': 6,    // USDT on Ethereum/Sepolia has 6 decimals
-      'USDT_BSC': 18,       // USDT on BSC has 18 decimals
-      'USDC_BSC': 18,       // USDC on BSC has 18 decimals
-      'BUSD_BSC': 18,       // BUSD on BSC has 18 decimals
-      'BNB_BSC': 18,        // BNB has 18 decimals
-      'ETH_ETH': 18,        // ETH has 18 decimals
-      'BTC_BSC': 18,        // BTC on BSC has 18 decimals
-      'LTC_LTC': 8,         // LTC has 8 decimals
-      'DOGE_DOGE': 8,       // DOGE has 8 decimals
-      'DOGE_BSC': 18,       // DOGE on BSC has 18 decimals
-      'SOL_SOL': 9,         // SOL has 9 decimals
-      'TRX_TRON': 6,        // TRX has 6 decimals
-      'USDT_TRON': 6,       // USDT on TRON has 6 decimals
+      'USDT_SEPOLIA': 6,
+      'USDT_BSC': 18,
+      'USDC_BSC': 18,
+      'BUSD_BSC': 18,
+      'BNB_BSC': 18,
+      'ETH_ETH': 18,
+      'BTC_BSC': 18,
+      'LTC_LTC': 8,
+      'DOGE_DOGE': 8,
+      'DOGE_BSC': 18,
+      'SOL_SOL': 9,
+      'TRX_TRON': 6,
+      'USDT_TRON': 6,
     };
     
     const key = `${token}_${network}`.toUpperCase();
-    return decimalsMap[key] || 18; // Default to 18 decimals if not specified
+    return decimalsMap[key] || 18;
   }
 
   init() {
-    // Ensure private key has 0x prefix
     const privateKey = config.HOT_WALLET_PRIVATE_KEY.startsWith('0x') 
       ? config.HOT_WALLET_PRIVATE_KEY 
       : '0x' + config.HOT_WALLET_PRIVATE_KEY;
     
-    // Initialize hot wallet for each network
     this.hotWallets = {
       BSC: new ethers.Wallet(privateKey),
       SEPOLIA: new ethers.Wallet(privateKey),
       ETH: new ethers.Wallet(privateKey),
-      LTC: new ethers.Wallet(privateKey)
+      LTC: new ethers.Wallet(privateKey),
+      TRON: new ethers.Wallet(privateKey)
     };
     
-    // Generate HD wallet from hot wallet private key
     const privateKeyHex = privateKey.startsWith('0x') 
       ? privateKey.slice(2) 
       : privateKey;

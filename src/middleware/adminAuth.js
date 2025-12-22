@@ -10,19 +10,16 @@ function requireAdmin() {
       const userId = ctx.from?.id;
       const username = ctx.from?.username;
 
-      // Check if user ID matches any admin user ID
       const adminIds = config.getAllAdminIds();
       if (adminIds.some(adminId => userId === parseInt(adminId))) {
         return next();
       }
 
-      // Check if username matches any admin username
       const adminUsernames = config.getAllAdminUsernames();
       if (adminUsernames.includes(username)) {
         return next();
       }
 
-      // If neither matches, deny access
       await ctx.reply('❌ Access denied. Admin privileges required.');
       
     } catch (error) {
@@ -39,13 +36,11 @@ function isAdmin(ctx) {
   const userId = ctx.from?.id;
   const username = ctx.from?.username;
 
-  // Check if user ID matches any admin user ID
   const adminIds = config.getAllAdminIds();
   if (adminIds.some(adminId => userId === parseInt(adminId))) {
     return true;
   }
 
-  // Check if username matches any admin username
   const adminUsernames = config.getAllAdminUsernames();
   if (adminUsernames.includes(username)) {
     return true;

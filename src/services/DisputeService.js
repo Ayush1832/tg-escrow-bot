@@ -3,7 +3,6 @@ const GroupPool = require('../models/GroupPool');
 const GroupPoolService = require('./GroupPoolService');
 const { formatParticipantByIndex, formatParticipantById } = require('../utils/participant');
 
-// HTML escape helper
 function escapeHtml(text = '') {
   if (typeof text !== 'string') {
     text = String(text);
@@ -31,7 +30,6 @@ class DisputeService {
         return { success: false, error: 'Dispute channel not configured' };
       }
 
-      // Get group information
       const group = await GroupPool.findOne({ 
         $or: [
           { assignedEscrowId: escrow.escrowId },
@@ -41,23 +39,34 @@ class DisputeService {
 
       const groupTitle = escapeHtml(group?.groupTitle || 'Unknown');
       
-      // Get or generate invite link
-      let inviteLink = group?.inviteLink || escrow.inviteLink;
-      if (!inviteLink && group && telegram) {
+      let inviteLink = null;
+      if (group && telegram) {
         try {
-          // Try to generate a new invite link if one doesn't exist
           inviteLink = await GroupPoolService.generateInviteLink(
             group.groupId,
             telegram,
-            { creates_join_request: true }
+            { 
+              creates_join_request: true,
+              forceRefresh: true
+            }
           );
         } catch (linkError) {
           console.error('Error generating invite link for dispute:', linkError);
-          inviteLink = null; // Will be set to fallback below
+          try {
+            inviteLink = await GroupPoolService.refreshInviteLink(group.groupId, telegram);
+          } catch (refreshError) {
+            console.error('Error refreshing invite link for dispute:', refreshError);
+            const freshGroup = await GroupPool.findOne({ groupId: group.groupId });
+            inviteLink = freshGroup?.inviteLink || group?.inviteLink || null;
+          }
         }
+      } else if (group) {
+        const freshGroup = await GroupPool.findOne({ groupId: group.groupId });
+        inviteLink = freshGroup?.inviteLink || group?.inviteLink || null;
+      } else {
+        inviteLink = null;
       }
       
-      // Escape invite link for HTML display and href attribute
       const inviteLinkDisplay = inviteLink 
         ? escapeHtml(inviteLink) 
         : 'No invite link available';
@@ -65,7 +74,6 @@ class DisputeService {
         ? escapeHtml(inviteLink) 
         : null;
 
-      // Get buyer and seller information
       const buyerParticipant = escrow.buyerId 
         ? { id: escrow.buyerId, username: escrow.buyerUsername }
         : null;
@@ -73,7 +81,6 @@ class DisputeService {
         ? { id: escrow.sellerId, username: escrow.sellerUsername }
         : null;
 
-      // Format buyer and seller mentions (unmasked for admins)
       const buyerText = buyerParticipant
         ? formatParticipantById(escrow, escrow.buyerId, 'Buyer', { html: true, mask: false })
         : 'Not set';
@@ -81,24 +88,20 @@ class DisputeService {
         ? formatParticipantById(escrow, escrow.sellerId, 'Seller', { html: true, mask: false })
         : 'Not set';
 
-      // Get reporter information - safely handle null/undefined buyerId/sellerId
       let reporterText = 'Unknown';
       if (escrow.buyerId != null && Number(escrow.buyerId) === Number(reportedByUserId)) {
         reporterText = 'Buyer';
       } else if (escrow.sellerId != null && Number(escrow.sellerId) === Number(reportedByUserId)) {
         reporterText = 'Seller';
       } else {
-        // Check if it's an admin
         const adminIds = config.getAllAdminIds();
         if (adminIds.includes(String(reportedByUserId))) {
           reporterText = 'Admin';
         }
       }
 
-      // Escape user-provided reason to prevent HTML injection
       const escapedReason = escapeHtml(reason || 'No reason provided');
       
-      // Format the dispute message
       const disputeMessage = `🚨 <b>NEW DISPUTE REPORTED</b>
 
 📋 <b>Escrow ID:</b> <code>${escapeHtml(escrow.escrowId || 'Unknown')}</code>
@@ -121,7 +124,6 @@ ${escapedReason}
 
 ⏰ <b>Reported At:</b> ${escapeHtml(new Date().toLocaleString())}`;
 
-      // Send message to dispute channel
       await telegram.sendMessage(config.DISPUTE_CHANNEL_ID, disputeMessage, {
         parse_mode: 'HTML',
         disable_web_page_preview: true

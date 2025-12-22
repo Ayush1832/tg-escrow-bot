@@ -3,7 +3,6 @@ const config = require('../../config');
 
 const connectDB = async () => {
   try {
-    // Set connection options for better reliability
     const options = {
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 5000,
@@ -13,7 +12,6 @@ const connectDB = async () => {
     
     await mongoose.connect(config.MONGODB_URI, options);
     
-    // Wait for the connection to be fully established
     await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error('MongoDB connection timeout'));

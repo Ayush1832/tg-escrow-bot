@@ -12,8 +12,8 @@ const UserStatsService = require('../services/UserStatsService');
 const CompletionFeedService = require('../services/CompletionFeedService');
 const { getParticipants, formatParticipant, formatParticipantById } = require('../utils/participant');
 const findGroupEscrow = require('../utils/findGroupEscrow');
+const { getAddressExample } = require('../utils/addressValidation');
 
-// Track scheduled group recycling timeouts to avoid duplicate timers
 const groupRecyclingTimers = new Map();
 
 /**
@@ -23,14 +23,11 @@ async function safeAnswerCbQuery(ctx, text = '') {
   try {
     await ctx.answerCbQuery(text);
   } catch (error) {
-    // Ignore expired callback query errors - they're harmless
     if (error.description?.includes('query is too old') || 
         error.description?.includes('query ID is invalid') ||
         error.response?.error_code === 400) {
-      // Silently ignore - query already expired or was already answered
       return;
     }
-    // Log other errors for debugging
     console.error('Error answering callback query:', error);
   }
 }
@@ -41,10 +38,9 @@ async function safeAnswerCbQuery(ctx, text = '') {
 async function updateTradeStartedMessage(escrow, telegram, status, transactionHash = null) {
   try {
     if (!escrow.originChatId || !escrow.tradeStartedMessageId) {
-    return; // No message to update
+    return;
   }
   
-    // Format buyer and seller labels - handle missing participants gracefully
     const buyerLabel = escrow.buyerId != null
       ? formatParticipantById(escrow, escrow.buyerId, 'Buyer', { html: true })
       : 'Not set';
@@ -52,16 +48,12 @@ async function updateTradeStartedMessage(escrow, telegram, status, transactionHa
       ? formatParticipantById(escrow, escrow.sellerId, 'Seller', { html: true })
       : 'Not set';
 
-    // Calculate time taken
     const tradeStart = escrow.tradeStartTime || escrow.createdAt || new Date();
     const minutesTaken = Math.max(
       1,
       Math.round((Date.now() - new Date(tradeStart)) / (60 * 1000))
     );
 
-    // Transaction link removed per user request
-
-    // Format amount - safely handle null/undefined/NaN
     let amount = 0;
     if (escrow.quantity != null && !isNaN(escrow.quantity)) {
       amount = Number(escrow.quantity);
@@ -71,7 +63,6 @@ async function updateTradeStartedMessage(escrow, telegram, status, transactionHa
     const token = (escrow.token || 'USDT').toUpperCase();
     const amountDisplay = `${amount.toFixed(2)} ${token}`;
 
-    // Build status-specific message
     let statusEmoji = '';
     let statusText = '';
     if (status === 'completed') {
@@ -94,6 +85,7 @@ async function updateTradeStartedMessage(escrow, telegram, status, transactionHa
 💰 <b>Amount:</b> ${amountDisplay}
 ⏱️ <b>Time Taken:</b> ${minutesTaken} min(s)`;
 
+    try {
     await telegram.editMessageText(
       escrow.originChatId,
       escrow.tradeStartedMessageId,
@@ -101,9 +93,16 @@ async function updateTradeStartedMessage(escrow, telegram, status, transactionHa
       updatedMessage,
       { parse_mode: 'HTML' }
     );
+    } catch (e) {
+      const description = e?.response?.description || e?.description || e?.message || '';
+      // Ignore harmless \"message is not modified\" errors
+      if (description.includes('message is not modified')) {
+        return;
+      }
+      console.error('Error updating trade started message:', e);
+    }
   } catch (error) {
-    // Non-critical - message might have been deleted or bot doesn't have permission
-    console.error('Error updating trade started message:', error);
+    console.error('Error preparing trade started message:', error);
   }
 }
 
@@ -196,7 +195,6 @@ async function recycleGroupImmediately(escrow, telegram) {
       assignedEscrowId: escrow.escrowId
     });
 
-    // Refund flows may have already cleared assignedEscrowId. Fallback by groupId.
     if (!group && escrow.groupId) {
       group = await GroupPool.findOne({ groupId: escrow.groupId });
     }
@@ -279,7 +277,6 @@ async function updateRoleSelectionMessage(ctx, escrow) {
       statusLines.push(escrow.sellerId ? `✅ ${sellerLabel} - SELLER` : `⏳ ${sellerLabel} - Waiting...`);
     }
     
-    // Role selection disclaimer
     const roleDisclaimer = `<b>⚠️ Choose roles accordingly</b>
 
 <b>As release & refund happen according to roles</b>
@@ -290,7 +287,6 @@ async function updateRoleSelectionMessage(ctx, escrow) {
     
     const messageText = roleDisclaimer + statusLines.join('\n');
     
-    // Update the message (remove buttons if both roles are set)
     const replyMarkup = (escrow.buyerId && escrow.sellerId) ? undefined : {
       inline_keyboard: [
         [
@@ -300,7 +296,6 @@ async function updateRoleSelectionMessage(ctx, escrow) {
       ]
     };
     
-    // Role selection message is now a photo, so we need to edit the caption
     try {
       await ctx.telegram.editMessageCaption(
       escrow.groupId,
@@ -312,13 +307,12 @@ async function updateRoleSelectionMessage(ctx, escrow) {
     } catch (editError) {
       const description = editError?.response?.description || editError?.message || '';
       if (description.includes('message is not modified')) {
-        return; // Safe to ignore
+        return;
       }
       throw editError;
     }
   } catch (error) {
     console.error('Error updating role selection message:', error);
-    // Non-critical - continue execution
   }
 }
 
@@ -331,7 +325,6 @@ module.exports = async (ctx) => {
     // Handle different callback types
     if (callbackData === 'select_role_buyer' || callbackData === 'select_role_seller') {
       const isBuyer = callbackData === 'select_role_buyer';
-      // Answer callback query immediately to prevent timeout
       await safeAnswerCbQuery(ctx, isBuyer ? 'Buyer role selected' : 'Seller role selected');
       
       const escrow = await findGroupEscrow(
@@ -344,7 +337,6 @@ module.exports = async (ctx) => {
         return;
       }
       
-      // Prevent same user from being both buyer and seller
       if (isBuyer && escrow.sellerId && escrow.sellerId === userId) {
         await safeAnswerCbQuery(ctx, '❌ You cannot be both buyer and seller.');
         return;
@@ -354,7 +346,6 @@ module.exports = async (ctx) => {
         return;
       }
       
-      // Assign role
       if (isBuyer) {
         if (escrow.buyerId && escrow.buyerId !== userId) {
           await safeAnswerCbQuery(ctx, '❌ Buyer role already taken.');
@@ -399,15 +390,9 @@ module.exports = async (ctx) => {
       
       await escrow.save();
       
-      // Update role selection message
       await updateRoleSelectionMessage(ctx, escrow);
       
-      // If both roles are set, start step-by-step trade details process (if not already completed)
       if (escrow.buyerId && escrow.sellerId && escrow.roleSelectionMessageId) {
-        // Note: Role selection message is kept permanently (not deleted)
-        // Only Step 1-3 messages will be deleted after 5 minutes
-        
-        // Start step-by-step trade details process if not already completed
         if (!escrow.tradeDetailsStep || escrow.tradeDetailsStep !== 'completed') {
           escrow.tradeDetailsStep = 'step1_amount';
           const step1Msg = await ctx.telegram.sendPhoto(escrow.groupId, images.ENTER_QUANTITY, {
@@ -417,7 +402,6 @@ module.exports = async (ctx) => {
           await escrow.save();
           
         } else {
-          // Trade details already set, show next instructions
           const buyerText = 'Now set /buyer address.\n\n📋 Example:\n• /buyer 0xabcdef1234567890abcdef1234567890abcdef12';
               await ctx.telegram.sendMessage(escrow.groupId, buyerText);
         }
@@ -428,17 +412,39 @@ module.exports = async (ctx) => {
       await safeAnswerCbQuery(ctx, 'Cancelled');
       return;
     } else if (callbackData === 'approve_deal_summary') {
-      await safeAnswerCbQuery(ctx, 'Approving deal...');
+      // First check if there's any escrow with dealSummaryMessageId in this group (any status)
+      // This handles cases where the deal has progressed or the message is stale/forwarded
+      const anyEscrow = await Escrow.findOne({
+        groupId: String(chatId),
+        dealSummaryMessageId: { $exists: true, $ne: null }
+      }).sort({ _id: -1 });
       
+      // If escrow exists but status is wrong, silently ignore (deal already progressed)
+      if (anyEscrow && !['draft', 'awaiting_details'].includes(anyEscrow.status)) {
+        await safeAnswerCbQuery(ctx, '✅ This deal has already been processed.');
+        return;
+      }
+      
+      // If no escrow found at all, silently ignore (message might be old/forwarded)
+      if (!anyEscrow) {
+        await safeAnswerCbQuery(ctx, '✅ This deal summary is no longer active.');
+        return;
+      }
+      
+      // Now find the escrow with correct status
       const escrow = await findGroupEscrow(
         chatId,
         ['draft', 'awaiting_details'],
         { dealSummaryMessageId: { $exists: true } }
       );
       
+      // Final check (shouldn't happen, but safety net)
       if (!escrow) {
-        return ctx.reply('❌ No active deal summary found.');
+        await safeAnswerCbQuery(ctx, '✅ This deal summary is no longer active.');
+        return;
       }
+      
+      await safeAnswerCbQuery(ctx, 'Approving deal...');
       
       const userId = ctx.from.id;
       const isBuyer = escrow.buyerId === userId;
@@ -668,7 +674,7 @@ Once you’ve sent the amount, tap the button below.`;
       
       // Update blockchain selection message with tick mark
       if (escrow.step4ChainMessageId) {
-        const chains = ['BSC'];
+        const chains = ['BSC', 'TRON'];
         const buttons = chains.map(c => ({ text: c === chain ? `✔ ${c}` : c, callback_data: `step4_select_chain_${c}` }));
         
         try {
@@ -691,7 +697,7 @@ Once you’ve sent the amount, tap the button below.`;
       }
       
       // Immediately show coin selection after chain is chosen
-      const coins = ['USDT', 'USDC'];
+      const coins = chain === 'TRON' ? ['USDT'] : ['USDT', 'USDC'];
       try {
         const coinMsg = await ctx.telegram.sendPhoto(escrow.groupId, images.SELECT_CRYPTO, {
           caption: '⚪ Select Coin',
@@ -735,7 +741,7 @@ Once you’ve sent the amount, tap the button below.`;
       
       // Update coin selection message with tick mark
       if (escrow.step4CoinMessageId) {
-        const coins = ['USDT', 'USDC'];
+        const coins = (escrow.chain && escrow.chain.toUpperCase() === 'TRON') ? ['USDT'] : ['USDT', 'USDC'];
         const buttons = coins.map(c => {
           const text = c === coin ? `✔ ${c}` : c;
           return { text, callback_data: `step4_select_coin_${c}` };
@@ -774,11 +780,13 @@ Once you’ve sent the amount, tap the button below.`;
         const telegram = ctx.telegram;
         const groupId = updatedEscrow.groupId;
         
+        let addressExample = getAddressExample(chainName);
+        addressExample = addressExample.replace('{username}', buyerUsername).replace('{chain}', chainName);
         const step5Msg = await telegram.sendPhoto(
           groupId,
           images.ENTER_ADDRESS,
           {
-            caption: `💰 Step 5 - ${buyerUsername}, enter your ${chainName} wallet address starts with 0x and is 42 chars (0x + 40 hex).`
+            caption: addressExample
           }
         );
         updatedEscrow.step5BuyerAddressMessageId = step5Msg.message_id;
@@ -1205,6 +1213,8 @@ Once you’ve sent the amount, tap the button below.`;
       return;
     } else if (callbackData.startsWith('admin_release_confirm_yes_')) {
       const escrowId = callbackData.replace('admin_release_confirm_yes_', '');
+      const callbackMessageId = ctx.callbackQuery?.message?.message_id;
+
       const escrow = await Escrow.findOne({
         escrowId,
         status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
@@ -1212,6 +1222,17 @@ Once you’ve sent the amount, tap the button below.`;
 
       if (!escrow) {
         return safeAnswerCbQuery(ctx,'❌ No active escrow found.');
+      }
+
+      // Guard against duplicate / stale confirmations
+      if (!escrow.releaseConfirmationMessageId || 
+          (callbackMessageId && escrow.releaseConfirmationMessageId !== callbackMessageId)) {
+        return safeAnswerCbQuery(ctx,'❌ This release confirmation is no longer valid or has already been processed.');
+      }
+
+      // Also guard against already-settled deals
+      if (escrow.releaseTransactionHash || ['completed','refunded'].includes(escrow.status)) {
+        return safeAnswerCbQuery(ctx,'❌ This deal has already been settled.');
       }
 
       const userId = ctx.from.id;
@@ -1500,6 +1521,8 @@ Thank you for using our safe escrow system.`;
       return;
     } else if (callbackData.startsWith('release_confirm_yes_')) {
       const escrowId = callbackData.replace('release_confirm_yes_', '');
+      const callbackMessageId = ctx.callbackQuery?.message?.message_id;
+
       const escrow = await Escrow.findOne({
         escrowId,
         status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
@@ -1507,6 +1530,17 @@ Thank you for using our safe escrow system.`;
 
       if (!escrow) {
         return safeAnswerCbQuery(ctx,'❌ No active escrow found.');
+      }
+
+      // Guard against duplicate / stale confirmations
+      if (!escrow.releaseConfirmationMessageId || 
+          (callbackMessageId && escrow.releaseConfirmationMessageId !== callbackMessageId)) {
+        return safeAnswerCbQuery(ctx,'❌ This release confirmation is no longer valid or has already been processed.');
+      }
+
+      // Also guard against already-settled deals
+      if (escrow.releaseTransactionHash || ['completed','refunded'].includes(escrow.status)) {
+        return safeAnswerCbQuery(ctx,'❌ This deal has already been settled.');
       }
 
       const userId = ctx.from.id;
@@ -1592,6 +1626,11 @@ ${approvalNote}`;
       
       // Check if both have confirmed
       if (updatedEscrow.buyerConfirmedRelease && updatedEscrow.sellerConfirmedRelease) {
+        // Final guard to prevent double release if something already settled the deal
+        if (updatedEscrow.releaseTransactionHash || ['completed','refunded'].includes(updatedEscrow.status)) {
+          return safeAnswerCbQuery(ctx,'❌ This deal has already been settled.');
+        }
+
         const decimals = BlockchainService.getTokenDecimals(updatedEscrow.token, updatedEscrow.chain);
         const totalDepositedWei = updatedEscrow.accumulatedDepositAmountWei && updatedEscrow.accumulatedDepositAmountWei !== '0'
           ? updatedEscrow.accumulatedDepositAmountWei
@@ -1781,6 +1820,8 @@ ${approvalNote}`;
               explorerUrl = `https://etherscan.io/tx/${releaseResult.transactionHash}`;
             } else if (chainUpper === 'POLYGON' || chainUpper === 'MATIC') {
               explorerUrl = `https://polygonscan.com/tx/${releaseResult.transactionHash}`;
+            } else if (chainUpper === 'TRON' || chainUpper === 'TRX') {
+              explorerUrl = `https://tronscan.org/#/transaction/${releaseResult.transactionHash}`;
             }
           }
           
@@ -2116,6 +2157,8 @@ Use /release After Fund Transfer to Seller
       return;
     } else if (callbackData.startsWith('refund_confirm_yes_')) {
       const escrowId = callbackData.replace('refund_confirm_yes_', '');
+      const callbackMessageId = ctx.callbackQuery?.message?.message_id;
+
       const escrow = await Escrow.findOne({
         escrowId,
         status: { $in: ['deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed'] }
@@ -2123,6 +2166,15 @@ Use /release After Fund Transfer to Seller
       
       if (!escrow) {
         return safeAnswerCbQuery(ctx,'❌ No active escrow found.');
+      }
+
+      // Guard against duplicate / stale confirmations:
+      // - If the stored confirmation message ID is missing or does not match
+      //   the message that triggered this callback, treat it as already
+      //   processed / cancelled and do NOT issue another refund.
+      if (!escrow.refundConfirmationMessageId || 
+          (callbackMessageId && escrow.refundConfirmationMessageId !== callbackMessageId)) {
+        return safeAnswerCbQuery(ctx,'❌ This refund confirmation is no longer valid or has already been processed.');
       }
 
       // Check if user is admin
@@ -2293,6 +2345,8 @@ Use /release After Fund Transfer to Seller
             explorerUrl = `https://etherscan.io/tx/${refundResult.transactionHash}`;
           } else if (chainUpper === 'POLYGON' || chainUpper === 'MATIC') {
             explorerUrl = `https://polygonscan.com/tx/${refundResult.transactionHash}`;
+          } else if (chainUpper === 'TRON' || chainUpper === 'TRX') {
+            explorerUrl = `https://tronscan.org/#/transaction/${refundResult.transactionHash}`;
           }
           
           if (explorerUrl) {
@@ -2518,6 +2572,8 @@ Thank you for using our safe escrow system.`;
               explorerUrl = `https://etherscan.io/tx/${releaseResult.transactionHash}`;
             } else if (chain.toUpperCase() === 'POLYGON' || chain.toUpperCase() === 'MATIC') {
               explorerUrl = `https://polygonscan.com/tx/${releaseResult.transactionHash}`;
+            } else if (chain.toUpperCase() === 'TRON' || chain.toUpperCase() === 'TRX') {
+              explorerUrl = `https://tronscan.org/#/transaction/${releaseResult.transactionHash}`;
             }
           }
           
@@ -2709,6 +2765,18 @@ Trade completed successfully.`;
           } catch (statsError) {
             console.error('Error recording trade stats:', statsError);
           }
+          
+          // Send completion log
+          try {
+            await CompletionFeedService.handleCompletion({
+              escrow,
+              amount: actualAmount,
+              transactionHash: releaseResult.transactionHash,
+              telegram: ctx.telegram
+            });
+          } catch (feedError) {
+            console.error('Error broadcasting completion feed:', feedError);
+          }
 
 
           const successText = `
@@ -2729,6 +2797,8 @@ Approved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escro
               explorerUrl = `https://etherscan.io/tx/${releaseResult.transactionHash}`;
             } else if (chain.toUpperCase() === 'POLYGON' || chain.toUpperCase() === 'MATIC') {
               explorerUrl = `https://polygonscan.com/tx/${releaseResult.transactionHash}`;
+            } else if (chain.toUpperCase() === 'TRON' || chain.toUpperCase() === 'TRX') {
+              explorerUrl = `https://tronscan.org/#/transaction/${releaseResult.transactionHash}`;
             }
             
             if (explorerUrl) {
@@ -2854,6 +2924,70 @@ Approved By: ${escrow.sellerUsername ? '@' + escrow.sellerUsername : '[' + escro
       
       await safeAnswerCbQuery(ctx, '❌ Transaction rejected');
       await ctx.reply('❌ Transaction has been rejected by one of the parties. Please restart the process if needed.');
+      
+      return;
+    } else if (callbackData === 'withdraw_cancel') {
+      // Handle withdrawal cancellation - must be in private chat
+      const callbackChatId = ctx.chat?.id || ctx.callbackQuery?.message?.chat?.id;
+      if (!callbackChatId || callbackChatId <= 0) {
+        await safeAnswerCbQuery(ctx, '❌ This command can only be used in private chat.');
+        return;
+      }
+      
+      await safeAnswerCbQuery(ctx, '❌ Withdrawal cancelled');
+      try {
+        await ctx.editMessageText('❌ Withdrawal cancelled by admin.');
+      } catch (editError) {
+        // Message might have been deleted, ignore
+      }
+      return;
+    } else if (callbackData === 'withdraw_proceed') {
+      // Handle proceed anyway button - check if admin and private chat first
+      const callbackChatId = ctx.chat?.id || ctx.callbackQuery?.message?.chat?.id;
+      if (!callbackChatId || callbackChatId <= 0) {
+        await safeAnswerCbQuery(ctx, '❌ This command can only be used in private chat.');
+        return;
+      }
+      
+      const { isAdmin } = require('../middleware/adminAuth');
+      if (!isAdmin(ctx)) {
+        await safeAnswerCbQuery(ctx, '❌ Access denied. Admin privileges required.');
+        return;
+      }
+
+      await safeAnswerCbQuery(ctx, '⚠️ Proceeding to confirmation...');
+      
+      // Import and call the confirmation request function
+      const { requestWithdrawConfirmation } = require('./adminHandler');
+      await requestWithdrawConfirmation(ctx);
+      
+      return;
+    } else if (callbackData === 'withdraw_confirm') {
+      // Handle final confirmation - check if admin and private chat first
+      const callbackChatId = ctx.chat?.id || ctx.callbackQuery?.message?.chat?.id;
+      if (!callbackChatId || callbackChatId <= 0) {
+        await safeAnswerCbQuery(ctx, '❌ This command can only be used in private chat.');
+        return;
+      }
+      
+      const { isAdmin } = require('../middleware/adminAuth');
+      if (!isAdmin(ctx)) {
+        await safeAnswerCbQuery(ctx, '❌ Access denied. Admin privileges required.');
+        return;
+      }
+
+      await safeAnswerCbQuery(ctx, '🔄 Executing withdrawal...');
+      
+      // Update message to show processing
+      try {
+        await ctx.editMessageText('🔄 Processing withdrawal... Please wait.');
+      } catch (e) {
+        // Message might already be edited or deleted, ignore
+      }
+      
+      // Import and execute the withdrawal
+      const { executeWithdrawExcess } = require('./adminHandler');
+      await executeWithdrawExcess(ctx);
       
       return;
     }

@@ -76,6 +76,10 @@
 
 `/refund <amount>` - Refund partial amount to seller (admin only, in group chat)
 
+### Fund Management
+
+`/admin_withdraw_bsc_usdt` - Withdraw excess USDT from BSC escrow contracts to admin wallet (private chat only, admin only)
+
 ### Help and Reference
 
 `/admin_help` - Display all admin commands with descriptions

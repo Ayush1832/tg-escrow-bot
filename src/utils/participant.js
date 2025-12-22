@@ -67,7 +67,6 @@ function formatParticipant(participant, fallbackLabel = 'Unknown', options = {})
     const usernameLabel = `@${participant.username}`;
     displayText = mask ? `@${maskValue(participant.username)}` : usernameLabel;
   } else {
-    // If no username but has ID, use the ID as display text instead of fallback label
     if (hasId) {
       displayText = `User ${participant.id}`;
     } else {

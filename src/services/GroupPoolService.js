@@ -7,7 +7,6 @@ class GroupPoolService {
    */
   async assignGroup(escrowId, telegram = null) {
     try {
-      // Find an available group
       const availableGroup = await GroupPool.findOne({ 
         status: 'available' 
       });
@@ -16,7 +15,6 @@ class GroupPoolService {
         throw new Error('No available groups in pool. All groups are currently occupied.');
       }
 
-      // Double-check group is still available (prevent race conditions)
       const recheckGroup = await GroupPool.findOne({ 
         _id: availableGroup._id,
         status: 'available' 
@@ -26,7 +24,6 @@ class GroupPoolService {
         throw new Error('Group was assigned to another escrow. Please try again.');
       }
 
-      // Update group status atomically
       const updateResult = await GroupPool.updateOne(
         { _id: availableGroup._id, status: 'available' },
         { 
@@ -40,10 +37,8 @@ class GroupPoolService {
         throw new Error('Group assignment failed. Please try again.');
       }
 
-      // Return updated group
       const updatedGroup = await GroupPool.findById(availableGroup._id);
 
-      // Verify admin is present when group is assigned (if telegram is provided)
       if (telegram) {
         await this.ensureAdminInGroup(updatedGroup.groupId, telegram);
       }
@@ -51,7 +46,6 @@ class GroupPoolService {
       return updatedGroup;
 
     } catch (error) {
-      // Only log errors that are not "no available groups" 
       if (!error.message || (!error.message.includes('No available groups') && !error.message.includes('All groups are currently occupied'))) {
         console.error('Error assigning group:', error);
       }
@@ -80,104 +74,64 @@ class GroupPoolService {
 
       const chatId = String(groupId);
       
-      // If forceRefresh is true, ensure we clear any existing link first
-      // This is a safety measure in case the link wasn't cleared in refreshInviteLink
-      // NOTE: refreshInviteLink() already clears the link before calling this function,
-      // but this check ensures we handle any edge cases or race conditions
       if (options.forceRefresh && group.inviteLink) {
         try {
           await telegram.revokeChatInviteLink(chatId, group.inviteLink);
         } catch (revokeError) {
-          // Link might already be revoked - ignore
         }
         group.inviteLink = null;
         group.inviteLinkHasJoinRequest = false;
         await group.save();
       }
 
-      // IMPORTANT: If join request approval is required, we MUST create a new link with creates_join_request: true
-      // Primary invite links (from exportChatInviteLink) do NOT support join request approval
-      // They allow direct joining without verification, which is a security issue
       if (options.creates_join_request === true) {
-        // If we already have a link with join request approval, try to reuse it
-        // But if refreshInviteLink was called (forceRefresh=true), we should always create a new link
-        // Only reuse if explicitly requested (not during refresh)
-        // NOTE: When forceRefresh=true, group.inviteLink should be null (cleared above or in refreshInviteLink),
-        // so this condition will be false and we'll skip to creating a new link
         if (group.inviteLink && group.inviteLinkHasJoinRequest && !options.forceRefresh) {
-          // Verify the chat is accessible - if chat is accessible, assume link is valid
-          // Note: We can't directly validate invite links via API without the invite link object
-          // So we verify chat accessibility and trust that if chat is accessible, link should work
-          // If link is expired, users will get an error and we'll refresh it when needed
           try {
             await telegram.getChat(chatId);
-            // Chat is accessible - reuse the link
-            // If the link is expired, users will report it and we'll refresh it
             return group.inviteLink;
           } catch (verifyError) {
-            // Chat might have issues - clear link and create new one
             console.log(`Chat verification failed for ${groupId}: ${verifyError.message}`);
             try {
               if (group.inviteLink) {
                 await telegram.revokeChatInviteLink(chatId, group.inviteLink);
               }
             } catch (revokeError) {
-              // Ignore revoke errors
             }
             group.inviteLink = null;
             group.inviteLinkHasJoinRequest = false;
             await group.save();
           }
         } else if (group.inviteLink) {
-          // We have a link but it doesn't have join request approval or forceRefresh is true
-          // Revoke it and create a new one with join request approval
           try {
             await telegram.revokeChatInviteLink(chatId, group.inviteLink);
           } catch (revokeError) {
-            // Link might already be revoked or invalid - continue to create new one
-            // Error is non-critical - we'll create a new link anyway
           }
           group.inviteLink = null;
           group.inviteLinkHasJoinRequest = false;
           await group.save();
         }
       } else {
-        // For non-restricted links, try to use the primary invite link first
-        // Primary invite links work for everyone, including previously removed users
         try {
           const primaryLink = await telegram.exportChatInviteLink(chatId);
           if (primaryLink) {
-            // Update group with primary invite link (this revokes any previous primary link)
             group.inviteLink = primaryLink;
             await group.save();
             return primaryLink;
           }
         } catch (exportError) {
-          // Primary link export failed - might not have permission or group doesn't have primary link
-          // Continue to check stored link or create new one
         }
 
-        // If primary link export failed, check if we have a stored link
-        // Strategy: Reuse existing invite link if it exists
-        // Only create a new link if the group doesn't have one
         if (group.inviteLink) {
-          // Verify the existing link is still valid by checking chat info
           try {
             await telegram.getChat(chatId);
-            
-            // Link exists and chat is accessible - reuse it
             return group.inviteLink;
           } catch (verifyError) {
-            // Link might be invalid or chat might have issues
-            // Clear it and create a new one
             group.inviteLink = null;
             await group.save();
           }
         }
       }
 
-      // No existing link or link is invalid - create a new permanent link
-      // Generate invite link. If creates_join_request is true, do NOT set member_limit (Telegram API restriction)
       let inviteLinkData;
       try {
         const params = {};
@@ -186,20 +140,16 @@ class GroupPoolService {
         } else {
           params.member_limit = options.member_limit ?? 2;
         }
-        // DO NOT set expire_date - this makes the link permanent (never expires)
-        // Only set expiry if explicitly provided in options (which should be rare)
         if (typeof options.expire_date === 'number') {
           params.expire_date = options.expire_date;
         }
         inviteLinkData = await telegram.createChatInviteLink(chatId, params);
       } catch (chatError) {
-        // Handle migration: group upgraded to supergroup → use migrate_to_chat_id
         const migrateId = chatError?.on?.payload?.chat_id === chatId && chatError?.response?.parameters?.migrate_to_chat_id
           ? String(chatError.response.parameters.migrate_to_chat_id)
           : null;
 
         if (migrateId) {
-          // Update stored groupId to the new supergroup id and retry once
           group.groupId = migrateId;
           await group.save();
           try {
@@ -209,7 +159,6 @@ class GroupPoolService {
             } else {
               retryParams.member_limit = options.member_limit ?? 2;
             }
-            // DO NOT set expire_date - permanent link
             if (typeof options.expire_date === 'number') {
               retryParams.expire_date = options.expire_date;
             }
@@ -219,15 +168,12 @@ class GroupPoolService {
             throw retryErr;
           }
         } else if (chatError.message.includes('chat not found')) {
-          // Group doesn't exist or bot is not a member - mark group as archived
           group.status = 'archived';
           await group.save();
           throw new Error(`Group ${groupId} not found or bot is not a member. Group has been archived.`);
         }
         throw chatError;
       }
-
-      // Update group with the new permanent invite link
       group.inviteLink = inviteLinkData.invite_link;
       group.inviteLinkHasJoinRequest = options.creates_join_request === true;
       await group.save();
@@ -253,12 +199,9 @@ class GroupPoolService {
         return null;
       }
 
-      // Mark group as completed
-      // IMPORTANT: Do NOT clear group.inviteLink - we keep the permanent link for reuse
       group.status = 'completed';
       group.completedAt = new Date();
-      // Keep inviteLink - it's permanent
-      group.assignedEscrowId = null; // Clear assignment
+      group.assignedEscrowId = null;
       group.assignedAt = null;
       await group.save();
 
@@ -777,19 +720,10 @@ class GroupPoolService {
         return null;
       }
 
-      // IMPORTANT: We MUST create a link with join request approval for security
-      // Primary invite links (from exportChatInviteLink) do NOT support join request approval
-      // They allow direct joining without verification, which is a security issue
-      // So we skip primary link export and always create a new link with creates_join_request: true
-
-      // Revoke old link if it exists
       if (group.inviteLink) {
         try {
-          // Telegram API accepts the full invite link URL string
           await telegram.revokeChatInviteLink(chatId, group.inviteLink);
         } catch (revokeError) {
-          // Link might already be revoked or invalid - continue to create new one
-          // Error is non-critical - we'll create a new link anyway
           console.log(`Could not revoke old invite link for ${groupId}: ${revokeError.message}`);
         }
         group.inviteLink = null;
@@ -797,28 +731,19 @@ class GroupPoolService {
         await group.save();
       }
 
-      // Small delay to ensure Telegram has processed all unbans before creating new link
-      // This helps ensure the new link will work for previously removed users
-      // Note: Telegram may need a moment to process unbans, so we wait before creating the link
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Increased to 2 seconds for better reliability
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
-      // Create a new permanent invite link with join request approval
-      // This new link will work for previously removed users after they are unbanned
-      // We force creation by passing creates_join_request and forceRefresh flag
       const newLink = await this.generateInviteLink(groupId, telegram, { 
         creates_join_request: true,
-        forceRefresh: true // Force creation of new link, don't reuse existing
+        forceRefresh: true
       });
       
-      // Verify the link was created and saved correctly
       const updatedGroup = await GroupPool.findOne({ groupId });
       if (updatedGroup) {
         if (newLink && updatedGroup.inviteLink === newLink) {
-          // Link is saved correctly, ensure flag is set
           updatedGroup.inviteLinkHasJoinRequest = true;
           await updatedGroup.save();
         } else if (newLink) {
-          // Link was created but not saved - save it now
           updatedGroup.inviteLink = newLink;
           updatedGroup.inviteLinkHasJoinRequest = true;
           await updatedGroup.save();
@@ -827,7 +752,6 @@ class GroupPoolService {
       
       return newLink;
     } catch (error) {
-      // Log error for debugging
       console.error(`Error refreshing invite link for ${groupId}:`, error);
       // Non-critical error - group can still be recycled, link will be created when needed
       return null;

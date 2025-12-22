@@ -13,11 +13,10 @@ class AddressAssignmentService {
   normalizeChainToNetwork(chain) {
     if (!chain) return 'BSC';
     const upper = chain.toUpperCase();
-    // Map common chain names to network names
     if (upper === 'BNB' || upper === 'BEP-20') return 'BSC';
     if (upper === 'ETHEREUM') return 'ETH';
     if (upper === 'MATIC' || upper === 'POLYGON') return 'POLYGON';
-    return upper; // Return as-is if no mapping needed
+    return upper;
   }
 
   async assignDepositAddress(escrowId, token, network, amount, feePercent = null, groupId = null) {
@@ -26,25 +25,20 @@ class AddressAssignmentService {
       let normalizedNetwork = network ? this.normalizeChainToNetwork(network) : 'BSC';
       const normalizedFeePercent = feePercent !== null ? Number(feePercent) : Number(config.ESCROW_FEE_PERCENT || 0);
 
-      // If groupId is not provided, try to get it from the escrow
       if (!groupId) {
         const escrow = await Escrow.findOne({ escrowId });
         if (escrow && escrow.groupId) {
           groupId = escrow.groupId;
-          // If escrow has chain but network wasn't provided, use chain and normalize it
           if (escrow.chain && !network) {
             normalizedNetwork = this.normalizeChainToNetwork(escrow.chain);
           }
         }
       }
       
-      // Ensure network is uppercase
       normalizedNetwork = normalizedNetwork.toUpperCase();
 
-      // If we have a groupId, use group-specific contract address
       if (groupId) {
         try {
-          // First, get the EscrowVault contract address assigned to this group
           let contract = await Contract.findOne({
             name: 'EscrowVault',
             token: normalizedToken,
@@ -54,7 +48,6 @@ class AddressAssignmentService {
             status: 'deployed'
           });
 
-          // Fallback to any contract if group-specific not found
           if (!contract) {
             contract = await Contract.findOne({
               name: 'EscrowVault',
@@ -72,17 +65,14 @@ class AddressAssignmentService {
             );
           }
 
-          // Use the contract address as the deposit address
           const contractAddress = contract.address;
 
-          // Ensure this address is stored in GroupPool.assignedAddresses for consistency
           try {
             const group = await GroupPool.findOne({ groupId });
             if (group) {
               const addressKey = `${normalizedToken}_${normalizedNetwork}`;
               const existingAddress = GroupAddressService.getAddressValue(group.assignedAddresses, addressKey);
               
-              // Update if different or missing
               if (existingAddress !== contractAddress) {
                 group.assignedAddresses = GroupAddressService.setAddressValue(
                   group.assignedAddresses,
@@ -93,23 +83,19 @@ class AddressAssignmentService {
               }
             }
           } catch (updateError) {
-            // Non-critical error, log but continue
             console.warn('Warning: Could not update GroupPool assignedAddresses:', updateError.message);
           }
 
           return {
-            address: contractAddress, // Use contract address as deposit address
-            contractAddress: contractAddress, // Contract address for reference
+            address: contractAddress,
+            contractAddress: contractAddress,
             sharedWithAmount: null
           };
         } catch (groupError) {
           console.error('Error getting group-specific contract address, falling back to contract address:', groupError);
-          // Fall through to contract address fallback
         }
       }
 
-      // Fallback: Use contract address (for backward compatibility or if no group assigned)
-      // Try to find group-specific contract first if groupId exists
       let contract = null;
       if (groupId) {
         contract = await Contract.findOne({
@@ -122,7 +108,6 @@ class AddressAssignmentService {
         });
       }
       
-      // Fallback to any contract
       if (!contract) {
         contract = await Contract.findOne({
           name: 'EscrowVault',

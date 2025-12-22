@@ -9,29 +9,22 @@ const {
   formatParticipantByIndex,
 } = require("../utils/participant");
 
-// Store timeout references for invite message expiration checks
 const inviteTimeoutMap = new Map();
-
-// Share the timeout map with joinRequestHandler so it can cancel timeouts
 joinRequestHandler.setInviteTimeoutMap(inviteTimeoutMap);
 
 module.exports = async (ctx) => {
   try {
     const chatId = ctx.chat.id;
-    // Must be called from a group/supergroup
     if (chatId > 0) {
       return ctx.reply("❌ This command can only be used inside a group.");
     }
 
-    // Check if this is a trade group (has an active escrow with this groupId)
-    // Use findGroupEscrow to check for any active escrow (any status)
     const tradeGroupEscrow = await findGroupEscrow(
       chatId,
-      null // No status filter - check for any escrow
+      null
     );
 
     if (tradeGroupEscrow) {
-      // This is a trade group, command should not work here
       return ctx.reply("❌ This command can only be used in the main group, not in trade groups.");
     }
 
@@ -40,7 +33,6 @@ module.exports = async (ctx) => {
     const initiatorId = ctx.from.id;
     const initiatorUsername = ctx.from.username || null;
 
-    // Determine the counterparty using mention, text_mention, or reply target
     let counterpartyUser = null;
     let counterpartyHandle = null;
 
@@ -78,24 +70,17 @@ module.exports = async (ctx) => {
 
     if (!counterpartyUser && counterpartyHandle) {
       const handle = counterpartyHandle.startsWith("@")
-        ? counterpartyHandle.substring(1) // Remove @ for username lookup
+        ? counterpartyHandle.substring(1)
         : counterpartyHandle;
       
-      // Try multiple methods to get the user
       let chatInfo = null;
       
-      // Method 1: Try getChat with @username (works if user has interacted with bot)
       try {
         chatInfo = await ctx.telegram.getChat(`@${handle}`);
       } catch (getChatError) {
-        // getChat failed (expected if user hasn't interacted with bot)
-        // Silently continue to alternative methods - don't log as error
-        // This is normal behavior for users who haven't started the bot
-        chatInfo = null; // Ensure chatInfo is null so we proceed to Method 2
+        chatInfo = null;
       }
       
-      // Method 2: Try to find the user in the current group's administrators
-      // This works even if the user hasn't interacted with the bot
       if (!counterpartyUser && chatId < 0) {
         try {
           const administrators = await ctx.telegram.getChatAdministrators(chatId);

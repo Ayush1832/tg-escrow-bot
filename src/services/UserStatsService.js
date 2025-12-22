@@ -9,7 +9,6 @@ class UserStatsService {
   }
 
   formatUserLabel(username, telegramId, options = {}) {
-    // Show username if available, otherwise show user ID, otherwise unknown
     const normalized = this.normalizeUsername(username);
     if (normalized) {
       return `@${normalized}`;

@@ -5,6 +5,7 @@ const {
   BSC_RPC_URL,
   BSC_TESTNET_RPC_URL,
   SEPOLIA_RPC_URL,
+  TRON_RPC_URL,
   HOT_WALLET_PRIVATE_KEY
 } = process.env;
 
@@ -32,6 +33,10 @@ module.exports = {
     },
     litecoin: {
       url: process.env.LTC_RPC_URL || 'https://ltc.llamarpc.com',
+      accounts: HOT_WALLET_PRIVATE_KEY ? [HOT_WALLET_PRIVATE_KEY] : []
+    },
+    tron: {
+      url: TRON_RPC_URL || 'https://api.trongrid.io',
       accounts: HOT_WALLET_PRIVATE_KEY ? [HOT_WALLET_PRIVATE_KEY] : []
     }
   }

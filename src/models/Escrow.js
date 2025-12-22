@@ -243,6 +243,21 @@ const escrowSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+  // Track if completion log has been sent to prevent duplicates
+  completionLogSent: {
+    type: Boolean,
+    default: false
+  },
+  // Track if refund log has been sent to prevent duplicates
+  refundLogSent: {
+    type: Boolean,
+    default: false
+  },
+  // Track if partial deposit log has been sent
+  partialDepositLogSent: {
+    type: Boolean,
+    default: false
+  },
   inviteLink: String,
   depositAmount: {
     type: Number,

@@ -1,39 +1,36 @@
 const Escrow = require('../models/Escrow');
 const Contract = require('../models/Contract');
+const { isValidAddress } = require('../utils/addressValidation');
 
 module.exports = async (ctx) => {
   try {
     const chatId = ctx.chat.id;
     const text = ctx.message.text.trim();
     
-    // Must be in a group
     if (chatId > 0) {
       return ctx.reply('❌ This command can only be used in a group chat.');
     }
 
-    // Check if this is a trade group (has an escrow with this groupId)
     const tradeGroupEscrow = await Escrow.findOne({
       groupId: chatId.toString()
     });
 
     if (tradeGroupEscrow) {
-      // This is a trade group, command should not work here
       return ctx.reply('❌ This command can only be used in the main group, not in trade groups.');
     }
 
-    // Parse address from command: /verify 0x...
     const parts = text.split(/\s+/);
     if (parts.length < 2) {
-      return ctx.reply('❌ Usage: /verify <address>\n\nExample: /verify 0x4dd9c84aD4201d4aDF67eE20508BF622125C515c');
+      return ctx.reply('❌ Usage: /verify <address>\n\nExamples:\n• /verify 0x4dd9c84aD4201d4aDF67eE20508BF622125C515c (EVM)\n• /verify TQn9Y2khEsLMWT4K3LdL8oKbh1Z2HtZqjP (TRON)');
     }
 
     let address = parts[1].trim();
     
-    // Extract address from explorer links if provided
     const urlPatterns = [
       /bscscan\.com\/address\/(0x[a-fA-F0-9]{40})/i,
       /etherscan\.io\/address\/(0x[a-fA-F0-9]{40})/i,
-      /polygonscan\.com\/address\/(0x[a-fA-F0-9]{40})/i
+      /polygonscan\.com\/address\/(0x[a-fA-F0-9]{40})/i,
+      /tronscan\.org\/#\/address\/(T[1-9A-HJ-NP-Za-km-z]{33})/i
     ];
     
     for (const pattern of urlPatterns) {
@@ -44,24 +41,28 @@ module.exports = async (ctx) => {
       }
     }
 
-    // Validate address format
-    if (!address.startsWith('0x') || address.length !== 42 || !/^0x[a-fA-F0-9]{40}$/.test(address)) {
-      return ctx.reply('❌ Invalid address format. Please provide a valid Ethereum/BSC address (0x followed by 40 hexadecimal characters).');
+    const isTRON = address.startsWith('T') && address.length === 34;
+    const isEVM = address.startsWith('0x') && address.length === 42;
+
+    if (!isEVM && !isTRON) {
+      return ctx.reply('❌ Invalid address format. Please provide:\n• EVM address: 0x followed by 40 hex characters\n• TRON address: T followed by 33 base58 characters');
     }
 
-    // Normalize address to lowercase for comparison
-    const normalizedAddress = address.toLowerCase();
+    const chainType = isTRON ? 'TRON' : 'BSC';
+    if (!isValidAddress(address, chainType)) {
+      return ctx.reply('❌ Invalid address format. Please provide a valid address.');
+    }
 
-    // Find escrow(s) with this deposit address
+    const normalizedAddress = isTRON ? address : address.toLowerCase();
+
     const escrows = await Escrow.find({
       $or: [
         { depositAddress: { $regex: new RegExp(`^${normalizedAddress}$`, 'i') } },
         { uniqueDepositAddress: { $regex: new RegExp(`^${normalizedAddress}$`, 'i') } }
       ]
-    }).sort({ createdAt: -1 }); // Most recent first
+    }).sort({ createdAt: -1 });
 
     if (!escrows || escrows.length === 0) {
-      // Check if it's a contract address
       const contract = await Contract.findOne({
         address: { $regex: new RegExp(`^${normalizedAddress}$`, 'i') },
         status: 'deployed'
@@ -75,7 +76,6 @@ module.exports = async (ctx) => {
           { parse_mode: 'HTML' }
         );
         
-        // Delete user's command message and bot's response after 5 minutes
         const telegram = ctx.telegram;
         const commandMsgId = ctx.message.message_id;
         
@@ -86,7 +86,7 @@ module.exports = async (ctx) => {
           try {
             await telegram.deleteMessage(chatId, replyMsg.message_id);
           } catch (e) {}
-        }, 5 * 60 * 1000); // 5 minutes
+        }, 5 * 60 * 1000);
         
         return;
       }
@@ -98,7 +98,6 @@ module.exports = async (ctx) => {
         { parse_mode: 'HTML' }
       );
       
-      // Delete user's command message and bot's response after 5 minutes
       const telegram = ctx.telegram;
       const commandMsgId = ctx.message.message_id;
       
@@ -109,12 +108,11 @@ module.exports = async (ctx) => {
         try {
           await telegram.deleteMessage(chatId, notFoundMsg.message_id);
         } catch (e) {}
-      }, 5 * 60 * 1000); // 5 minutes
+      }, 5 * 60 * 1000);
       
       return;
     }
 
-    // Get the most recent escrow
     const escrow = escrows[0];
     const token = escrow.token || 'USDT';
     const chain = escrow.chain || 'BSC';
@@ -126,7 +124,6 @@ module.exports = async (ctx) => {
       { parse_mode: 'HTML' }
     );
     
-    // Delete user's command message and bot's response after 5 minutes
     const telegram = ctx.telegram;
     const commandMsgId = ctx.message.message_id;
     
@@ -137,7 +134,7 @@ module.exports = async (ctx) => {
       try {
         await telegram.deleteMessage(chatId, replyMsg.message_id);
       } catch (e) {}
-    }, 5 * 60 * 1000); // 5 minutes
+    }, 5 * 60 * 1000);
 
   } catch (error) {
     console.error('Error in verify handler:', error);

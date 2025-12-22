@@ -8,27 +8,22 @@ module.exports = async (ctx) => {
     const chatId = ctx.chat.id;
     const userId = ctx.from.id;
 
-    // Check if user is in a group
     if (chatId > 0) {
       return ctx.reply('❌ This command can only be used in a trade group.');
     }
 
-    // Find active escrow in this group (use findGroupEscrow to get the correct escrow)
     let escrow = await findGroupEscrow(
       chatId,
       ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release', 'disputed']
     );
 
-    // Return error if no escrow found (don't silently ignore)
     if (!escrow) {
       return ctx.reply('❌ No active escrow found in this group. This command can only be used in trade groups.');
     }
 
-    // Check if user is authorized (buyer, seller, or admin)
     const isAdmin = config.getAllAdminUsernames().includes(ctx.from.username) || 
                     config.getAllAdminIds().includes(String(userId));
     
-    // Safely check buyer/seller - handle null/undefined cases
     const isBuyer = escrow.buyerId != null && Number(escrow.buyerId) === Number(userId);
     const isSeller = escrow.sellerId != null && Number(escrow.sellerId) === Number(userId);
 
@@ -36,7 +31,6 @@ module.exports = async (ctx) => {
       return ctx.reply('❌ Only the buyer, seller, or admin can report a dispute.');
     }
 
-    // Parse reason from command (e.g., /dispute Payment not received)
     const commandText = ctx.message.text.trim();
     const parts = commandText.split(/\s+/);
     const reason = parts.slice(1).join(' ').trim();
@@ -50,7 +44,6 @@ module.exports = async (ctx) => {
       );
     }
 
-    // Mark escrow as disputed using atomic update to prevent race conditions
     try {
       const updatedEscrow = await Escrow.findOneAndUpdate(
         { _id: escrow._id },
@@ -62,14 +55,12 @@ module.exports = async (ctx) => {
         throw new Error('Failed to update escrow status');
       }
       
-      // Use the updated escrow for notification
       escrow = updatedEscrow;
     } catch (saveError) {
       console.error('Error updating escrow status to disputed:', saveError);
       return ctx.reply('❌ Failed to update escrow status. Please try again or contact an admin.');
     }
     
-    // Send dispute notification
     const result = await DisputeService.sendDisputeNotification(
       escrow,
       reason,
@@ -78,7 +69,6 @@ module.exports = async (ctx) => {
     );
 
     if (result.success) {
-      // Escape reason for HTML display
       const escapeHtml = (text) => String(text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
       await ctx.reply(
         '✅ <b>Dispute reported successfully!</b>\n\n' +
@@ -87,8 +77,6 @@ module.exports = async (ctx) => {
         { parse_mode: 'HTML' }
       );
     } else {
-      // Even if notification fails, the status is already updated
-      // Log the error but still confirm to user that dispute was recorded
       console.error('Dispute notification failed but status updated:', result.error);
       const escapeHtml = (text) => String(text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
       await ctx.reply(

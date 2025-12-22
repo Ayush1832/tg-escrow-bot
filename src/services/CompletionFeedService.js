@@ -29,7 +29,27 @@ class CompletionFeedService {
       return;
     }
     
-    // Validate chat access before attempting to send
+    const Escrow = require('../models/Escrow');
+    const freshEscrow = await Escrow.findById(escrow._id || escrow.id);
+    
+    if (!freshEscrow) {
+      console.error('CompletionFeedService: Escrow not found in database');
+      return;
+    }
+    
+    if (freshEscrow.completionLogSent) {
+      console.log(`CompletionFeedService: Completion log already sent for escrow ${freshEscrow.escrowId}. Skipping duplicate.`);
+      return;
+    }
+    
+    if (transactionHash && freshEscrow.releaseTransactionHash) {
+      if (freshEscrow.releaseTransactionHash.toLowerCase() === transactionHash.toLowerCase()) {
+        if (freshEscrow.completionLogSent) {
+          console.log(`CompletionFeedService: Completion log already sent for transaction ${transactionHash}. Skipping duplicate.`);
+          return;
+        }
+      }
+    }
     try {
       await telegram.getChat(this.chatId);
     } catch (chatError) {
@@ -61,14 +81,14 @@ class CompletionFeedService {
     const previousVolume = Math.max(0, newVolume - releaseAmount);
     const previousTrades = Math.max(0, newTrades - 1);
 
-    const buyerDisplay = formatParticipantById(escrow, escrow.buyerId, 'Buyer', { html: true, mask: true });
-    const sellerDisplay = formatParticipantById(escrow, escrow.sellerId, 'Seller', { html: true, mask: true });
+    const buyerDisplay = formatParticipantById(freshEscrow, freshEscrow.buyerId, 'Buyer', { html: true, mask: true });
+    const sellerDisplay = formatParticipantById(freshEscrow, freshEscrow.sellerId, 'Seller', { html: true, mask: true });
 
-    const token = (escrow.token || 'USDT').toUpperCase();
-    const network = (escrow.chain || 'BSC').toUpperCase();
-    const explorerLink = this.getExplorerLink(network, transactionHash || escrow.releaseTransactionHash);
+    const token = (freshEscrow.token || 'USDT').toUpperCase();
+    const network = (freshEscrow.chain || 'BSC').toUpperCase();
+    const explorerLink = this.getExplorerLink(network, transactionHash || freshEscrow.releaseTransactionHash);
     const amountDisplay = this.formatAmount(releaseAmount);
-    const usdDisplay = this.formatAmount(this.estimateUsdValue(releaseAmount, escrow));
+    const usdDisplay = this.formatAmount(this.estimateUsdValue(releaseAmount, freshEscrow));
     const totalWorthLine = `${this.formatLargeNumber(previousVolume)}$ >> ${this.formatLargeNumber(newVolume)}$`;
     const totalEscrowsLine = `${newTrades}`;
 
@@ -92,8 +112,12 @@ ${transactionLine}`;
         parse_mode: 'HTML',
         disable_web_page_preview: true
       });
+      
+      freshEscrow.completionLogSent = true;
+      await freshEscrow.save();
+      
+      console.log(`CompletionFeedService: Successfully sent completion log for escrow ${freshEscrow.escrowId}`);
     } catch (error) {
-      // Handle specific Telegram errors
       if (error.response && error.response.error_code === 400) {
         if (error.response.description && error.response.description.includes('chat not found')) {
           console.error(`CompletionFeedService: Chat ${this.chatId} not found. The bot may not be a member of this chat.`);
@@ -113,7 +137,6 @@ ${transactionLine}`;
           response: error.response
         });
       }
-      // Don't throw - we want the trade completion to succeed even if the feed fails
     }
   }
 
@@ -122,7 +145,6 @@ ${transactionLine}`;
   }
 
   estimateUsdValue(amount, escrow) {
-    // If we have a USD rate in the future, calculate here. For stablecoins treat 1:1
     return Number(amount || 0);
   }
 
@@ -157,7 +179,88 @@ ${transactionLine}`;
     if (chain === 'POLYGON' || chain === 'MATIC') {
       return `https://polygonscan.com/tx/${txHash}`;
     }
+    if (chain === 'TRON' || chain === 'TRX') {
+      return `https://tronscan.org/#/transaction/${txHash}`;
+    }
     return `https://bscscan.com/tx/${txHash}`;
+  }
+
+  /**
+   * Handle partial deposit logging
+   * @param {Object} escrow - The escrow object
+   * @param {number} partialAmount - The partial deposit amount
+   * @param {string} transactionHash - The transaction hash
+   * @param {Object} telegram - Telegram bot instance
+   */
+  async handlePartialDeposit({ escrow, partialAmount, transactionHash, telegram }) {
+    if (!this.chatId) {
+      return;
+    }
+    
+    if (!escrow || !telegram) {
+      return;
+    }
+
+    const amount = Number(partialAmount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return;
+    }
+    
+    const Escrow = require('../models/Escrow');
+    const freshEscrow = await Escrow.findById(escrow._id || escrow.id);
+    
+    if (!freshEscrow) {
+      return;
+    }
+    
+    if (freshEscrow.partialDepositLogSent) {
+      const existingHashes = [
+        freshEscrow.transactionHash,
+        ...(freshEscrow.partialTransactionHashes || [])
+      ].filter(Boolean);
+      
+      if (transactionHash && existingHashes.some(h => h.toLowerCase() === transactionHash.toLowerCase())) {
+        return;
+      }
+    }
+    
+    const buyerDisplay = formatParticipantById(freshEscrow, freshEscrow.buyerId, 'Buyer', { html: true, mask: true });
+    const sellerDisplay = formatParticipantById(freshEscrow, freshEscrow.sellerId, 'Seller', { html: true, mask: true });
+    const token = (freshEscrow.token || 'USDT').toUpperCase();
+    const network = (freshEscrow.chain || 'BSC').toUpperCase();
+    const explorerLink = this.getExplorerLink(network, transactionHash);
+    const amountDisplay = this.formatAmount(amount);
+    const expectedAmount = freshEscrow.quantity || 0;
+    const remainingAmount = Math.max(0, expectedAmount - (freshEscrow.accumulatedDepositAmount || 0));
+    
+    const transactionLine = explorerLink
+      ? `🔗 Transaction: <a href="${explorerLink}">Link</a>`
+      : transactionHash ? `🔗 Transaction: <code>${transactionHash.substring(0, 10)}...</code>` : '';
+    
+    const message = `💰<b>PARTIAL DEPOSIT RECEIVED</b>
+
+⚡️ Buyer: ${buyerDisplay}
+⚡️ Seller: ${sellerDisplay}
+✅ CRYPTO: ${token}
+✅ NETWORK: ${network}
+🪙 Partial Amount: ${amountDisplay} ${token}
+📊 Expected: ${this.formatAmount(expectedAmount)} ${token}
+📊 Remaining: ${this.formatAmount(remainingAmount)} ${token}
+${transactionLine}`;
+
+    try {
+      await telegram.sendMessage(this.chatId, message, {
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+      });
+      
+      freshEscrow.partialDepositLogSent = true;
+      await freshEscrow.save();
+      
+      console.log(`CompletionFeedService: Successfully sent partial deposit log for escrow ${freshEscrow.escrowId}`);
+    } catch (error) {
+      console.error('CompletionFeedService: Failed to send partial deposit log:', error.message);
+    }
   }
 
   escapeHtml(text = '') {

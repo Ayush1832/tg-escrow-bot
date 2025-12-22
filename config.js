@@ -37,17 +37,21 @@ module.exports = {
   BNB_BSC: process.env.BNB_BSC,
   DOGE_DOGE: process.env.DOGE_DOGE,
   DOGE_BSC: process.env.DOGE_BSC,
-  
+
   // Network RPC URLs
   SEPOLIA_RPC_URL: process.env.SEPOLIA_RPC_URL,
   ETH_RPC_URL: process.env.ETH_RPC_URL,
   LTC_RPC_URL: process.env.LTC_RPC_URL,
+  TRON_RPC_URL: process.env.TRON_RPC_URL || 'https://api.trongrid.io',
 
   // Wallet Configuration
   HOT_WALLET_PRIVATE_KEY: process.env.HOT_WALLET_PRIVATE_KEY,
+  TRC_PRIVATE_KEY: process.env.TRC_PRIVATE_KEY,
+  ADMIN_WALLET: process.env.ADMIN_WALLET,
 
   // Escrow Configuration
   ESCROW_FEE_PERCENT: Number(process.env.ESCROW_FEE_PERCENT || 0),
+  CONTRACT_USDT_RESERVE: Number(process.env.CONTRACT_USDT_RESERVE || 0.1),
 
   MIN_TRADE_AMOUNT: Number(process.env.MIN_TRADE_AMOUNT || 1),
   MAX_TRADE_AMOUNT: Number(process.env.MAX_TRADE_AMOUNT || 10000),

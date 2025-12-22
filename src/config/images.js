@@ -1,4 +1,3 @@
-// Image URLs for bot messages
 module.exports = {
   ENTER_QUANTITY: 'https://i.ibb.co/0yrbwpwC/x.jpg',
   ENTER_RATE: 'https://i.ibb.co/s9Lx1wcy/x.jpg',

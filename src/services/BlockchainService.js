@@ -2,6 +2,7 @@ const { ethers } = require('ethers');
 const axios = require('axios');
 const config = require('../../config');
 const ContractModel = require('../models/Contract');
+const TronService = require('./TronService');
 
 const ESCROW_VAULT_ABI = [
   'function token() view returns (address)',
@@ -19,27 +20,23 @@ const ERC20_ABI = [
 
 class BlockchainService {
   constructor() {
-    // Initialize providers for different networks
-    // Configure providers to use 'latest' instead of 'pending' for nonce queries
-    // Some RPC providers don't support 'pending' tag
     const providerOptions = {
-      staticNetwork: null, // Will be auto-detected
-      batchMaxCount: 1, // Disable batching to avoid issues
+      staticNetwork: null,
+      batchMaxCount: 1,
     };
     
     this.providers = {
       BSC: new ethers.JsonRpcProvider(config.BSC_RPC_URL, null, providerOptions),
       SEPOLIA: new ethers.JsonRpcProvider(config.SEPOLIA_RPC_URL, null, providerOptions),
       ETH: new ethers.JsonRpcProvider(config.ETH_RPC_URL || 'https://eth.llamarpc.com', null, providerOptions),
-      LTC: new ethers.JsonRpcProvider(config.LTC_RPC_URL || 'https://ltc.llamarpc.com', null, providerOptions)
+      LTC: new ethers.JsonRpcProvider(config.LTC_RPC_URL || 'https://ltc.llamarpc.com', null, providerOptions),
+      TRON: new ethers.JsonRpcProvider(config.TRON_RPC_URL || 'https://api.trongrid.io', null, providerOptions)
     };
     
-    // Ensure private key has 0x prefix
     const privateKey = config.HOT_WALLET_PRIVATE_KEY.startsWith('0x') 
       ? config.HOT_WALLET_PRIVATE_KEY 
       : '0x' + config.HOT_WALLET_PRIVATE_KEY;
     
-    // Create wallet instances for each network
     this.wallets = {};
     Object.keys(this.providers).forEach(network => {
       this.wallets[network] = new ethers.Wallet(privateKey, this.providers[network]);
@@ -52,10 +49,8 @@ class BlockchainService {
 
   async initialize() {
     try {
-      // Get the desired fee percentage from environment
       const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
       
-      // Show all available EscrowVault contracts
       const contracts = await ContractModel.find({ 
         name: 'EscrowVault',
         feePercent: desiredFeePercent
@@ -65,8 +60,6 @@ class BlockchainService {
         throw new Error(`No EscrowVault contracts found with ${desiredFeePercent}% fee. Please deploy contracts with this fee percentage.`);
       }
       
-      // Initialize is successful if at least one contract exists
-      // The bot will use getEscrowContractAddress() which filters by token for specific operations
       return contracts[0].address;
     } catch (error) {
       console.error('Error initializing BlockchainService:', error);
@@ -83,7 +76,6 @@ class BlockchainService {
         feePercent: desiredFeePercent
       };
       
-      // If token is provided, filter by token (preferred)
       if (token) {
         query.token = token.toUpperCase();
       }
@@ -103,15 +95,12 @@ class BlockchainService {
     }
   }
 
-  // Get token contract address for a specific token-network pair
   getTokenAddress(token, network) {
     const key = `${token}_${network}`.toUpperCase();
     return config[key];
   }
 
-  // Get token decimals for a specific token-network pair
   getTokenDecimals(token, network) {
-    // Most tokens use 18 decimals, but some have different decimals
     const decimalsMap = {
       'USDT_SEPOLIA': 6,    // USDT on Ethereum/Sepolia has 6 decimals
       'USDT_BSC': 18,       // USDT on BSC has 18 decimals
@@ -125,19 +114,17 @@ class BlockchainService {
       'DOGE_BSC': 18,       // DOGE on BSC has 18 decimals
       'SOL_SOL': 9,         // SOL has 9 decimals
       'TRX_TRON': 6,        // TRX has 6 decimals
-      'USDT_TRON': 6,       // USDT on TRON has 6 decimals
+      'USDT_TRON': 6,
     };
     
     const key = `${token}_${network}`.toUpperCase();
-    return decimalsMap[key] || 18; // Default to 18 decimals if not specified
+    return decimalsMap[key] || 18;
   }
 
-  // Get provider for a specific network
   getProvider(network) {
     return this.providers[network.toUpperCase()];
   }
 
-  // Get wallet for a specific network
   getWallet(network) {
     return this.wallets[network.toUpperCase()];
   }
@@ -149,13 +136,10 @@ class BlockchainService {
     const decimals = this.getTokenDecimals(token, network);
     const amount = ethers.parseUnits(String(amountUSDT), decimals);
     
-    // Get nonce manually using 'latest' instead of 'pending' to avoid RPC errors
-    // Some RPC providers don't support 'pending' tag
     let nonce;
     try {
       nonce = await provider.getTransactionCount(wallet.address, 'latest');
     } catch (nonceError) {
-      // Fallback: try without tag (defaults to 'latest')
       try {
         nonce = await provider.getTransactionCount(wallet.address);
       } catch (fallbackError) {
@@ -174,13 +158,10 @@ class BlockchainService {
     const decimals = this.getTokenDecimals(token, network);
     const amount = ethers.parseUnits(String(amountUSDT), decimals);
     
-    // Get nonce manually using 'latest' instead of 'pending' to avoid RPC errors
-    // Some RPC providers don't support 'pending' tag
     let nonce;
     try {
       nonce = await provider.getTransactionCount(wallet.address, 'latest');
     } catch (nonceError) {
-      // Fallback: try without tag (defaults to 'latest')
       try {
         nonce = await provider.getTransactionCount(wallet.address);
       } catch (fallbackError) {
@@ -192,7 +173,6 @@ class BlockchainService {
     return await tx.wait();
   }
 
-  // Etherscan API methods for transaction fetching
   async getTokenTransactions(token, network, address, startBlock = 0) {
     try {
       const tokenAddress = this.getTokenAddress(token, network);
@@ -201,9 +181,6 @@ class BlockchainService {
         return [];
       }
 
-      // Use Etherscan API for all networks
-      // Note: Etherscan API works for Ethereum mainnet and testnets
-      // For BSC and other networks, we'll use RPC fallback
       if (network.toUpperCase() === 'ETH' || network.toUpperCase() === 'SEPOLIA') {
         const response = await axios.get(this.etherscanBaseUrl, {
           params: {
@@ -219,7 +196,6 @@ class BlockchainService {
         });
 
         if (response.data.status === '1') {
-          // Normalize amounts to decimal (assuming 6 decimals for most tokens)
           return response.data.result.map((tx) => ({
             ...tx,
             valueDecimal: Number(tx.value) / 1_000_000
@@ -227,19 +203,19 @@ class BlockchainService {
         }
         return [];
       } else {
-        // For BSC and other networks, use RPC logs
         return await this.getTokenTransfersViaRPC(token, network, address, startBlock);
       }
     } catch (error) {
       console.error('Error fetching token transactions:', error);
-      // Fallback to RPC logs if explorer fails
       return await this.getTokenTransfersViaRPC(token, network, address, startBlock);
     }
   }
 
-  // RPC fallback: query ERC20 Transfer logs directly
   async getTokenTransfersViaRPC(token, network, toAddress, fromBlock) {
     try {
+      if (network && network.toUpperCase() === 'TRON') {
+        return await TronService.getTokenTransfers(token, toAddress, fromBlock);
+      }
       const provider = this.getProvider(network);
       const tokenAddress = this.getTokenAddress(token, network);
       
@@ -248,16 +224,15 @@ class BlockchainService {
       const toAddrLc = toAddress.toLowerCase();
       const iface = new ethers.Interface(ERC20_ABI);
 
-      // Get latest block and calculate start block
       const latest = await provider.getBlockNumber();
-      const start = fromBlock || Math.max(0, latest - 2000); // Reduced to 2000 blocks max
+      const start = Number.isFinite(fromBlock)
+        ? Math.max(0, fromBlock)
+        : Math.max(0, latest - 2000);
       
-      // If range is too large, scan in chunks of 500 blocks
       const maxRange = 500;
       const totalRange = latest - start;
       
       if (totalRange <= maxRange) {
-        // Small range, scan directly
         const filter = {
           address: tokenAddress,
           fromBlock: start,
@@ -280,7 +255,6 @@ class BlockchainService {
           return { from, to, valueDecimal };
         });
       } else {
-        // Large range, scan in chunks
         const allLogs = [];
         let currentStart = start;
         
@@ -305,7 +279,6 @@ class BlockchainService {
             currentStart = currentEnd + 1;
           } catch (chunkError) {
             console.error(`Error scanning blocks ${currentStart}-${currentEnd}:`, chunkError);
-            // Continue with next chunk
             currentStart = currentEnd + 1;
           }
         }
@@ -321,14 +294,16 @@ class BlockchainService {
         });
       }
     } catch (error) {
-      console.error('RPC fallback error fetching token transfers:', error);
+      console.error('Error fetching token transfers:', error);
       return [];
     }
   }
 
   async getLatestBlockNumber(network = 'ETH') {
     try {
-      // Use Etherscan API for Ethereum networks
+      if (network && network.toUpperCase() === 'TRON') {
+        return await TronService.getLatestBlockNumber();
+      }
       if (network.toUpperCase() === 'ETH' || network.toUpperCase() === 'SEPOLIA') {
         const response = await axios.get(this.etherscanBaseUrl, {
           params: {
@@ -339,7 +314,6 @@ class BlockchainService {
         });
         return parseInt(response.data.result, 16);
       } else {
-        // For BSC and other networks, use RPC
         const provider = this.getProvider(network);
         return await provider.getBlockNumber();
       }
@@ -354,7 +328,6 @@ class BlockchainService {
       const tokenAddress = this.getTokenAddress(token, network);
       if (!tokenAddress) return 0;
 
-      // Use Etherscan API for Ethereum networks
       if (network.toUpperCase() === 'ETH' || network.toUpperCase() === 'SEPOLIA') {
         const response = await axios.get(this.etherscanBaseUrl, {
           params: {
@@ -368,12 +341,10 @@ class BlockchainService {
         });
 
         if (response.data.status === '1') {
-          // Assuming 6 decimals for most tokens
           return parseFloat(response.data.result) / 1000000;
         }
         return 0;
       } else {
-        // For BSC and other networks, use RPC
         const provider = this.getProvider(network);
         const contract = new ethers.Contract(tokenAddress, ['function balanceOf(address) view returns (uint256)'], provider);
         const balance = await contract.balanceOf(address);
@@ -386,11 +357,22 @@ class BlockchainService {
     }
   }
 
-  /**
-   * Release funds from escrow vault to buyer
-   */
   async releaseFunds(token, network, buyerAddress, amount, amountWeiOverride = null, groupId = null) {
     try {
+      if (network && network.toUpperCase() === 'TRON') {
+        const tronResult = await TronService.releaseFunds({
+          token,
+          to: buyerAddress,
+          amount,
+          groupId
+        });
+        return {
+          success: true,
+          transactionHash: tronResult.transactionHash,
+          blockNumber: null
+        };
+      }
+
       const contractAddress = await this.getEscrowContractAddress(token, network, groupId);
       if (!contractAddress) {
         throw new Error(`No escrow contract found for ${token} on ${network}${groupId ? ` for group ${groupId}` : ''}`);
@@ -408,13 +390,10 @@ class BlockchainService {
         ? BigInt(amountWeiOverride)
         : ethers.parseUnits(amount.toString(), decimals);
 
-      // Get nonce manually using 'latest' instead of 'pending' to avoid RPC errors
-      // Some RPC providers don't support 'pending' tag
       let nonce;
       try {
         nonce = await provider.getTransactionCount(wallet.address, 'latest');
       } catch (nonceError) {
-        // Fallback: try without tag (defaults to 'latest')
         try {
           nonce = await provider.getTransactionCount(wallet.address);
         } catch (fallbackError) {
@@ -422,13 +401,11 @@ class BlockchainService {
         }
       }
 
-      // Build transaction with explicit nonce
       const tx = await vaultContract.release(buyerAddress, amountWei, {
         nonce: nonce
       });
       const receipt = await tx.wait();
 
-      // Get transaction hash from receipt or transaction object
       const transactionHash = receipt.transactionHash || receipt.hash || tx.hash;
       
       return {
@@ -438,16 +415,34 @@ class BlockchainService {
       };
 
     } catch (error) {
+      // Provide a concise log for common provider errors (like insufficient gas funds)
+      const code = error?.code || error?.shortMessage || '';
+      const providerMessage = error?.info?.error?.message || error?.message || '';
+      if (code === 'INSUFFICIENT_FUNDS' || providerMessage.toLowerCase().includes('insufficient funds')) {
+        console.error(`Error releasing funds: Insufficient gas balance on ${network}. Details: ${providerMessage}`);
+      } else {
       console.error('Error releasing funds:', error);
+      }
       throw error;
     }
   }
 
-  /**
-   * Refund funds from escrow vault to seller
-   */
   async refundFunds(token, network, sellerAddress, amount, amountWeiOverride = null, groupId = null) {
     try {
+      if (network && network.toUpperCase() === 'TRON') {
+        const tronResult = await TronService.refundFunds({
+          token,
+          to: sellerAddress,
+          amount,
+          groupId
+        });
+        return {
+          success: true,
+          transactionHash: tronResult.transactionHash,
+          blockNumber: null
+        };
+      }
+
       const contractAddress = await this.getEscrowContractAddress(token, network, groupId);
       if (!contractAddress) {
         throw new Error(`No escrow contract found for ${token} on ${network}${groupId ? ` for group ${groupId}` : ''}`);
@@ -465,13 +460,10 @@ class BlockchainService {
         ? BigInt(amountWeiOverride)
         : ethers.parseUnits(amount.toString(), decimals);
 
-      // Get nonce manually using 'latest' instead of 'pending' to avoid RPC errors
-      // Some RPC providers don't support 'pending' tag
       let nonce;
       try {
         nonce = await provider.getTransactionCount(wallet.address, 'latest');
       } catch (nonceError) {
-        // Fallback: try without tag (defaults to 'latest')
         try {
           nonce = await provider.getTransactionCount(wallet.address);
         } catch (fallbackError) {
@@ -479,13 +471,11 @@ class BlockchainService {
         }
       }
 
-      // Build transaction with explicit nonce
       const tx = await vaultContract.refund(sellerAddress, amountWei, {
         nonce: nonce
       });
       const receipt = await tx.wait();
 
-      // Get transaction hash from receipt or transaction object
       const transactionHash = receipt.transactionHash || receipt.hash || tx.hash;
       
       return {
@@ -495,21 +485,22 @@ class BlockchainService {
       };
 
     } catch (error) {
+      // Provide a concise log for common provider errors (like insufficient gas funds)
+      const code = error?.code || error?.shortMessage || '';
+      const providerMessage = error?.info?.error?.message || error?.message || '';
+      if (code === 'INSUFFICIENT_FUNDS' || providerMessage.toLowerCase().includes('insufficient funds')) {
+        console.error(`Error refunding funds: Insufficient gas balance on ${network}. Details: ${providerMessage}`);
+      } else {
       console.error('Error refunding funds:', error);
+      }
       throw error;
     }
   }
 
-  /**
-   * Get escrow contract address for token/network pair
-   * If groupId is provided, returns the contract assigned to that group
-   * Otherwise returns any available contract for the token/network
-   */
   async getEscrowContractAddress(token, network, groupId = null) {
     try {
       const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
       
-      // If groupId is provided, try to find group-specific contract first
       if (groupId) {
         const groupContract = await ContractModel.findOne({
           name: 'EscrowVault',
@@ -525,7 +516,6 @@ class BlockchainService {
         }
       }
       
-      // Fallback: find any contract for the token/network (backward compatibility)
       const contract = await ContractModel.findOne({
         name: 'EscrowVault',
         token: token.toUpperCase(),
@@ -541,17 +531,11 @@ class BlockchainService {
     }
   }
 
-  /**
-   * Get token contract address for a given token and network
-   */
   getTokenAddress(token, network) {
     const tokenKey = `${token}_${network.toUpperCase()}`;
     return config[tokenKey];
   }
 
-  /**
-   * Withdraw all funds from escrow contract to admin wallet
-   */
   async withdrawToAdmin(contractAddress, adminAddress, token, network, amount) {
     try {
       const wallet = this.wallets[network.toUpperCase()];
@@ -564,20 +548,15 @@ class BlockchainService {
       const decimals = this.getTokenDecimals(token, network);
       const amountWei = ethers.parseUnits(amount.toString(), decimals);
 
-      
-      // Get the token contract address
       const tokenAddress = this.getTokenAddress(token, network);
       if (!tokenAddress) {
         throw new Error(`Token address not found for ${token} on ${network}`);
       }
       
-      // Get nonce manually using 'latest' instead of 'pending' to avoid RPC errors
-      // Some RPC providers don't support 'pending' tag
       let nonce;
       try {
         nonce = await provider.getTransactionCount(wallet.address, 'latest');
       } catch (nonceError) {
-        // Fallback: try without tag (defaults to 'latest')
         try {
           nonce = await provider.getTransactionCount(wallet.address);
         } catch (fallbackError) {
@@ -585,13 +564,11 @@ class BlockchainService {
         }
       }
       
-      // Use the withdrawToken function from the contract
       const tx = await vaultContract.withdrawToken(tokenAddress, adminAddress, {
         nonce: nonce
       });
       const receipt = await tx.wait();
 
-      // Get transaction hash from receipt or transaction object
       const transactionHash = receipt.transactionHash || receipt.hash || tx.hash;
       
       return transactionHash;
