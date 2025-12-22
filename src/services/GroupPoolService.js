@@ -608,6 +608,43 @@ class GroupPoolService {
   }
 
   /**
+   * Immediately recycle group (cancel command) - remove users and return to pool
+   */
+  async recycleGroupNow(escrow, telegram) {
+    try {
+      if (!telegram) {
+        throw new Error("Telegram API instance is required for recycling");
+      }
+
+      const group = await GroupPool.findOne({
+        assignedEscrowId: escrow.escrowId,
+      });
+
+      if (!group) {
+        return null;
+      }
+
+      // Remove users
+      await this.removeUsersFromGroup(escrow, group.groupId, telegram);
+
+      // Refresh invite link
+      await this.refreshInviteLink(group.groupId, telegram);
+
+      // Reset group status
+      group.status = "available";
+      group.assignedEscrowId = null;
+      group.assignedAt = null;
+      group.completedAt = null;
+      await group.save();
+
+      return group;
+    } catch (error) {
+      console.error("Error in immediate group recycling:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Send completion notification to users before removal
    * REMOVED: No longer sending DM messages to users, only in-group messages
    */

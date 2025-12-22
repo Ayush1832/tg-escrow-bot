@@ -95,8 +95,6 @@ class CompletionFeedService {
 
     const newVolume = stats.totalCompletedVolume || 0;
     const newTrades = stats.totalCompletedTrades || 0;
-    const previousVolume = Math.max(0, newVolume - releaseAmount);
-    const previousTrades = Math.max(0, newTrades - 1);
 
     const buyerDisplay = formatParticipantById(
       freshEscrow,
@@ -121,24 +119,20 @@ class CompletionFeedService {
     const usdDisplay = this.formatAmount(
       this.estimateUsdValue(releaseAmount, freshEscrow)
     );
-    const totalWorthLine = `${this.formatLargeNumber(
-      previousVolume
-    )}$ >> ${this.formatLargeNumber(newVolume)}$`;
-    const totalEscrowsLine = `${newTrades}`;
-
     const transactionLine = explorerLink
-      ? `🔗 Transaction Link: <a href="${explorerLink}">Link</a>`
-      : "🔗 Transaction Link: N/A";
+      ? `🔗 PROOF OF RELEASE: <a href="${explorerLink}">[Link]</a>`
+      : "🔗 PROOF OF RELEASE: N/A";
 
-    const message = `📍<b>NEW ESCROW DONE</b>
+    const message = `🚀 NEW DEAL LOCKED & RELEASED
 
-⚡️ Buyer: ${buyerDisplay}
-⚡️ Seller: ${sellerDisplay}
-✅ CRYPTO: ${token}
-✅ NETWORK: ${network}
-🪙 AMOUNT: ${amountDisplay}${token} [${usdDisplay}$]
-📈 Total Worth: ${totalWorthLine}
-📈 Total Escrows: ${totalEscrowsLine}
+PARTIES: ${buyerDisplay} & ${sellerDisplay}
+
+🪙 Token: <code>${token}</code>
+🌐 Chain: <code>${network}</code>
+💰 Value: <code>${amountDisplay} ${token}</code>
+📊 TVL Processed: <code>$${this.formatLargeNumber(newVolume)}</code>
+🏆 Success Record: <code>${newTrades}</code>
+
 ${transactionLine}`;
 
     try {

@@ -188,10 +188,8 @@ function parseFlexibleNumber(value) {
     const afterDot = str.slice(lastDot + 1);
     if (afterDot.length === 3 && /^\d{3}$/.test(afterDot) && lastDot > 0) {
       decimalSeparator = null;
-    } else if (afterDot.length <= 2 && /^\d{1,2}$/.test(afterDot)) {
-      decimalSeparator = ".";
     } else {
-      decimalSeparator = null;
+      decimalSeparator = ".";
     }
   }
 
@@ -236,6 +234,60 @@ class EscrowBot {
   }
 
   setupHandlers() {
+    this.bot.command("cancel", async (ctx) => {
+      try {
+        const chat = ctx.chat;
+        const from = ctx.from;
+        if (!chat || !from) return;
+
+        const chatId = chat.id;
+        // Find escrow in draft or awaiting_details
+        const escrow = await findGroupEscrow(chatId, [
+          "draft",
+          "awaiting_details",
+        ]);
+
+        if (!escrow) {
+          return;
+        }
+
+        // Check if deposit address is already provided
+        if (escrow.depositAddress || escrow.uniqueDepositAddress) {
+          return ctx.reply(
+            "❌ Cannot cancel the deal after deposit address has been provided."
+          );
+        }
+
+        const userId = from.id;
+        const adminUserId = config.ADMIN_USER_ID
+          ? Number(config.ADMIN_USER_ID)
+          : null;
+        const adminUserId2 = config.ADMIN_USER_ID2
+          ? Number(config.ADMIN_USER_ID2)
+          : null;
+
+        const isBuyer = escrow.buyerId === userId;
+        const isSeller = escrow.sellerId === userId;
+        const isAdmin = userId === adminUserId || userId === adminUserId2;
+
+        if (!isBuyer && !isSeller && !isAdmin) {
+          return ctx.reply(
+            "❌ Only the buyer, seller, or admin can cancel the deal."
+          );
+        }
+
+        await ctx.reply("⚠️ Deal cancelled. Resetting group...");
+
+        escrow.status = "cancelled";
+        await escrow.save();
+
+        await GroupPoolService.recycleGroupNow(escrow, ctx.telegram);
+      } catch (error) {
+        console.error("Error in cancel command:", error);
+        ctx.reply("❌ An error occurred while cancelling the deal.");
+      }
+    });
+
     this.bot.use(async (ctx, next) => {
       try {
         const chat = ctx.chat;
