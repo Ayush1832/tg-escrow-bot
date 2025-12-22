@@ -1,6 +1,7 @@
 const config = require("../../config");
 const Stats = require("../models/Stats");
 const { formatParticipantById } = require("../utils/participant");
+const UserStatsService = require("./UserStatsService");
 
 class CompletionFeedService {
   constructor() {
@@ -92,6 +93,9 @@ class CompletionFeedService {
       },
       { upsert: true, new: true }
     );
+
+    // Update user stats
+    await UserStatsService.updateUserStats(freshEscrow);
 
     const newVolume = stats.totalCompletedVolume || 0;
     const newTrades = stats.totalCompletedTrades || 0;

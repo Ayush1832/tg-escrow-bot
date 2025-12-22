@@ -1,22 +1,24 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
-const statsSchema = new mongoose.Schema({
-  key: {
-    type: String,
-    unique: true,
-    required: true
+const statsSchema = new mongoose.Schema(
+  {
+    key: {
+      type: String,
+      unique: true,
+      required: true,
+    },
+    totalCompletedVolume: {
+      type: Number,
+      default: 0,
+    },
+    totalCompletedTrades: {
+      type: Number,
+      default: 0,
+    },
   },
-  totalCompletedVolume: {
-    type: Number,
-    default: 0
-  },
-  totalCompletedTrades: {
-    type: Number,
-    default: 0
+  {
+    timestamps: true,
   }
-}, {
-  timestamps: true
-});
+);
 
-module.exports = mongoose.model('Stats', statsSchema);
-
+module.exports = mongoose.model("Stats", statsSchema);

@@ -1,194 +1,212 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const escrowSchema = new mongoose.Schema({
   escrowId: {
     type: String,
     required: true,
-    unique: true
+    unique: true,
   },
   creatorId: {
     type: Number,
-    required: false
+    required: false,
   },
   creatorUsername: {
     type: String,
-    required: false
+    required: false,
   },
   groupId: {
     type: String,
-    required: true
+    required: true,
   },
   assignedFromPool: {
     type: Boolean,
-    default: false
+    default: false,
   },
   status: {
     type: String,
-    enum: ['draft', 'awaiting_details', 'awaiting_deposit', 'deposited', 'in_fiat_transfer', 'ready_to_release', 'completed', 'refunded', 'disputed'],
-    default: 'draft'
+    enum: [
+      "draft",
+      "awaiting_details",
+      "awaiting_deposit",
+      "deposited",
+      "in_fiat_transfer",
+      "ready_to_release",
+      "completed",
+      "refunded",
+      "disputed",
+    ],
+    default: "draft",
   },
   token: {
     type: String,
-    default: 'USDT'
+    default: "USDT",
   },
   chain: {
     type: String,
-    default: 'BSC'
+    default: "BSC",
   },
   quantity: {
     type: Number,
-    required: false
+    required: false,
   },
   rate: {
     type: Number,
-    required: false
+    required: false,
   },
   paymentMethod: {
     type: String,
-    required: false
+    required: false,
   },
   // Track which step in the trade details flow we're on
   tradeDetailsStep: {
     type: String,
-    enum: ['step1_amount', 'step2_rate', 'step3_payment', 'step4_chain_coin', 'step5_buyer_address', 'step6_seller_address', 'completed'],
-    required: false
+    enum: [
+      "step1_amount",
+      "step2_rate",
+      "step3_payment",
+      "step4_chain_coin",
+      "step5_buyer_address",
+      "step6_seller_address",
+      "completed",
+    ],
+    required: false,
   },
   // Store Step 5 message ID for deletion
   step5BuyerAddressMessageId: {
     type: Number,
-    required: false
+    required: false,
   },
   // Store Step 6 message ID for deletion
   step6SellerAddressMessageId: {
     type: Number,
-    required: false
+    required: false,
   },
   // Store OTC Deal Summary message ID for editing approval status
   dealSummaryMessageId: {
     type: Number,
-    required: false
+    required: false,
   },
   // Store pinned deal confirmed message ID for later unpinning
   dealConfirmedMessageId: {
     type: Number,
-    required: false
+    required: false,
   },
   // Track deal approvals
   buyerApproved: {
     type: Boolean,
-    default: false
+    default: false,
   },
   sellerApproved: {
     type: Boolean,
-    default: false
+    default: false,
   },
   // Store transaction hash message ID for editing
   transactionHashMessageId: {
     type: Number,
-    required: false
+    required: false,
   },
   // Store partial payment message ID for editing
   partialPaymentMessageId: {
     type: Number,
-    required: false
+    required: false,
   },
   // Store waiting for user message ID (when only one user has joined)
   waitingForUserMessageId: {
     type: Number,
-    required: false
+    required: false,
   },
   // Store confirmed transaction hash (deposit transaction)
   transactionHash: {
     type: String,
     required: false,
-    index: true // Index for faster duplicate checking
+    index: true, // Index for faster duplicate checking
   },
   // Store multiple transaction hashes for partial deposits
   partialTransactionHashes: {
     type: [String],
-    default: []
+    default: [],
   },
   // Store accumulated deposit amount from partial deposits
   accumulatedDepositAmount: {
     type: Number,
-    default: 0
+    default: 0,
   },
   accumulatedDepositAmountWei: {
     type: String,
-    default: '0'
+    default: "0",
   },
   // Store the actual from address of the deposit transaction (can be any address)
   depositTransactionFromAddress: {
     type: String,
-    required: false
+    required: false,
   },
   // Store release transaction hash (when funds are released)
   releaseTransactionHash: {
     type: String,
-    required: false
+    required: false,
   },
   // Store refund transaction hash (when funds are refunded)
   refundTransactionHash: {
     type: String,
-    required: false
+    required: false,
   },
   // Store Step 4 message IDs for deletion
   step4ChainMessageId: {
     type: Number,
-    required: false
+    required: false,
   },
   step4CoinMessageId: {
     type: Number,
-    required: false
+    required: false,
   },
   buyerId: {
     type: Number,
-    required: false
+    required: false,
   },
   buyerUsername: {
     type: String,
-    required: false
+    required: false,
   },
   sellerId: {
     type: Number,
-    required: false
+    required: false,
   },
   sellerUsername: {
     type: String,
-    required: false
+    required: false,
   },
   // Origin message details (main group where /deal was initiated)
   originChatId: {
     type: String,
-    required: false
+    required: false,
   },
   originInviteMessageId: {
     type: Number,
-    required: false
+    required: false,
   },
   tradeStartedMessageId: {
     type: Number,
-    required: false
+    required: false,
   },
   // Allowed usernames for restricted join requests (when room is created via /deal in a group)
   allowedUsernames: {
     type: [String],
-    default: undefined
+    default: undefined,
   },
   // Track which users have been approved and joined (user ids)
   approvedUserIds: {
     type: [Number],
-    default: undefined
+    default: undefined,
   },
   // Allowed user ids (used when initiator has no username)
   allowedUserIds: {
     type: [Number],
-    default: undefined
+    default: undefined,
   },
   // Store role selection message ID for editing
   roleSelectionMessageId: {
     type: Number,
-    required: false
+    required: false,
   },
   buyerAddress: String,
   sellerAddress: String,
@@ -196,125 +214,140 @@ const escrowSchema = new mongoose.Schema({
   uniqueDepositAddress: String,
   tradeStartTime: {
     type: Date,
-    default: null
+    default: null,
   },
   lastCheckedBlock: {
     type: Number,
-    default: 0
+    default: 0,
   },
   // Track close trade confirmations
   buyerClosedTrade: {
     type: Boolean,
-    default: false
+    default: false,
   },
   sellerClosedTrade: {
     type: Boolean,
-    default: false
+    default: false,
   },
   // Store close trade message ID for editing
   closeTradeMessageId: {
     type: Number,
-    required: false
+    required: false,
   },
   // Store release confirmation message ID for editing
   releaseConfirmationMessageId: {
     type: Number,
-    required: false
+    required: false,
   },
   // Store refund confirmation message ID for editing
   refundConfirmationMessageId: {
     type: Number,
-    required: false
+    required: false,
   },
   // Store pending refund/release amount (for partial operations)
   pendingRefundAmount: {
     type: Number,
-    required: false
+    required: false,
   },
   pendingReleaseAmount: {
     type: Number,
-    required: false
+    required: false,
   },
   buyerStatsParticipationRecorded: {
     type: Boolean,
-    default: false
+    default: false,
   },
   sellerStatsParticipationRecorded: {
     type: Boolean,
-    default: false
+    default: false,
   },
   // Track if completion log has been sent to prevent duplicates
   completionLogSent: {
     type: Boolean,
-    default: false
+    default: false,
   },
   // Track if refund log has been sent to prevent duplicates
   refundLogSent: {
     type: Boolean,
-    default: false
+    default: false,
   },
   // Track if partial deposit log has been sent
   partialDepositLogSent: {
     type: Boolean,
-    default: false
+    default: false,
   },
   inviteLink: String,
   depositAmount: {
     type: Number,
-    default: 0
+    default: 0,
   },
   confirmedAmount: {
     type: Number,
-    default: 0
+    default: 0,
   },
   escrowFee: {
     type: Number,
-    default: 0
+    default: 0,
   },
   networkFee: {
     type: Number,
-    default: 0
+    default: 0,
   },
   buyerSentFiat: {
     type: Boolean,
-    default: false
+    default: false,
   },
   sellerReceivedFiat: {
     type: Boolean,
-    default: false
+    default: false,
   },
   buyerConfirmedRelease: {
     type: Boolean,
-    default: false
+    default: false,
   },
   sellerConfirmedRelease: {
     type: Boolean,
-    default: false
+    default: false,
   },
   adminConfirmedRelease: {
     type: Boolean,
-    default: false
+    default: false,
   },
   buyerConfirmedRefund: {
     type: Boolean,
-    default: false
+    default: false,
   },
   sellerConfirmedRefund: {
     type: Boolean,
-    default: false
+    default: false,
   },
   pendingSellerAddress: {
     type: String,
-    default: null
+    default: null,
   },
   createdAt: {
     type: Date,
-    default: Date.now
+    default: Date.now,
   },
   updatedAt: {
     type: Date,
-    default: Date.now
-  }
+    default: Date.now,
+  },
+  // Timestamp of last activity in the group (for inactivity recycling)
+  lastActivityAt: {
+    type: Date,
+    default: Date.now,
+  },
+  // Timestamp when recycling warning was sent
+  recycleWarningSentAt: {
+    type: Date,
+    required: false,
+  },
+  // Flag if recycling is already scheduled/in progress
+  isScheduledForRecycle: {
+    type: Boolean,
+    default: false,
+  },
 });
 
-module.exports = mongoose.model('Escrow', escrowSchema);
+module.exports = mongoose.model("Escrow", escrowSchema);

@@ -223,12 +223,124 @@ class EscrowBot {
     this.setupErrorHandling();
   }
 
+  setupGroupMonitoring() {
+    // Check every 5 minutes
+    setInterval(async () => {
+      try {
+        const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2 hours
+        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000); // 10 minutes
+
+        // Find inactive escrows
+        // Status must be one of the pre-deposit stages
+        // Last activity > 2 hours ago
+        // Not yet scheduled for recycle
+        const inactiveEscrows = await Escrow.find({
+          status: { $in: ["draft", "awaiting_details", "awaiting_deposit"] },
+          lastActivityAt: { $lt: twoHoursAgo },
+          isScheduledForRecycle: false,
+        });
+
+        for (const escrow of inactiveEscrows) {
+          try {
+            // Send warning
+            await this.bot.telegram.sendMessage(
+              escrow.groupId,
+              "⚠️ <b>Inactivity Alert:</b> This group has been inactive for more than 2 hours.\n\nIt will be recycled and closed in 10 minutes if no activity is detected.",
+              { parse_mode: "HTML" }
+            );
+
+            escrow.isScheduledForRecycle = true;
+            escrow.recycleWarningSentAt = new Date();
+            await escrow.save();
+          } catch (e) {
+            // If bot kicked or chat not found, maybe mark as archived?
+            // For now just log
+            console.error(
+              `Error sending inactivity warning to ${escrow.groupId}:`,
+              e.message
+            );
+          }
+        }
+
+        // Check for recycled warnings that have expired (10 mins passed)
+        // This covers both inactivity warnings and "user left" warnings if they set the flag
+        const pendingRecycle = await Escrow.find({
+          status: { $in: ["draft", "awaiting_details", "awaiting_deposit"] },
+          isScheduledForRecycle: true,
+          recycleWarningSentAt: { $lt: tenMinutesAgo },
+        });
+
+        for (const escrow of pendingRecycle) {
+          try {
+            // Verify one last time?
+            // Maybe check if activity happened SINCE warning?
+            // If lastActivityAt > recycleWarningSentAt, then cancel recycle
+            if (escrow.lastActivityAt > escrow.recycleWarningSentAt) {
+              escrow.isScheduledForRecycle = false;
+              escrow.recycleWarningSentAt = null;
+              await escrow.save();
+              await this.bot.telegram.sendMessage(
+                escrow.groupId,
+                "✅ Activity detected. Group recycling cancelled."
+              );
+              continue;
+            }
+
+            await this.bot.telegram.sendMessage(
+              escrow.groupId,
+              "⏳ Session expired. Recycling group..."
+            );
+
+            escrow.status = "cancelled";
+            await escrow.save();
+
+            await GroupPoolService.recycleGroupNow(escrow, this.bot.telegram);
+          } catch (e) {
+            console.error(
+              `Error processing pending recycle for ${escrow.groupId}:`,
+              e
+            );
+          }
+        }
+      } catch (error) {
+        console.error("Error in setupGroupMonitoring loop:", error);
+      }
+    }, 5 * 60 * 1000); // Run every 5 minutes
+  }
+
   setupMiddleware() {
     this.bot.use(async (ctx, next) => {
       const user = ctx.from;
       if (user) {
         await this.ensureUser(user);
       }
+
+      // Track group activity
+      if (
+        ctx.chat &&
+        (ctx.chat.type === "group" || ctx.chat.type === "supergroup")
+      ) {
+        const chatId = String(ctx.chat.id);
+
+        // Lightweight update: only update if it finds a matching active/draft escrow
+        // We do this asynchronously without waiting to avoid slowing down other logic
+        (async () => {
+          try {
+            await Escrow.updateOne(
+              {
+                groupId: chatId,
+                status: {
+                  $in: ["draft", "awaiting_details", "awaiting_deposit"],
+                },
+              },
+              { $set: { lastActivityAt: new Date() } }
+            );
+          } catch (e) {
+            // ignore errors in background tracking
+          }
+        })();
+      }
+
       return next();
     });
   }
@@ -285,6 +397,34 @@ class EscrowBot {
       } catch (error) {
         console.error("Error in cancel command:", error);
         ctx.reply("❌ An error occurred while cancelling the deal.");
+      }
+    });
+
+    this.bot.command("add", async (ctx) => {
+      try {
+        const chatId = ctx.chat.id;
+        const escrow = await findGroupEscrow(chatId, [
+          "deposited",
+          "in_fiat_transfer",
+          "ready_to_release",
+        ]);
+
+        if (!escrow) {
+          return ctx.reply(
+            "❌ This command can only be used when a deposit is already confirmed and before release."
+          );
+        }
+
+        const networkName = (escrow.chain || "BSC").toUpperCase();
+        const address =
+          escrow.uniqueDepositAddress || escrow.depositAddress || "N/A";
+
+        await ctx.reply(
+          `💰 <b>ADD MORE FUNDS</b>\n\nTo deposit additional funds, send ${escrow.token} to:\n\n<code>${address}</code>\n\nNetwork: ${networkName}\n\n⚠️ <b>After sending, please paste the Transaction Hash (TXID) here to automatically update the balance.</b>`,
+          { parse_mode: "HTML" }
+        );
+      } catch (error) {
+        console.error("Error in add command:", error);
       }
     });
 
@@ -446,8 +586,26 @@ class EscrowBot {
           return next();
         }
 
-        if (escrow.status !== "awaiting_deposit") {
+        if (
+          escrow.status !== "awaiting_deposit" &&
+          !["deposited", "in_fiat_transfer", "ready_to_release"].includes(
+            escrow.status
+          )
+        ) {
           return next();
+        }
+
+        // For non-awaiting states, we check if this looks like a TX hash to treat it as a top-up
+        // If it's just random text in a deposited chat, ignore it
+        if (escrow.status !== "awaiting_deposit") {
+          const potentialHash = ctx.message.text.trim();
+          // Basic regex check to see if it MIGHT be a hash
+          if (
+            !/^(0x)?[a-fA-F0-9]{64}$/.test(potentialHash) &&
+            !potentialHash.includes("scan")
+          ) {
+            return next();
+          }
         }
 
         const text = ctx.message.text.trim();
@@ -773,8 +931,17 @@ class EscrowBot {
         }
 
         freshEscrow.depositAmount = newAccumulated;
-        if (freshEscrow.status !== "awaiting_deposit") {
-          freshEscrow.status = "awaiting_deposit";
+        // Only revert to awaiting_deposit if we fall below expected amount and we are not already advanced?
+        // Actually, for partial deposits, we want to stay in awaiting_deposit.
+        // But if we are doing a top-up, we don't want to flip to awaiting_deposit temporarily.
+        if (
+          newAccumulated < expectedAmount - tolerance &&
+          freshEscrow.status !== "awaiting_deposit"
+        ) {
+          // Only force status back if underfunded? Or maybe just keep as is?
+          // If it was 'deposited' and we add more, it stays 'deposited'.
+          // If it was 'awaiting_deposit' and we add some (still partial), it stays 'awaiting_deposit'.
+          // So we generally don't need to force change here unless we want to handle underpayment.
         }
         await freshEscrow.save();
 
@@ -832,8 +999,31 @@ class EscrowBot {
             expectedAmount > 0 && newAccumulated - expectedAmount > tolerance;
 
           freshEscrow.confirmedAmount = newAccumulated;
-          freshEscrow.status = "deposited";
+          // Only update status to deposited if it was awaiting_deposit (don't regress from in_fiat_transfer, etc.)
+          if (
+            ["draft", "awaiting_details", "awaiting_deposit"].includes(
+              freshEscrow.status
+            )
+          ) {
+            freshEscrow.status = "deposited";
+          }
           await freshEscrow.save();
+
+          // Check if this is a top-up (additional funds after initial completion)
+          // It's a top-up if the previous accumulated amount (before this tx) was already >= expected
+          const isTopUp = currentAccumulated >= expectedAmount - tolerance;
+
+          if (isTopUp) {
+            const topUpMessage = `💰 <b>ADDITIONAL FUNDS RECEIVED</b>
+             
+✅ <b>Recieved:</b> ${amount.toFixed(2)} ${freshEscrow.token}
+📊 <b>New Total:</b> ${newAccumulated.toFixed(2)} ${freshEscrow.token}
+Transactions: ${totalTxCount}
+Main Tx: <code>${txHashShort}</code>`;
+
+            await ctx.reply(topUpMessage, { parse_mode: "HTML" });
+            return;
+          }
 
           const statusLine = overDelivered
             ? `🟢 Extra ${
@@ -1686,6 +1876,74 @@ This is the current available balance for this trade.`;
 
     this.bot.on("callback_query", callbackHandler);
     this.bot.on("chat_join_request", joinRequestHandler);
+
+    // Handle user leaving the group
+    this.bot.on("left_chat_member", async (ctx) => {
+      try {
+        const chatId = String(ctx.chat.id);
+        const leftMember = ctx.message.left_chat_member;
+
+        // Ignore if bot itself left (handle elsewhere)
+        if (leftMember.id === ctx.botInfo.id) return;
+
+        // Use findGroupEscrow to locate any relevant escrow for this group
+        // We only care about stages BEFORE deposit is confirmed
+        const escrow = await findGroupEscrow(chatId, [
+          "draft",
+          "awaiting_details",
+          "awaiting_deposit",
+        ]);
+
+        if (!escrow) return;
+
+        // Check if the user who left is a party to the deal
+        const isBuyer = escrow.buyerId && escrow.buyerId === leftMember.id;
+        const isSeller = escrow.sellerId && escrow.sellerId === leftMember.id;
+
+        if (isBuyer || isSeller) {
+          // If a party leaves, trigger recycling logic
+          if (escrow.isScheduledForRecycle) return;
+
+          const role = isBuyer ? "Buyer" : "Seller";
+          await ctx.reply(
+            `⚠️ <b>Alert:</b> The ${role} has left the group.\n\nThis deal will be cancelled and the group recycled in 10 minutes if they do not return.`,
+            { parse_mode: "HTML" }
+          );
+
+          escrow.recycleWarningSentAt = new Date();
+          escrow.isScheduledForRecycle = true;
+          await escrow.save();
+
+          // Schedule immediate check/recycle in 10 minutes via simple timeout
+          // We also have the background poller as backup
+          setTimeout(async () => {
+            try {
+              const freshEscrow = await Escrow.findById(escrow._id);
+              // conditions might have changed in 10 mins (e.g., user re-joined? or status changed?)
+              // For simplicity, if status is still same and not updated recently, recycle.
+              if (
+                freshEscrow &&
+                ["draft", "awaiting_details", "awaiting_deposit"].includes(
+                  freshEscrow.status
+                )
+              ) {
+                await ctx.reply("⏳ Time is up. Recycling group...");
+                freshEscrow.status = "cancelled";
+                await freshEscrow.save();
+                await GroupPoolService.recycleGroupNow(
+                  freshEscrow,
+                  ctx.telegram
+                );
+              }
+            } catch (e) {
+              console.error("Error in scheduled recycle after user left:", e);
+            }
+          }, 10 * 60 * 1000);
+        }
+      } catch (e) {
+        console.error("Error in left_chat_member handler:", e);
+      }
+    });
   }
 
   setupErrorHandling() {
@@ -1735,6 +1993,9 @@ This is the current available balance for this trade.`;
   async start() {
     try {
       console.log("🚀 Starting Escrow Bot...");
+
+      // Start background monitoring for inactivity
+      this.setupGroupMonitoring();
 
       await connectDB();
 

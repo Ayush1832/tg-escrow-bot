@@ -1,381 +1,278 @@
 const User = require("../models/User");
 
 class UserStatsService {
-  normalizeUsername(username) {
-    if (!username) {
-      return null;
-    }
-    return username.replace(/^@/, "").trim();
-  }
-
-  formatUserLabel(username, telegramId, options = {}) {
-    const normalized = this.normalizeUsername(username);
-    if (normalized) {
-      return `@${normalized}`;
-    }
+  /**
+   * Get user stats with global ranks
+   * @param {Object} params - { telegramId, username }
+   */
+  async getUserStats({ telegramId, username }) {
+    let user = null;
 
     if (telegramId) {
-      return `User ${telegramId}`;
-    }
-
-    return "Unknown User";
-  }
-
-  escapeRegex(value = "") {
-    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
-
-  formatAmount(amount = 0) {
-    return Number(amount || 0).toFixed(2);
-  }
-
-  formatDate(date) {
-    if (!date) {
-      return "N/A";
-    }
-    return new Date(date).toLocaleString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-  }
-
-  async ensureUserRecord(telegramId, username = null) {
-    if (!telegramId) {
-      return null;
-    }
-
-    const normalizedUsername = this.normalizeUsername(username);
-    const now = new Date();
-    const update = {
-      $setOnInsert: {
-        telegramId,
-        createdAt: now,
-      },
-      $set: {
-        lastActive: now,
-      },
-    };
-
-    if (normalizedUsername) {
-      update.$set.username = normalizedUsername;
-    }
-
-    return User.findOneAndUpdate({ telegramId }, update, {
-      upsert: true,
-      new: true,
-    });
-  }
-
-  buildCounterpartyLabel(username, telegramId) {
-    const normalized = this.normalizeUsername(username);
-    if (normalized) {
-      return `@${normalized}`;
-    }
-    if (telegramId) {
-      return `ID ${telegramId}`;
-    }
-    return "N/A";
-  }
-
-  async applyTradeUpdate({
-    telegramId,
-    username,
-    role,
-    amount,
-    token,
-    escrowId,
-    counterpartyUsername,
-    counterpartyId,
-  }) {
-    if (!telegramId || !amount || amount <= 0) {
-      return null;
-    }
-
-    const normalizedUsername = this.normalizeUsername(username);
-    const counterpartyLabel = this.buildCounterpartyLabel(
-      counterpartyUsername,
-      counterpartyId
-    );
-    const now = new Date();
-
-    const inc = {
-      totalTradedVolume: amount,
-      totalCompletedTrades: 1,
-    };
-
-    if (role === "buyer") {
-      inc.totalBoughtVolume = amount;
-      inc.totalBoughtTrades = 1;
-    } else if (role === "seller") {
-      inc.totalSoldVolume = amount;
-      inc.totalSoldTrades = 1;
-    }
-
-    const update = {
-      $inc: inc,
-      $set: {
-        lastActive: now,
-        lastTradeAt: now,
-        lastTradeRole: role,
-        lastTradeAmount: amount,
-        lastTradeToken: token,
-        lastTradeEscrowId: escrowId,
-        lastTradeCounterparty: counterpartyLabel,
-      },
-      $setOnInsert: {
-        telegramId,
-        createdAt: now,
-      },
-    };
-
-    if (normalizedUsername) {
-      update.$set.username = normalizedUsername;
-    }
-
-    return User.findOneAndUpdate({ telegramId }, update, {
-      upsert: true,
-      new: true,
-    });
-  }
-
-  async recordTrade({
-    buyerId,
-    buyerUsername,
-    sellerId,
-    sellerUsername,
-    amount,
-    token = "USDT",
-    escrowId,
-  }) {
-    if (!amount || amount <= 0) {
-      return;
-    }
-
-    const updates = [];
-
-    if (buyerId) {
-      updates.push(
-        this.applyTradeUpdate({
-          telegramId: buyerId,
-          username: buyerUsername,
-          role: "buyer",
-          amount,
-          token,
-          escrowId,
-          counterpartyUsername: sellerUsername,
-          counterpartyId: sellerId,
-        })
-      );
-    }
-
-    if (sellerId) {
-      updates.push(
-        this.applyTradeUpdate({
-          telegramId: sellerId,
-          username: sellerUsername,
-          role: "seller",
-          amount,
-          token,
-          escrowId,
-          counterpartyUsername: buyerUsername,
-          counterpartyId: buyerId,
-        })
-      );
-    }
-
-    if (updates.length > 0) {
-      await Promise.all(updates);
-    }
-  }
-
-  async recordParticipation({ telegramId, username }) {
-    if (!telegramId) {
-      return null;
-    }
-
-    const normalizedUsername = this.normalizeUsername(username);
-    const now = new Date();
-
-    const update = {
-      $inc: {
-        totalParticipatedTrades: 1,
-      },
-      $set: {
-        lastActive: now,
-      },
-      $setOnInsert: {
-        telegramId,
-        createdAt: now,
-      },
-    };
-
-    if (normalizedUsername) {
-      update.$set.username = normalizedUsername;
-    }
-
-    return User.findOneAndUpdate({ telegramId }, update, {
-      upsert: true,
-      new: true,
-    });
-  }
-
-  async getUserStats({ telegramId = null, username = null }) {
-    const query = {};
-
-    if (telegramId) {
-      query.telegramId = telegramId;
+      user = await User.findOne({ telegramId: Number(telegramId) });
     } else if (username) {
-      const normalized = this.normalizeUsername(username);
-      if (!normalized) {
-        return null;
-      }
-      query.username = {
-        $regex: new RegExp(`^${this.escapeRegex(normalized)}$`, "i"),
-      };
-    } else {
+      // Case-insensitive username search
+      user = await User.findOne({
+        username: { $regex: new RegExp(`^${username}$`, "i") },
+      });
+    }
+
+    if (!user) {
       return null;
     }
 
-    return User.findOne(query);
-  }
+    // Calculate ranks
+    // Rank is (number of users with higher value) + 1
+    // We handle null/undefined values as 0
+    const [buyRank, sellRank, overallRank] = await Promise.all([
+      User.countDocuments({
+        totalBoughtVolume: { $gt: user.totalBoughtVolume || 0 },
+      }),
+      User.countDocuments({
+        totalSoldVolume: { $gt: user.totalSoldVolume || 0 },
+      }),
+      User.countDocuments({
+        totalTradedVolume: { $gt: user.totalTradedVolume || 0 },
+      }),
+    ]);
 
-  formatStatsMessage(userDoc) {
-    if (!userDoc) {
-      // Return default stats with 0 trades
-      return `📊 <b>Trading Stats – Unknown User</b>
+    // Convert to object to attach ranks
+    const userObj = user.toObject();
+    userObj.globalBuyRank = buyRank + 1;
+    userObj.globalSellRank = sellRank + 1;
+    userObj.overallGlobalRank = overallRank + 1;
 
-• <b>Total Bought:</b> 0.00 USDT (0 trades)
-• <b>Total Sold:</b> 0.00 USDT (0 trades)
-• <b>Lifetime Volume:</b> 0.00 USDT (0 deals)
-• <b>Completion Rate:</b> N/A
-
-<b>Last Deal:</b> No completed trades yet.`;
-    }
-
-    // Show username if available, otherwise show userId
-    const usernameLabel = this.formatUserLabel(
-      userDoc.username,
-      userDoc.telegramId
-    );
-    const totalBought = this.formatAmount(userDoc.totalBoughtVolume || 0);
-    const totalSold = this.formatAmount(userDoc.totalSoldVolume || 0);
-    const totalVolume = this.formatAmount(userDoc.totalTradedVolume || 0);
-    const boughtTrades = userDoc.totalBoughtTrades || 0;
-    const soldTrades = userDoc.totalSoldTrades || 0;
-    const totalTrades = boughtTrades + soldTrades;
-    const participatedTrades = userDoc.totalParticipatedTrades || 0;
-    const completedTrades = userDoc.totalCompletedTrades || totalTrades || 0;
-    const completionRate =
-      participatedTrades > 0
-        ? ((completedTrades / participatedTrades) * 100).toFixed(1)
-        : null;
-
-    let lastTradeSummary = "<b>Last Deal:</b> No completed trades yet.";
-
-    if (userDoc.lastTradeAt && userDoc.lastTradeAmount) {
-      const roleLabel = userDoc.lastTradeRole === "seller" ? "Sold" : "Bought";
-      const amountLabel = this.formatAmount(userDoc.lastTradeAmount);
-      const tokenLabel = userDoc.lastTradeToken || "USDT";
-      const dateLabel = this.formatDate(userDoc.lastTradeAt);
-      const counterpartyLabel = userDoc.lastTradeCounterparty || "N/A";
-      const escrowLabel = userDoc.lastTradeEscrowId || "N/A";
-      lastTradeSummary = `<b>Last Deal:</b> ${roleLabel} ${amountLabel} ${tokenLabel} with ${counterpartyLabel} on ${dateLabel} (Escrow ${escrowLabel})`;
-    }
-
-    return `📊 <b>Trading Stats – ${usernameLabel}</b>
-
-• <b>Total Bought:</b> ${totalBought} USDT (${boughtTrades} trades)
-• <b>Total Sold:</b> ${totalSold} USDT (${soldTrades} trades)
-• <b>Lifetime Volume:</b> ${totalVolume} USDT (${totalTrades} deals)
-• <b>Completion Rate:</b> ${
-      completionRate !== null
-        ? `${completionRate}% (${completedTrades}/${participatedTrades})`
-        : "N/A"
-    }
-
-${lastTradeSummary}`;
-  }
-
-  async getLeaderboard(limit = 5) {
-    return User.find({ totalTradedVolume: { $gt: 0 } })
-      .sort({ totalTradedVolume: -1 })
-      .limit(limit)
-      .lean();
+    return userObj;
   }
 
   /**
-   * Get top buyers and sellers by volume
+   * Format stats message
+   * @param {Object} user - User stats object
+   */
+  formatStatsMessage(user) {
+    if (!user) {
+      return "❌ User stats not found.";
+    }
+
+    const formatCurrency = (amount) => {
+      return (amount || 0).toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    };
+
+    const usernameDisplay = user.username
+      ? `@${user.username}`
+      : `User ${user.telegramId}`;
+
+    // Buying Stats
+    const totalBought = formatCurrency(user.totalBoughtVolume);
+    const totalBuyTrades = user.totalBoughtTrades || 0;
+    const buyRank = user.globalBuyRank || "N/A";
+
+    // Selling Stats
+    const totalSold = formatCurrency(user.totalSoldVolume);
+    const totalSellTrades = user.totalSoldTrades || 0;
+    const sellRank = user.globalSellRank || "N/A";
+
+    // Overall Performance
+    const lifetimeVolume = formatCurrency(user.totalTradedVolume);
+    const totalDeals = user.totalCompletedTrades || 0;
+    const totalParticipated = user.totalParticipatedTrades || 0;
+
+    // Calculate completion rate
+    // If participated is 0, rate is 0%. If completed > participated (shouldn't happen), cap at 100%?
+    // Let's assume data is correct.
+    let completionRate = 0;
+    if (totalParticipated > 0) {
+      completionRate = (totalDeals / totalParticipated) * 100;
+    }
+    const completionRateStr = `${completionRate.toFixed(1)}%`;
+    const overallRank = user.overallGlobalRank || "N/A";
+
+    // Last Trade
+    let lastTradeSection = "";
+    if (user.lastTradeAmount && user.lastTradeRole) {
+      const isBuy = user.lastTradeRole === "buyer";
+      const roleIcon = isBuy ? "🟢" : "🔻";
+      const roleName = isBuy ? "Bought" : "Sold";
+      const amount = formatCurrency(user.lastTradeAmount);
+      const token = user.lastTradeToken || "USDT";
+
+      const counterparty = user.lastTradeCounterparty
+        ? user.lastTradeCounterparty.startsWith("@")
+          ? user.lastTradeCounterparty
+          : `@${user.lastTradeCounterparty}`
+        : "N/A";
+
+      let dateStr = "N/A";
+      if (user.lastTradeAt) {
+        const d = new Date(user.lastTradeAt);
+        const day = d.getDate();
+        const month = d.toLocaleString("en-US", { month: "short" });
+        const time = d.toLocaleTimeString("en-GB", {
+          hour: "2-digit",
+          minute: "2-digit",
+        }); // 17:16
+        dateStr = `${day} ${month}, ${time}`;
+      }
+
+      lastTradeSection = `
+⏱ LAST TRADE
+${roleIcon} ${roleName} <code>${amount} ${token}</code>
+👤 With: ${counterparty}
+📅 <code>${dateStr}</code>`;
+    }
+
+    return `📊 PERSONAL TRADING STATS — ${usernameDisplay}
+
+🟢 BUYING STATS
+• Total Bought: <code>${totalBought} USDT</code>
+• Total Buy Trades: <code>${totalBuyTrades}</code>
+🏅 Global Buy Rank: <code>#${buyRank} Buyer</code>
+
+🔴 SELLING STATS
+• Total Sold: <code>${totalSold} USDT</code>
+• Total Sell Trades: <code>${totalSellTrades}</code>
+🥇 Global Sell Rank: <code>#${sellRank} Seller</code>
+
+📈 OVERALL PERFORMANCE
+• Lifetime Volume: <code>${lifetimeVolume} USDT</code>
+• Total Deals: <code>${totalDeals}</code>
+• Completion Rate: <code>${completionRateStr} (${totalDeals} / ${totalParticipated})</code>
+🏆 Overall Global Rank: <code>#${overallRank} Trader</code>${lastTradeSection}`;
+  }
+
+  /**
+   * Get leaderboard (top traders by volume)
+   */
+  async getLeaderboard(limit = 10) {
+    return User.find({ totalTradedVolume: { $gt: 0 } })
+      .sort({ totalTradedVolume: -1 })
+      .limit(limit);
+  }
+
+  /**
+   * Get top buyers and sellers
    */
   async getTopBuyersAndSellers(limit = 3) {
-    const [topBuyers, topSellers] = await Promise.all([
-      User.find({ totalBoughtVolume: { $gt: 0 } })
-        .sort({ totalBoughtVolume: -1 })
-        .limit(limit)
-        .lean(),
-      User.find({ totalSoldVolume: { $gt: 0 } })
-        .sort({ totalSoldVolume: -1 })
-        .limit(limit)
-        .lean(),
-    ]);
+    const topBuyers = await User.find({ totalBoughtVolume: { $gt: 0 } })
+      .sort({ totalBoughtVolume: -1 })
+      .limit(limit);
+
+    const topSellers = await User.find({ totalSoldVolume: { $gt: 0 } })
+      .sort({ totalSoldVolume: -1 })
+      .limit(limit);
 
     return { topBuyers, topSellers };
   }
 
-  formatLeaderboardSection(title, users, getAmountFn) {
-    if (!users || users.length === 0) {
-      return `${title}\nNo data yet.`;
-    }
+  /**
+   * Format leaderboard message
+   */
+  formatLeaderboard(topUsers, { topBuyers, topSellers }) {
+    // Basic implementation to prevent crash
+    const formatCurrency = (val) =>
+      Number(val || 0).toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
 
-    const lines = users.map((user, index) => {
-      const label = this.formatUserLabel(user.username, user.telegramId);
-      const amount = this.formatAmount(getAmountFn(user) || 0);
-      return `${index + 1}. ${label} – ${amount} USDT`;
+    let message = "🏆 <b>TRADING LEADERBOARD</b>\n\n";
+
+    message += "📈 <b>Top Traders (Volume)</b>\n";
+    topUsers.forEach((u, i) => {
+      const name = u.username ? `@${u.username}` : `ID:${u.telegramId}`;
+      message += `${i + 1}. ${name} - $${formatCurrency(
+        u.totalTradedVolume
+      )}\n`;
     });
-
-    return `${title}\n${lines.join("\n")}`;
-  }
-
-  formatLeaderboard(users, extraStats = null) {
-    if (!users || users.length === 0) {
-      return "🏆 <b>Leaderboard</b>\n\nNo completed trades yet.";
-    }
-
-    const lines = users.map((user, index) => {
-      const label = this.formatUserLabel(user.username, user.telegramId);
-      const totalVolume = this.formatAmount(user.totalTradedVolume);
-      const bought = this.formatAmount(user.totalBoughtVolume);
-      const sold = this.formatAmount(user.totalSoldVolume);
-      return `${
-        index + 1
-      }. ${label} – ${totalVolume} USDT (Bought ${bought} / Sold ${sold})`;
-    });
-
-    let message = `🏆 <b>Top Traders</b>\n\n${lines.join("\n")}`;
-
-    // Optionally append top buyers/sellers sections
-    if (
-      extraStats &&
-      (extraStats.topBuyers?.length || extraStats.topSellers?.length)
-    ) {
-      const topBuyersSection = this.formatLeaderboardSection(
-        "\n👑 <b>Top Buyers</b>",
-        extraStats.topBuyers || [],
-        (u) => u.totalBoughtVolume
-      );
-
-      const topSellersSection = this.formatLeaderboardSection(
-        "\n💰 <b>Top Sellers</b>",
-        extraStats.topSellers || [],
-        (u) => u.totalSoldVolume
-      );
-
-      message += `\n\n${topBuyersSection}\n\n${topSellersSection}`;
-    }
 
     return message;
+  }
+
+  /**
+   * Update user stats after a completed trade
+   * @param {Object} escrow - The completed escrow object
+   */
+  async updateUserStats(escrow) {
+    if (!escrow || !escrow.buyerId || !escrow.sellerId) {
+      return;
+    }
+
+    const {
+      buyerId,
+      sellerId,
+      buyerUsername,
+      sellerUsername,
+      quantity,
+      token,
+      escrowId,
+      createdAt,
+    } = escrow;
+
+    const amount = Number(quantity || 0);
+    const tradeDate = new Date();
+
+    // specific logic for buyer
+    await User.findOneAndUpdate(
+      { telegramId: buyerId },
+      {
+        $setOnInsert: {
+          username: buyerUsername || `user_${buyerId}`,
+          telegramId: buyerId,
+        },
+        $inc: {
+          totalBoughtVolume: amount,
+          totalTradedVolume: amount,
+          totalBoughtTrades: 1,
+          totalParticipatedTrades: 1,
+          totalCompletedTrades: 1,
+        },
+        $set: {
+          lastActive: tradeDate,
+          lastTradeAt: tradeDate,
+          lastTradeRole: "buyer",
+          lastTradeAmount: amount,
+          lastTradeToken: token,
+          lastTradeEscrowId: escrowId,
+          lastTradeCounterparty: sellerUsername
+            ? `@${sellerUsername}`
+            : `User ${sellerId}`,
+        },
+      },
+      { upsert: true }
+    );
+
+    // specific logic for seller
+    await User.findOneAndUpdate(
+      { telegramId: sellerId },
+      {
+        $setOnInsert: {
+          username: sellerUsername || `user_${sellerId}`,
+          telegramId: sellerId,
+        },
+        $inc: {
+          totalSoldVolume: amount,
+          totalTradedVolume: amount,
+          totalSoldTrades: 1,
+          totalParticipatedTrades: 1,
+          totalCompletedTrades: 1,
+        },
+        $set: {
+          lastActive: tradeDate,
+          lastTradeAt: tradeDate,
+          lastTradeRole: "seller",
+          lastTradeAmount: amount,
+          lastTradeToken: token,
+          lastTradeEscrowId: escrowId,
+          lastTradeCounterparty: buyerUsername
+            ? `@${buyerUsername}`
+            : `User ${buyerId}`,
+        },
+      },
+      { upsert: true }
+    );
   }
 }
 
