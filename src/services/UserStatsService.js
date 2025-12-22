@@ -256,7 +256,10 @@ class UserStatsService {
     }
 
     // Show username if available, otherwise show userId
-    const usernameLabel = this.formatUserLabel(userDoc.username, userDoc.telegramId);
+    const usernameLabel = this.formatUserLabel(
+      userDoc.username,
+      userDoc.telegramId
+    );
     const totalBought = this.formatAmount(userDoc.totalBoughtVolume || 0);
     const totalSold = this.formatAmount(userDoc.totalSoldVolume || 0);
     const totalVolume = this.formatAmount(userDoc.totalTradedVolume || 0);
@@ -353,7 +356,10 @@ ${lastTradeSummary}`;
     let message = `🏆 <b>Top Traders</b>\n\n${lines.join("\n")}`;
 
     // Optionally append top buyers/sellers sections
-    if (extraStats && (extraStats.topBuyers?.length || extraStats.topSellers?.length)) {
+    if (
+      extraStats &&
+      (extraStats.topBuyers?.length || extraStats.topSellers?.length)
+    ) {
       const topBuyersSection = this.formatLeaderboardSection(
         "\n👑 <b>Top Buyers</b>",
         extraStats.topBuyers || [],

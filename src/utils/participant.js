@@ -6,13 +6,13 @@ function normalizeId(value) {
   return Number.isFinite(num) ? num : null;
 }
 
-function escapeHtml(text = '') {
+function escapeHtml(text = "") {
   return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function getParticipants(escrow) {
@@ -20,7 +20,9 @@ function getParticipants(escrow) {
     return [];
   }
 
-  const usernames = Array.isArray(escrow.allowedUsernames) ? escrow.allowedUsernames : [];
+  const usernames = Array.isArray(escrow.allowedUsernames)
+    ? escrow.allowedUsernames
+    : [];
   const ids = Array.isArray(escrow.allowedUserIds) ? escrow.allowedUserIds : [];
   const maxLength = Math.max(usernames.length, ids.length);
 
@@ -34,10 +36,10 @@ function getParticipants(escrow) {
   return participants;
 }
 
-function maskValue(value = '') {
-  const stripped = value.replace(/^@/, '');
+function maskValue(value = "") {
+  const stripped = value.replace(/^@/, "");
   if (!stripped) {
-    return '*';
+    return "*";
   }
   if (stripped.length === 1) {
     return `${stripped[0]}*`;
@@ -47,13 +49,17 @@ function maskValue(value = '') {
   }
   const first = stripped[0];
   const last = stripped[stripped.length - 1];
-  const middle = '*'.repeat(Math.min(6, Math.max(1, stripped.length - 2)));
+  const middle = "*".repeat(Math.min(6, Math.max(1, stripped.length - 2)));
   return `${first}${middle}${last}`;
 }
 
-function formatParticipant(participant, fallbackLabel = 'Unknown', options = {}) {
+function formatParticipant(
+  participant,
+  fallbackLabel = "Unknown",
+  options = {}
+) {
   const { html = false, mask = false } = options;
-  const baseLabel = fallbackLabel || 'User';
+  const baseLabel = fallbackLabel || "User";
 
   if (!participant) {
     const display = mask ? maskValue(baseLabel) : baseLabel;
@@ -76,7 +82,9 @@ function formatParticipant(participant, fallbackLabel = 'Unknown', options = {})
   }
 
   if (html && hasId && !mask) {
-    return `<a href="tg://user?id=${participant.id}">${escapeHtml(displayText)}</a>`;
+    return `<a href="tg://user?id=${participant.id}">${escapeHtml(
+      displayText
+    )}</a>`;
   }
 
   if (html) {
@@ -101,7 +109,9 @@ function formatParticipantById(escrow, id, fallbackLabel, options) {
   }
   const participants = getParticipants(escrow);
   const targetId = Number(id);
-  const match = participants.find(p => p.id !== null && Number(p.id) === targetId);
+  const match = participants.find(
+    (p) => p.id !== null && Number(p.id) === targetId
+  );
   return formatParticipant(match, fallbackLabel, options);
 }
 
@@ -110,6 +120,5 @@ module.exports = {
   formatParticipant,
   formatParticipantByIndex,
   formatParticipantById,
-  normalizeId
+  normalizeId,
 };
-

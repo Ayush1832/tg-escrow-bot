@@ -1,6 +1,6 @@
-const { ethers } = require('ethers');
-const config = require('../../config');
-const GroupPool = require('../models/GroupPool');
+const { ethers } = require("ethers");
+const config = require("../../config");
+const GroupPool = require("../models/GroupPool");
 
 class GroupAddressService {
   constructor() {
@@ -10,15 +10,17 @@ class GroupAddressService {
 
   init() {
     if (!config.HOT_WALLET_PRIVATE_KEY) {
-      console.warn('HOT_WALLET_PRIVATE_KEY not set in config. Address generation will still work.');
+      console.warn(
+        "HOT_WALLET_PRIVATE_KEY not set in config. Address generation will still work."
+      );
       this.masterPrivateKey = null;
       return;
     }
-    
-    const privateKey = config.HOT_WALLET_PRIVATE_KEY.startsWith('0x') 
-      ? config.HOT_WALLET_PRIVATE_KEY 
-      : '0x' + config.HOT_WALLET_PRIVATE_KEY;
-    
+
+    const privateKey = config.HOT_WALLET_PRIVATE_KEY.startsWith("0x")
+      ? config.HOT_WALLET_PRIVATE_KEY
+      : "0x" + config.HOT_WALLET_PRIVATE_KEY;
+
     this.masterPrivateKey = privateKey;
   }
 
@@ -27,8 +29,8 @@ class GroupAddressService {
    * Uses HD wallet derivation based on groupId + token + network
    */
   generateAddressForGroup(groupId, token, network) {
-    const normalizedToken = (token || '').toUpperCase();
-    const normalizedNetwork = (network || 'BSC').toUpperCase();
+    const normalizedToken = (token || "").toUpperCase();
+    const normalizedNetwork = (network || "BSC").toUpperCase();
     const cacheKey = `${groupId}_${normalizedToken}_${normalizedNetwork}`;
 
     if (this.addressCache.has(cacheKey)) {
@@ -37,9 +39,9 @@ class GroupAddressService {
 
     const seed = `${groupId}_${normalizedToken}_${normalizedNetwork}`;
     const hash = ethers.keccak256(ethers.toUtf8Bytes(seed));
-    
-    const derivedPrivateKey = '0x' + hash.slice(2, 66);
-    
+
+    const derivedPrivateKey = "0x" + hash.slice(2, 66);
+
     // Create wallet from derived private key
     const wallet = new ethers.Wallet(derivedPrivateKey);
     const address = wallet.address;
@@ -55,17 +57,17 @@ class GroupAddressService {
    */
   getAddressValue(assignedAddresses, key) {
     if (!assignedAddresses) return null;
-    
+
     // If it's a Map, use .get()
     if (assignedAddresses instanceof Map) {
       return assignedAddresses.get(key) || null;
     }
-    
+
     // If it's an object (from MongoDB), use bracket notation
-    if (typeof assignedAddresses === 'object') {
+    if (typeof assignedAddresses === "object") {
       return assignedAddresses[key] || null;
     }
-    
+
     return null;
   }
 
@@ -76,13 +78,13 @@ class GroupAddressService {
     if (!assignedAddresses) {
       return new Map([[key, value]]);
     }
-    
+
     // If it's a Map, use .set()
     if (assignedAddresses instanceof Map) {
       assignedAddresses.set(key, value);
       return assignedAddresses;
     }
-    
+
     // If it's an object, convert to Map for consistency
     const map = new Map();
     for (const [k, v] of Object.entries(assignedAddresses)) {
@@ -99,17 +101,20 @@ class GroupAddressService {
   async getOrAssignAddress(groupId, token, network) {
     try {
       const group = await GroupPool.findOne({ groupId });
-      
+
       if (!group) {
         throw new Error(`Group not found: ${groupId}`);
       }
 
-      const normalizedToken = (token || '').toUpperCase();
-      const normalizedNetwork = (network || 'BSC').toUpperCase();
+      const normalizedToken = (token || "").toUpperCase();
+      const normalizedNetwork = (network || "BSC").toUpperCase();
       const addressKey = `${normalizedToken}_${normalizedNetwork}`;
 
       // Check if address already assigned (handle both Map and Object formats)
-      const existingAddress = this.getAddressValue(group.assignedAddresses, addressKey);
+      const existingAddress = this.getAddressValue(
+        group.assignedAddresses,
+        addressKey
+      );
       if (existingAddress) {
         return existingAddress;
       }
@@ -118,12 +123,16 @@ class GroupAddressService {
       const address = this.generateAddressForGroup(groupId, token, network);
 
       // Save to database (ensure it's a Map for Mongoose)
-      group.assignedAddresses = this.setAddressValue(group.assignedAddresses, addressKey, address);
+      group.assignedAddresses = this.setAddressValue(
+        group.assignedAddresses,
+        addressKey,
+        address
+      );
       await group.save();
 
       return address;
     } catch (error) {
-      console.error('Error getting/assigning address for group:', error);
+      console.error("Error getting/assigning address for group:", error);
       throw error;
     }
   }
@@ -134,18 +143,18 @@ class GroupAddressService {
   async getAddress(groupId, token, network) {
     try {
       const group = await GroupPool.findOne({ groupId });
-      
+
       if (!group) {
         return null;
       }
 
-      const normalizedToken = (token || '').toUpperCase();
-      const normalizedNetwork = (network || 'BSC').toUpperCase();
+      const normalizedToken = (token || "").toUpperCase();
+      const normalizedNetwork = (network || "BSC").toUpperCase();
       const addressKey = `${normalizedToken}_${normalizedNetwork}`;
 
       return this.getAddressValue(group.assignedAddresses, addressKey);
     } catch (error) {
-      console.error('Error getting address for group:', error);
+      console.error("Error getting address for group:", error);
       return null;
     }
   }
@@ -156,7 +165,7 @@ class GroupAddressService {
   async assignAddressesForGroup(groupId, tokenNetworkPairs) {
     try {
       const group = await GroupPool.findOne({ groupId });
-      
+
       if (!group) {
         throw new Error(`Group not found: ${groupId}`);
       }
@@ -176,17 +185,24 @@ class GroupAddressService {
       const assigned = {};
 
       for (const { token, network } of tokenNetworkPairs) {
-        const normalizedToken = (token || '').toUpperCase();
-        const normalizedNetwork = (network || 'BSC').toUpperCase();
+        const normalizedToken = (token || "").toUpperCase();
+        const normalizedNetwork = (network || "BSC").toUpperCase();
         const addressKey = `${normalizedToken}_${normalizedNetwork}`;
 
         // Check if address already assigned
-        const existingAddress = this.getAddressValue(group.assignedAddresses, addressKey);
-        
+        const existingAddress = this.getAddressValue(
+          group.assignedAddresses,
+          addressKey
+        );
+
         if (!existingAddress) {
           // Generate new address
           const address = this.generateAddressForGroup(groupId, token, network);
-          group.assignedAddresses = this.setAddressValue(group.assignedAddresses, addressKey, address);
+          group.assignedAddresses = this.setAddressValue(
+            group.assignedAddresses,
+            addressKey,
+            address
+          );
           assigned[addressKey] = address;
         } else {
           assigned[addressKey] = existingAddress;
@@ -196,7 +212,7 @@ class GroupAddressService {
       await group.save();
       return assigned;
     } catch (error) {
-      console.error('Error assigning addresses for group:', error);
+      console.error("Error assigning addresses for group:", error);
       throw error;
     }
   }
@@ -207,7 +223,7 @@ class GroupAddressService {
   async getAllAddressesForGroup(groupId) {
     try {
       const group = await GroupPool.findOne({ groupId });
-      
+
       if (!group) {
         return {};
       }
@@ -217,25 +233,24 @@ class GroupAddressService {
       }
 
       const addresses = {};
-      
+
       // Handle both Map and Object formats
       if (group.assignedAddresses instanceof Map) {
         // Convert Map to object
         for (const [key, value] of group.assignedAddresses.entries()) {
           addresses[key] = value;
         }
-      } else if (typeof group.assignedAddresses === 'object') {
+      } else if (typeof group.assignedAddresses === "object") {
         // Already an object
         Object.assign(addresses, group.assignedAddresses);
       }
 
       return addresses;
     } catch (error) {
-      console.error('Error getting all addresses for group:', error);
+      console.error("Error getting all addresses for group:", error);
       return {};
     }
   }
 }
 
 module.exports = new GroupAddressService();
-

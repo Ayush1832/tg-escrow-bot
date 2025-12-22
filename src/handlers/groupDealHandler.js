@@ -3,7 +3,7 @@ const GroupPool = require("../models/GroupPool");
 const GroupPoolService = require("../services/GroupPoolService");
 const config = require("../../config");
 const joinRequestHandler = require("./joinRequestHandler");
-const findGroupEscrow = require('../utils/findGroupEscrow');
+const findGroupEscrow = require("../utils/findGroupEscrow");
 const {
   formatParticipant,
   formatParticipantByIndex,
@@ -19,13 +19,12 @@ module.exports = async (ctx) => {
       return ctx.reply("❌ This command can only be used inside a group.");
     }
 
-    const tradeGroupEscrow = await findGroupEscrow(
-      chatId,
-      null
-    );
+    const tradeGroupEscrow = await findGroupEscrow(chatId, null);
 
     if (tradeGroupEscrow) {
-      return ctx.reply("❌ This command can only be used in the main group, not in trade groups.");
+      return ctx.reply(
+        "❌ This command can only be used in the main group, not in trade groups."
+      );
     }
 
     const text = ctx.message?.text || "";
@@ -72,20 +71,22 @@ module.exports = async (ctx) => {
       const handle = counterpartyHandle.startsWith("@")
         ? counterpartyHandle.substring(1)
         : counterpartyHandle;
-      
+
       let chatInfo = null;
-      
+
       try {
         chatInfo = await ctx.telegram.getChat(`@${handle}`);
       } catch (getChatError) {
         chatInfo = null;
       }
-      
+
       if (!counterpartyUser && chatId < 0) {
         try {
-          const administrators = await ctx.telegram.getChatAdministrators(chatId);
+          const administrators = await ctx.telegram.getChatAdministrators(
+            chatId
+          );
           const normalizedHandle = handle.toLowerCase();
-          
+
           for (const admin of administrators) {
             if (admin.user && admin.user.username) {
               const adminUsername = admin.user.username.toLowerCase();
@@ -107,7 +108,7 @@ module.exports = async (ctx) => {
           // Silently continue to other methods
         }
       }
-      
+
       // Method 3: If still not found, try to find the user in our database
       // (if they've done trades before, we'll have their user ID)
       if (!counterpartyUser && (!chatInfo || chatInfo.type !== "private")) {
@@ -116,24 +117,45 @@ module.exports = async (ctx) => {
           // Search for the user in recent escrows by username
           const escrowWithUser = await Escrow.findOne({
             $or: [
-              { buyerUsername: { $regex: new RegExp(`^${handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } },
-              { sellerUsername: { $regex: new RegExp(`^${handle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } }
-            ]
+              {
+                buyerUsername: {
+                  $regex: new RegExp(
+                    `^${handle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+                    "i"
+                  ),
+                },
+              },
+              {
+                sellerUsername: {
+                  $regex: new RegExp(
+                    `^${handle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+                    "i"
+                  ),
+                },
+              },
+            ],
           }).sort({ createdAt: -1 });
-          
+
           if (escrowWithUser) {
             // Found the user in database, get their info
-            const userId = escrowWithUser.buyerUsername?.toLowerCase() === handle.toLowerCase()
-              ? escrowWithUser.buyerId
-              : escrowWithUser.sellerId;
-            const userUsername = escrowWithUser.buyerUsername?.toLowerCase() === handle.toLowerCase()
-              ? escrowWithUser.buyerUsername
-              : escrowWithUser.sellerUsername;
-            
+            const userId =
+              escrowWithUser.buyerUsername?.toLowerCase() ===
+              handle.toLowerCase()
+                ? escrowWithUser.buyerId
+                : escrowWithUser.sellerId;
+            const userUsername =
+              escrowWithUser.buyerUsername?.toLowerCase() ===
+              handle.toLowerCase()
+                ? escrowWithUser.buyerUsername
+                : escrowWithUser.sellerUsername;
+
             if (userId) {
               // Try to get chat member info from the group (preferred method)
               try {
-                const memberInfo = await ctx.telegram.getChatMember(chatId, userId);
+                const memberInfo = await ctx.telegram.getChatMember(
+                  chatId,
+                  userId
+                );
                 if (memberInfo && memberInfo.user) {
                   counterpartyUser = {
                     id: Number(memberInfo.user.id),
@@ -161,7 +183,7 @@ module.exports = async (ctx) => {
           console.error("Error searching database for user:", dbError);
         }
       }
-      
+
       // Method 4: If we still don't have the user, try getChat one more time
       // (usually won't work if Method 1 failed, but worth a try)
       if (!counterpartyUser && (!chatInfo || chatInfo.type !== "private")) {
@@ -173,7 +195,7 @@ module.exports = async (ctx) => {
           chatInfo = null;
         }
       }
-      
+
       // If we got chatInfo, validate and use it
       if (!counterpartyUser && chatInfo) {
         // getChat can return different types, we need a user
@@ -182,11 +204,11 @@ module.exports = async (ctx) => {
             "❌ Could not retrieve user info. Please tag the user directly (tap their name) or reply to their message when using /deal."
           );
         }
-        
+
         if (chatInfo.is_bot) {
           return ctx.reply("❌ You cannot start a deal with a bot.");
         }
-        
+
         counterpartyUser = {
           id: Number(chatInfo.id),
           username: chatInfo.username || null,
@@ -195,7 +217,7 @@ module.exports = async (ctx) => {
           is_bot: chatInfo.is_bot,
         };
       }
-      
+
       // Method 5: If we still don't have the user ID but have a username,
       // allow proceeding with just the username. The join request handler will
       // match them by username when they try to join.
@@ -227,7 +249,11 @@ module.exports = async (ctx) => {
     const counterpartyUsername = counterpartyUser.username || null;
 
     // Check if user is trying to deal with themselves (only if we have both IDs)
-    if (counterpartyId !== null && counterpartyId !== undefined && Number(counterpartyId) === Number(initiatorId)) {
+    if (
+      counterpartyId !== null &&
+      counterpartyId !== undefined &&
+      Number(counterpartyId) === Number(initiatorId)
+    ) {
       return ctx.reply("❌ You cannot start a deal with yourself.");
     }
 

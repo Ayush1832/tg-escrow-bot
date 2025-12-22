@@ -1,5 +1,5 @@
-const GroupPool = require('../models/GroupPool');
-const config = require('../../config');
+const GroupPool = require("../models/GroupPool");
+const config = require("../../config");
 
 class GroupPoolService {
   /**
@@ -7,34 +7,38 @@ class GroupPoolService {
    */
   async assignGroup(escrowId, telegram = null) {
     try {
-      const availableGroup = await GroupPool.findOne({ 
-        status: 'available' 
+      const availableGroup = await GroupPool.findOne({
+        status: "available",
       });
 
       if (!availableGroup) {
-        throw new Error('No available groups in pool. All groups are currently occupied.');
+        throw new Error(
+          "No available groups in pool. All groups are currently occupied."
+        );
       }
 
-      const recheckGroup = await GroupPool.findOne({ 
+      const recheckGroup = await GroupPool.findOne({
         _id: availableGroup._id,
-        status: 'available' 
+        status: "available",
       });
 
       if (!recheckGroup) {
-        throw new Error('Group was assigned to another escrow. Please try again.');
+        throw new Error(
+          "Group was assigned to another escrow. Please try again."
+        );
       }
 
       const updateResult = await GroupPool.updateOne(
-        { _id: availableGroup._id, status: 'available' },
-        { 
-          status: 'assigned',
+        { _id: availableGroup._id, status: "available" },
+        {
+          status: "assigned",
           assignedEscrowId: escrowId,
-          assignedAt: new Date()
+          assignedAt: new Date(),
         }
       );
 
       if (updateResult.modifiedCount === 0) {
-        throw new Error('Group assignment failed. Please try again.');
+        throw new Error("Group assignment failed. Please try again.");
       }
 
       const updatedGroup = await GroupPool.findById(availableGroup._id);
@@ -44,10 +48,13 @@ class GroupPoolService {
       }
 
       return updatedGroup;
-
     } catch (error) {
-      if (!error.message || (!error.message.includes('No available groups') && !error.message.includes('All groups are currently occupied'))) {
-        console.error('Error assigning group:', error);
+      if (
+        !error.message ||
+        (!error.message.includes("No available groups") &&
+          !error.message.includes("All groups are currently occupied"))
+      ) {
+        console.error("Error assigning group:", error);
       }
       throw error;
     }
@@ -63,40 +70,46 @@ class GroupPoolService {
   async generateInviteLink(groupId, telegram, options = {}) {
     try {
       if (!telegram) {
-        throw new Error('Telegram API instance is required for generating invite links');
+        throw new Error(
+          "Telegram API instance is required for generating invite links"
+        );
       }
 
       // Find the group in pool (reload to get latest state)
       const group = await GroupPool.findOne({ groupId });
       if (!group) {
-        throw new Error('Group not found in pool');
+        throw new Error("Group not found in pool");
       }
 
       const chatId = String(groupId);
-      
+
       if (options.forceRefresh && group.inviteLink) {
         try {
           await telegram.revokeChatInviteLink(chatId, group.inviteLink);
-        } catch (revokeError) {
-        }
+        } catch (revokeError) {}
         group.inviteLink = null;
         group.inviteLinkHasJoinRequest = false;
         await group.save();
       }
 
       if (options.creates_join_request === true) {
-        if (group.inviteLink && group.inviteLinkHasJoinRequest && !options.forceRefresh) {
+        if (
+          group.inviteLink &&
+          group.inviteLinkHasJoinRequest &&
+          !options.forceRefresh
+        ) {
           try {
             await telegram.getChat(chatId);
             return group.inviteLink;
           } catch (verifyError) {
-            console.log(`Chat verification failed for ${groupId}: ${verifyError.message}`);
+            console.log(
+              `Chat verification failed for ${groupId}: ${verifyError.message}`
+            );
             try {
               if (group.inviteLink) {
                 await telegram.revokeChatInviteLink(chatId, group.inviteLink);
               }
-            } catch (revokeError) {
-            }
+            } catch (revokeError) {}
             group.inviteLink = null;
             group.inviteLinkHasJoinRequest = false;
             await group.save();
@@ -104,8 +117,7 @@ class GroupPoolService {
         } else if (group.inviteLink) {
           try {
             await telegram.revokeChatInviteLink(chatId, group.inviteLink);
-          } catch (revokeError) {
-          }
+          } catch (revokeError) {}
           group.inviteLink = null;
           group.inviteLinkHasJoinRequest = false;
           await group.save();
@@ -118,8 +130,7 @@ class GroupPoolService {
             await group.save();
             return primaryLink;
           }
-        } catch (exportError) {
-        }
+        } catch (exportError) {}
 
         if (group.inviteLink) {
           try {
@@ -140,14 +151,16 @@ class GroupPoolService {
         } else {
           params.member_limit = options.member_limit ?? 2;
         }
-        if (typeof options.expire_date === 'number') {
+        if (typeof options.expire_date === "number") {
           params.expire_date = options.expire_date;
         }
         inviteLinkData = await telegram.createChatInviteLink(chatId, params);
       } catch (chatError) {
-        const migrateId = chatError?.on?.payload?.chat_id === chatId && chatError?.response?.parameters?.migrate_to_chat_id
-          ? String(chatError.response.parameters.migrate_to_chat_id)
-          : null;
+        const migrateId =
+          chatError?.on?.payload?.chat_id === chatId &&
+          chatError?.response?.parameters?.migrate_to_chat_id
+            ? String(chatError.response.parameters.migrate_to_chat_id)
+            : null;
 
         if (migrateId) {
           group.groupId = migrateId;
@@ -159,18 +172,26 @@ class GroupPoolService {
             } else {
               retryParams.member_limit = options.member_limit ?? 2;
             }
-            if (typeof options.expire_date === 'number') {
+            if (typeof options.expire_date === "number") {
               retryParams.expire_date = options.expire_date;
             }
-            inviteLinkData = await telegram.createChatInviteLink(migrateId, retryParams);
+            inviteLinkData = await telegram.createChatInviteLink(
+              migrateId,
+              retryParams
+            );
           } catch (retryErr) {
-            console.error('Error generating invite link after migration retry:', retryErr);
+            console.error(
+              "Error generating invite link after migration retry:",
+              retryErr
+            );
             throw retryErr;
           }
-        } else if (chatError.message.includes('chat not found')) {
-          group.status = 'archived';
+        } else if (chatError.message.includes("chat not found")) {
+          group.status = "archived";
           await group.save();
-          throw new Error(`Group ${groupId} not found or bot is not a member. Group has been archived.`);
+          throw new Error(
+            `Group ${groupId} not found or bot is not a member. Group has been archived.`
+          );
         }
         throw chatError;
       }
@@ -179,9 +200,8 @@ class GroupPoolService {
       await group.save();
 
       return inviteLinkData.invite_link;
-
     } catch (error) {
-      console.error('Error generating invite link:', error);
+      console.error("Error generating invite link:", error);
       throw error;
     }
   }
@@ -191,24 +211,23 @@ class GroupPoolService {
    */
   async releaseGroup(escrowId) {
     try {
-      const group = await GroupPool.findOne({ 
-        assignedEscrowId: escrowId 
+      const group = await GroupPool.findOne({
+        assignedEscrowId: escrowId,
       });
 
       if (!group) {
         return null;
       }
 
-      group.status = 'completed';
+      group.status = "completed";
       group.completedAt = new Date();
       group.assignedEscrowId = null;
       group.assignedAt = null;
       await group.save();
 
       return group;
-
     } catch (error) {
-      console.error('Error releasing group:', error);
+      console.error("Error releasing group:", error);
       throw error;
     }
   }
@@ -219,9 +238,9 @@ class GroupPoolService {
   async resetCompletedGroups() {
     try {
       const result = await GroupPool.updateMany(
-        { status: 'completed' },
-        { 
-          status: 'available',
+        { status: "completed" },
+        {
+          status: "available",
           assignedEscrowId: null,
           assignedAt: null,
           completedAt: null,
@@ -230,9 +249,8 @@ class GroupPoolService {
       );
 
       return result.modifiedCount;
-
     } catch (error) {
-      console.error('Error resetting completed groups:', error);
+      console.error("Error resetting completed groups:", error);
       throw error;
     }
   }
@@ -244,16 +262,15 @@ class GroupPoolService {
     try {
       const group = await GroupPool.findOne({ groupId });
       if (!group) {
-        throw new Error('Group not found');
+        throw new Error("Group not found");
       }
 
-      group.status = 'archived';
+      group.status = "archived";
       await group.save();
 
       return group;
-
     } catch (error) {
-      console.error('Error archiving group:', error);
+      console.error("Error archiving group:", error);
       throw error;
     }
   }
@@ -272,20 +289,22 @@ class GroupPoolService {
         // Verify admin is present if telegram is provided
         if (telegram) {
           await this.ensureAdminInGroup(groupId, telegram);
-          
+
           // If group doesn't have an invite link, create one
           if (!existingGroup.inviteLink) {
             try {
-              await this.generateInviteLink(groupId, telegram, { creates_join_request: true });
+              await this.generateInviteLink(groupId, telegram, {
+                creates_join_request: true,
+              });
               // Link is already saved in generateInviteLink
               // Reload to get the updated group with link
               const refreshed = await GroupPool.findOne({ groupId });
               if (refreshed) {
                 return refreshed;
               }
-        } catch (linkError) {
-          // Could not create invite link - will be created when needed
-        }
+            } catch (linkError) {
+              // Could not create invite link - will be created when needed
+            }
           }
         }
         return existingGroup;
@@ -294,7 +313,7 @@ class GroupPoolService {
       const group = new GroupPool({
         groupId,
         groupTitle,
-        status: 'available'
+        status: "available",
       });
 
       await group.save();
@@ -302,10 +321,12 @@ class GroupPoolService {
       // Verify admin is in group if telegram is provided
       if (telegram) {
         await this.ensureAdminInGroup(groupId, telegram);
-        
+
         // Create a permanent invite link when adding group to pool
         try {
-          await this.generateInviteLink(groupId, telegram, { creates_join_request: true });
+          await this.generateInviteLink(groupId, telegram, {
+            creates_join_request: true,
+          });
           // Link is already saved in generateInviteLink
           // Reload to get the updated group with link
           const refreshed = await GroupPool.findOne({ groupId });
@@ -318,9 +339,8 @@ class GroupPoolService {
       }
 
       return group;
-
     } catch (error) {
-      console.error('Error adding group:', error);
+      console.error("Error adding group:", error);
       throw error;
     }
   }
@@ -331,30 +351,38 @@ class GroupPoolService {
    */
   async ensureAdminInGroup(groupId, telegram) {
     try {
-      const adminUserId2 = config.ADMIN_USER_ID2 ? Number(config.ADMIN_USER_ID2) : null;
+      const adminUserId2 = config.ADMIN_USER_ID2
+        ? Number(config.ADMIN_USER_ID2)
+        : null;
       if (!adminUserId2) {
         return; // Admin not configured, skip check
       }
 
       const chatId = String(groupId);
-      
+
       try {
         // Get chat administrators to check if admin is present
         const chatAdministrators = await telegram.getChatAdministrators(chatId);
-        const adminIds = chatAdministrators.map(member => Number(member.user.id));
-        
+        const adminIds = chatAdministrators.map((member) =>
+          Number(member.user.id)
+        );
+
         // Also check regular members (if we can via getChatMember)
         let adminIsMember = false;
         try {
           const memberInfo = await telegram.getChatMember(chatId, adminUserId2);
-          adminIsMember = ['member', 'administrator', 'creator'].includes(memberInfo.status);
+          adminIsMember = ["member", "administrator", "creator"].includes(
+            memberInfo.status
+          );
         } catch (memberError) {
           // Admin might not be in group
           adminIsMember = false;
         }
 
         if (!adminIds.includes(adminUserId2) && !adminIsMember) {
-          console.warn(`⚠️ WARNING: ADMIN_USER_ID2 (${adminUserId2}) is not present in group ${groupId}. Admin should be manually added to the group before adding it to the pool.`);
+          console.warn(
+            `⚠️ WARNING: ADMIN_USER_ID2 (${adminUserId2}) is not present in group ${groupId}. Admin should be manually added to the group before adding it to the pool.`
+          );
         }
       } catch (error) {
         // Silently continue - can't verify if bot doesn't have access
@@ -379,10 +407,10 @@ class GroupPoolService {
       const stats = await GroupPool.aggregate([
         {
           $group: {
-            _id: '$status',
-            count: { $sum: 1 }
-          }
-        }
+            _id: "$status",
+            count: { $sum: 1 },
+          },
+        },
       ]);
 
       const result = {
@@ -390,18 +418,17 @@ class GroupPoolService {
         available: 0,
         assigned: 0,
         completed: 0,
-        archived: 0
+        archived: 0,
       };
 
-      stats.forEach(stat => {
+      stats.forEach((stat) => {
         result[stat._id] = stat.count;
         result.total += stat.count;
       });
 
       return result;
-
     } catch (error) {
-      console.error('Error getting pool stats:', error);
+      console.error("Error getting pool stats:", error);
       throw error;
     }
   }
@@ -414,7 +441,7 @@ class GroupPoolService {
       const groups = await GroupPool.find({ status }).sort({ createdAt: -1 });
       return groups;
     } catch (error) {
-      console.error('Error getting groups by status:', error);
+      console.error("Error getting groups by status:", error);
       throw error;
     }
   }
@@ -425,9 +452,9 @@ class GroupPoolService {
   async resetCompletedGroups() {
     try {
       const result = await GroupPool.updateMany(
-        { status: 'completed' },
-        { 
-          status: 'available',
+        { status: "completed" },
+        {
+          status: "available",
           assignedEscrowId: null,
           assignedAt: null,
           completedAt: null,
@@ -436,9 +463,8 @@ class GroupPoolService {
       );
 
       return result.modifiedCount;
-
     } catch (error) {
-      console.error('Error resetting completed groups:', error);
+      console.error("Error resetting completed groups:", error);
       throw error;
     }
   }
@@ -449,9 +475,9 @@ class GroupPoolService {
   async resetAssignedGroups() {
     try {
       const result = await GroupPool.updateMany(
-        { status: 'assigned' },
-        { 
-          status: 'available',
+        { status: "assigned" },
+        {
+          status: "available",
           assignedEscrowId: null,
           assignedAt: null,
           inviteLink: null,
@@ -459,9 +485,8 @@ class GroupPoolService {
       );
 
       return result.modifiedCount;
-
     } catch (error) {
-      console.error('Error resetting assigned groups:', error);
+      console.error("Error resetting assigned groups:", error);
       throw error;
     }
   }
@@ -472,11 +497,11 @@ class GroupPoolService {
   async cleanupInvalidGroups(telegram) {
     try {
       if (!telegram) {
-        throw new Error('Telegram API instance is required for cleanup');
+        throw new Error("Telegram API instance is required for cleanup");
       }
 
-      const groups = await GroupPool.find({ 
-        status: { $in: ['available', 'assigned'] } 
+      const groups = await GroupPool.find({
+        status: { $in: ["available", "assigned"] },
       });
 
       let cleanedCount = 0;
@@ -485,26 +510,26 @@ class GroupPoolService {
           // Try to get chat info to verify group exists and bot is a member
           await telegram.getChat(group.groupId);
         } catch (error) {
-          if (error.message.includes('chat not found') || 
-              error.message.includes('bot was kicked') ||
-              error.message.includes('bot is not a member')) {
-            
+          if (
+            error.message.includes("chat not found") ||
+            error.message.includes("bot was kicked") ||
+            error.message.includes("bot is not a member")
+          ) {
             // Mark group as archived
-            group.status = 'archived';
+            group.status = "archived";
             group.assignedEscrowId = null;
             group.assignedAt = null;
             // Keep inviteLink even when archived - might be reused if group is restored
             await group.save();
-            
+
             cleanedCount++;
           }
         }
       }
 
       return cleanedCount;
-
     } catch (error) {
-      console.error('Error cleaning up invalid groups:', error);
+      console.error("Error cleaning up invalid groups:", error);
       throw error;
     }
   }
@@ -516,12 +541,12 @@ class GroupPoolService {
   async recycleGroupAfterCompletion(escrow, telegram) {
     try {
       if (!telegram) {
-        throw new Error('Telegram API instance is required for recycling');
+        throw new Error("Telegram API instance is required for recycling");
       }
 
       // Only recycle groups that are in the pool (not manually created groups)
-      const group = await GroupPool.findOne({ 
-        assignedEscrowId: escrow.escrowId 
+      const group = await GroupPool.findOne({
+        assignedEscrowId: escrow.escrowId,
       });
 
       if (!group) {
@@ -535,9 +560,8 @@ class GroupPoolService {
       this.scheduleDelayedRecycling(escrow, group, telegram);
 
       return group;
-
     } catch (error) {
-      console.error('Error scheduling group recycling:', error);
+      console.error("Error scheduling group recycling:", error);
       throw error;
     }
   }
@@ -550,33 +574,35 @@ class GroupPoolService {
     setTimeout(async () => {
       try {
         // Remove ALL users from group (buyer, seller, admins, everyone)
-        const allUsersRemoved = await this.removeUsersFromGroup(escrow, group.groupId, telegram);
+        const allUsersRemoved = await this.removeUsersFromGroup(
+          escrow,
+          group.groupId,
+          telegram
+        );
 
         if (allUsersRemoved) {
           // Only add back to pool if ALL users were successfully removed
           // IMPORTANT: Refresh invite link (revoke old and create new)
           // This is necessary because users who were removed cannot rejoin using the same link
           await this.refreshInviteLink(group.groupId, telegram);
-          
-          group.status = 'available';
+
+          group.status = "available";
           group.assignedEscrowId = null;
           group.assignedAt = null;
           group.completedAt = null;
           await group.save();
-
         } else {
           // Mark as completed but don't add back to pool if users couldn't be removed
           // IMPORTANT: Do NOT clear group.inviteLink even here - link stays valid
-          group.status = 'completed';
+          group.status = "completed";
           group.assignedEscrowId = null;
           group.assignedAt = null;
           group.completedAt = new Date();
           // Keep inviteLink - it's permanent
           await group.save();
-
         }
       } catch (error) {
-        console.error('Error in delayed group recycling:', error);
+        console.error("Error in delayed group recycling:", error);
       }
     }, 15 * 60 * 1000); // 15 minutes
   }
@@ -597,12 +623,14 @@ class GroupPoolService {
   async removeUsersFromGroup(escrow, groupId, telegram) {
     try {
       if (!telegram) {
-        console.error('Telegram instance is required for removeUsersFromGroup');
+        console.error("Telegram instance is required for removeUsersFromGroup");
         return false;
       }
 
       const chatId = String(groupId);
-      const adminUserId2 = config.ADMIN_USER_ID2 ? Number(config.ADMIN_USER_ID2) : null;
+      const adminUserId2 = config.ADMIN_USER_ID2
+        ? Number(config.ADMIN_USER_ID2)
+        : null;
 
       // Get bot ID first (needed for skipping bot itself)
       let botId;
@@ -610,7 +638,7 @@ class GroupPoolService {
         const botInfo = await telegram.getMe();
         botId = botInfo.id;
       } catch (error) {
-        console.error('Error getting bot info:', error);
+        console.error("Error getting bot info:", error);
         return false;
       }
 
@@ -618,9 +646,11 @@ class GroupPoolService {
       let adminMembers = [];
       try {
         const chatAdministrators = await telegram.getChatAdministrators(chatId);
-        adminMembers = chatAdministrators.map(member => Number(member.user.id));
+        adminMembers = chatAdministrators.map((member) =>
+          Number(member.user.id)
+        );
       } catch (error) {
-        console.error('Error getting chat administrators:', error);
+        console.error("Error getting chat administrators:", error);
         // Continue with empty list - we'll still try to remove buyer/seller from escrow
       }
 
@@ -628,7 +658,7 @@ class GroupPoolService {
       // Note: Telegram Bot API doesn't provide a direct way to list all regular members
       // We'll work with administrators and any members we can identify via escrow
       const usersToCheck = new Set(adminMembers);
-      
+
       const addId = (value) => {
         if (value === null || value === undefined) {
           return;
@@ -638,16 +668,16 @@ class GroupPoolService {
           usersToCheck.add(numeric);
         }
       };
-      
+
       // Always include buyer and seller from escrow if they exist (they might be regular members, not admins)
       if (escrow) {
         addId(escrow.buyerId);
         addId(escrow.sellerId);
-        
+
         if (Array.isArray(escrow.allowedUserIds)) {
           escrow.allowedUserIds.forEach(addId);
         }
-        
+
         if (Array.isArray(escrow.approvedUserIds)) {
           escrow.approvedUserIds.forEach(addId);
         }
@@ -656,7 +686,7 @@ class GroupPoolService {
       // Remove ALL users except the bot itself and ADMIN_USER_ID2
       let removedCount = 0;
       let skippedCount = 0;
-      
+
       for (const userId of usersToCheck) {
         // Skip the bot itself
         if (userId === botId) {
@@ -674,34 +704,37 @@ class GroupPoolService {
         try {
           const untilDate = Math.floor(Date.now() / 1000) + 60; // minimum 60s per Telegram requirements
           await telegram.kickChatMember(chatId, userId, untilDate);
-          
+
           // Immediately lift the ban so user can rejoin when needed
           try {
             await telegram.unbanChatMember(chatId, userId);
           } catch (unbanError) {
             // Ignore if user was not banned or bot lacks permission
           }
-          
+
           removedCount++;
         } catch (kickError) {
           // User might have already left, or bot doesn't have permission
           // This is fine - we continue with other users
-          const errorMsg = kickError?.response?.description || kickError?.message || 'Unknown error';
-          if (!errorMsg.includes('user not found') && !errorMsg.includes('chat not found')) {
+          const errorMsg =
+            kickError?.response?.description ||
+            kickError?.message ||
+            "Unknown error";
+          if (
+            !errorMsg.includes("user not found") &&
+            !errorMsg.includes("chat not found")
+          ) {
             // Only log non-trivial errors
           }
         }
       }
 
-      
-      
       // Return true if operation completed successfully
       // Note: We return true even if no users were removed (they might have already left)
       // The important thing is that admin is preserved (which we skip in the loop)
       return true;
-
     } catch (error) {
-      console.error('Error removing users from group:', error);
+      console.error("Error removing users from group:", error);
       return false;
     }
   }
@@ -715,7 +748,7 @@ class GroupPoolService {
     try {
       const chatId = String(groupId);
       const group = await GroupPool.findOne({ groupId });
-      
+
       if (!group) {
         return null;
       }
@@ -724,20 +757,22 @@ class GroupPoolService {
         try {
           await telegram.revokeChatInviteLink(chatId, group.inviteLink);
         } catch (revokeError) {
-          console.log(`Could not revoke old invite link for ${groupId}: ${revokeError.message}`);
+          console.log(
+            `Could not revoke old invite link for ${groupId}: ${revokeError.message}`
+          );
         }
         group.inviteLink = null;
         group.inviteLinkHasJoinRequest = false;
         await group.save();
       }
 
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise((resolve) => setTimeout(resolve, 2000));
 
-      const newLink = await this.generateInviteLink(groupId, telegram, { 
+      const newLink = await this.generateInviteLink(groupId, telegram, {
         creates_join_request: true,
-        forceRefresh: true
+        forceRefresh: true,
       });
-      
+
       const updatedGroup = await GroupPool.findOne({ groupId });
       if (updatedGroup) {
         if (newLink && updatedGroup.inviteLink === newLink) {
@@ -749,7 +784,7 @@ class GroupPoolService {
           await updatedGroup.save();
         }
       }
-      
+
       return newLink;
     } catch (error) {
       console.error(`Error refreshing invite link for ${groupId}:`, error);
@@ -765,13 +800,13 @@ class GroupPoolService {
    * 1. Deleting tracked message IDs from escrow
    * 2. Sending a test message to get current message ID
    * 3. Attempting to delete ALL messages from 1 to current (in batches)
-   * 
+   *
    * IMPORTANT: Bots can only delete their own messages, not user messages
    */
   async deleteAllGroupMessages(groupId, telegram, escrow = null) {
     try {
       const chatId = String(groupId);
-      
+
       // Unpin all pinned messages first
       try {
         await telegram.unpinAllChatMessages(chatId);
@@ -786,19 +821,32 @@ class GroupPoolService {
       // Collect all known message IDs from escrow
       if (escrow) {
         // Add all tracked message IDs from escrow
-        if (escrow.step1MessageId) messageIdsToDelete.add(escrow.step1MessageId);
-        if (escrow.step2MessageId) messageIdsToDelete.add(escrow.step2MessageId);
-        if (escrow.step3MessageId) messageIdsToDelete.add(escrow.step3MessageId);
-        if (escrow.step4ChainMessageId) messageIdsToDelete.add(escrow.step4ChainMessageId);
-        if (escrow.step4CoinMessageId) messageIdsToDelete.add(escrow.step4CoinMessageId);
-        if (escrow.step5BuyerAddressMessageId) messageIdsToDelete.add(escrow.step5BuyerAddressMessageId);
-        if (escrow.step6SellerAddressMessageId) messageIdsToDelete.add(escrow.step6SellerAddressMessageId);
-        if (escrow.dealSummaryMessageId) messageIdsToDelete.add(escrow.dealSummaryMessageId);
-        if (escrow.dealConfirmedMessageId) messageIdsToDelete.add(escrow.dealConfirmedMessageId);
-        if (escrow.transactionHashMessageId) messageIdsToDelete.add(escrow.transactionHashMessageId);
-        if (escrow.closeTradeMessageId) messageIdsToDelete.add(escrow.closeTradeMessageId);
-        if (escrow.originInviteMessageId) messageIdsToDelete.add(escrow.originInviteMessageId);
-        if (escrow.roleSelectionMessageId) messageIdsToDelete.add(escrow.roleSelectionMessageId);
+        if (escrow.step1MessageId)
+          messageIdsToDelete.add(escrow.step1MessageId);
+        if (escrow.step2MessageId)
+          messageIdsToDelete.add(escrow.step2MessageId);
+        if (escrow.step3MessageId)
+          messageIdsToDelete.add(escrow.step3MessageId);
+        if (escrow.step4ChainMessageId)
+          messageIdsToDelete.add(escrow.step4ChainMessageId);
+        if (escrow.step4CoinMessageId)
+          messageIdsToDelete.add(escrow.step4CoinMessageId);
+        if (escrow.step5BuyerAddressMessageId)
+          messageIdsToDelete.add(escrow.step5BuyerAddressMessageId);
+        if (escrow.step6SellerAddressMessageId)
+          messageIdsToDelete.add(escrow.step6SellerAddressMessageId);
+        if (escrow.dealSummaryMessageId)
+          messageIdsToDelete.add(escrow.dealSummaryMessageId);
+        if (escrow.dealConfirmedMessageId)
+          messageIdsToDelete.add(escrow.dealConfirmedMessageId);
+        if (escrow.transactionHashMessageId)
+          messageIdsToDelete.add(escrow.transactionHashMessageId);
+        if (escrow.closeTradeMessageId)
+          messageIdsToDelete.add(escrow.closeTradeMessageId);
+        if (escrow.originInviteMessageId)
+          messageIdsToDelete.add(escrow.originInviteMessageId);
+        if (escrow.roleSelectionMessageId)
+          messageIdsToDelete.add(escrow.roleSelectionMessageId);
       }
 
       // Delete all known message IDs first
@@ -807,7 +855,7 @@ class GroupPoolService {
           await telegram.deleteMessage(chatId, msgId);
           deletedCount++;
           deletedSet.add(msgId);
-          await new Promise(resolve => setTimeout(resolve, 20)); // Small delay between deletions
+          await new Promise((resolve) => setTimeout(resolve, 20)); // Small delay between deletions
         } catch (deleteError) {
           // Message might not exist, is too old, or wasn't sent by bot - continue
         }
@@ -817,9 +865,9 @@ class GroupPoolService {
       // This gives us the latest message ID to work backwards from
       let currentMessageId = null;
       try {
-        const testMsg = await telegram.sendMessage(chatId, '🧹');
+        const testMsg = await telegram.sendMessage(chatId, "🧹");
         currentMessageId = testMsg.message_id;
-        
+
         // Immediately delete the test message
         try {
           await telegram.deleteMessage(chatId, currentMessageId);
@@ -847,29 +895,33 @@ class GroupPoolService {
       // Start from a reasonable minimum (groups usually start from message ID 1 or 2)
       const startId = 1;
       const endId = currentMessageId;
-      
+
       // Delete messages in batches - try to delete ALL messages, not just sampled ones
       // But we need to be careful with rate limits, so we'll delete in smaller batches with delays
       const BATCH_SIZE = 50; // Delete 50 messages at a time
       const DELAY_BETWEEN_BATCHES = 100; // 100ms delay between batches
       const DELAY_BETWEEN_MESSAGES = 10; // 10ms delay between individual messages
-      
+
       let consecutiveErrors = 0;
       const MAX_CONSECUTIVE_ERRORS = 20; // Stop after 20 consecutive errors
-      
+
       // Delete messages from endId backwards to startId (newer messages first)
       // This is more efficient as newer messages are more likely to be deletable
       // NOTE: Bots can only delete their own messages. User messages cannot be deleted.
       let totalAttempted = 0;
-      for (let batchStart = endId; batchStart >= startId; batchStart -= BATCH_SIZE) {
+      for (
+        let batchStart = endId;
+        batchStart >= startId;
+        batchStart -= BATCH_SIZE
+      ) {
         const batchEnd = Math.max(startId, batchStart - BATCH_SIZE + 1);
         let batchDeleted = 0;
         let batchErrors = 0;
-        
+
         for (let msgId = batchStart; msgId >= batchEnd; msgId--) {
           // Skip if already deleted
           if (deletedSet.has(msgId)) continue;
-          
+
           totalAttempted++;
           try {
             await telegram.deleteMessage(chatId, msgId);
@@ -877,24 +929,27 @@ class GroupPoolService {
             deletedSet.add(msgId);
             batchDeleted++;
             consecutiveErrors = 0; // Reset error counter on success
-            
+
             // Small delay between messages to avoid rate limiting
             if (msgId > batchEnd) {
-              await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_MESSAGES));
+              await new Promise((resolve) =>
+                setTimeout(resolve, DELAY_BETWEEN_MESSAGES)
+              );
             }
           } catch (deleteError) {
             consecutiveErrors++;
             batchErrors++;
-            
+
             // Check error type for debugging
-            const errorMsg = deleteError?.response?.description || deleteError?.message || '';
+            const errorMsg =
+              deleteError?.response?.description || deleteError?.message || "";
             const errorCode = deleteError?.response?.error_code;
-            
+
             // Common errors:
             // - 400: Bad Request (message not found, can't be deleted, etc.)
             // - 403: Forbidden (not sent by bot, no permission)
             // Continue trying other messages - these are expected for user messages
-            
+
             // Stop if we hit too many consecutive errors (likely reached undeletable messages)
             if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
               // Break out of inner loop to try next batch
@@ -902,7 +957,7 @@ class GroupPoolService {
             }
           }
         }
-        
+
         // If batch had no successful deletions and many errors, we might have hit the end
         if (batchDeleted === 0 && consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
           // Try one more smaller range before giving up
@@ -912,16 +967,18 @@ class GroupPoolService {
             break;
           }
         }
-        
+
         // Delay between batches to avoid rate limiting
         if (batchStart > batchEnd) {
-          await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
+          await new Promise((resolve) =>
+            setTimeout(resolve, DELAY_BETWEEN_BATCHES)
+          );
         }
       }
 
       return deletedCount;
     } catch (error) {
-      console.error('Error deleting all group messages:', error);
+      console.error("Error deleting all group messages:", error);
       return 0;
     }
   }

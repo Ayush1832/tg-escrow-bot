@@ -1,26 +1,27 @@
-const hre = require('hardhat');
-require('dotenv').config();
-const mongoose = require('mongoose');
-const path = require('path');
+const hre = require("hardhat");
+require("dotenv").config();
+const mongoose = require("mongoose");
+const path = require("path");
 
-const ContractModel = require(path.join(__dirname, '..', 'src', 'models', 'Contract'));
+const ContractModel = require(path.join(
+  __dirname,
+  "..",
+  "src",
+  "models",
+  "Contract"
+));
 
 async function main() {
-  const {
-    MONGODB_URI,
-    USDT_BSC,
-    USDC_BSC,
-    FEE_WALLET_1,
-    FEE_WALLET_2
-  } = process.env;
+  const { MONGODB_URI, USDT_BSC, USDC_BSC, FEE_WALLET_1, FEE_WALLET_2 } =
+    process.env;
 
-  if (!MONGODB_URI) throw new Error('MONGODB_URI missing');
-  if (!USDT_BSC) throw new Error('USDT_BSC missing');
-  if (!USDC_BSC) throw new Error('USDC_BSC missing');
-  if (!FEE_WALLET_1) throw new Error('FEE_WALLET_1 missing');
+  if (!MONGODB_URI) throw new Error("MONGODB_URI missing");
+  if (!USDT_BSC) throw new Error("USDT_BSC missing");
+  if (!USDC_BSC) throw new Error("USDC_BSC missing");
+  if (!FEE_WALLET_1) throw new Error("FEE_WALLET_1 missing");
 
   await mongoose.connect(MONGODB_URI);
-  console.log('✅ Connected to MongoDB');
+  console.log("✅ Connected to MongoDB");
 
   // Hardcoded 0% escrow fee
   const feePercent = 0;
@@ -31,14 +32,14 @@ async function main() {
   console.log(`📍 Network: BSC`);
   console.log(`💰 Fee: ${feePercent}%`);
 
-  const EscrowVault = await hre.ethers.getContractFactory('EscrowVault');
+  const EscrowVault = await hre.ethers.getContractFactory("EscrowVault");
   const deployedContracts = [];
 
   // Deploy USDT contract
   try {
     console.log(`\n📦 Deploying USDT contract...`);
     console.log(`📍 USDT Token Address: ${USDT_BSC}`);
-    
+
     const usdtContract = await EscrowVault.deploy(
       USDT_BSC,
       w1,
@@ -51,40 +52,45 @@ async function main() {
 
     // Drop old unique index if it exists
     try {
-      await ContractModel.collection.dropIndex('name_1');
+      await ContractModel.collection.dropIndex("name_1");
     } catch (e) {
       // Index might not exist, ignore error
     }
 
     await ContractModel.updateOne(
-      { name: 'EscrowVault', token: 'USDT', network: 'BSC', feePercent: feePercent },
-      { 
-        name: 'EscrowVault', 
-        token: 'USDT',
-        network: 'BSC',
-        address: usdtAddress, 
+      {
+        name: "EscrowVault",
+        token: "USDT",
+        network: "BSC",
         feePercent: feePercent,
-        status: 'deployed',
-        deployedAt: new Date() 
+      },
+      {
+        name: "EscrowVault",
+        token: "USDT",
+        network: "BSC",
+        address: usdtAddress,
+        feePercent: feePercent,
+        status: "deployed",
+        deployedAt: new Date(),
       },
       { upsert: true }
     );
     console.log(`💾 USDT contract saved to database`);
 
-    deployedContracts.push({ token: 'USDT', address: usdtAddress });
+    deployedContracts.push({ token: "USDT", address: usdtAddress });
   } catch (error) {
     console.error(`❌ Error deploying USDT contract:`, error);
     throw error;
   }
 
   // Wait 2 seconds before deploying next contract
-  await new Promise(resolve => setTimeout(resolve, 2000));
+  await new Promise((resolve) => setTimeout(resolve, 2000));
 
   // Deploy USDC contract
   try {
     console.log(`\n📦 Deploying USDC contract...`);
     console.log(`📍 USDC Token Address: ${USDC_BSC}`);
-    
+
     const usdcContract = await EscrowVault.deploy(
       USDC_BSC,
       w1,
@@ -96,21 +102,26 @@ async function main() {
     console.log(`✅ USDC-BSC EscrowVault deployed at: ${usdcAddress}`);
 
     await ContractModel.updateOne(
-      { name: 'EscrowVault', token: 'USDC', network: 'BSC', feePercent: feePercent },
-      { 
-        name: 'EscrowVault', 
-        token: 'USDC',
-        network: 'BSC',
-        address: usdcAddress, 
+      {
+        name: "EscrowVault",
+        token: "USDC",
+        network: "BSC",
         feePercent: feePercent,
-        status: 'deployed',
-        deployedAt: new Date() 
+      },
+      {
+        name: "EscrowVault",
+        token: "USDC",
+        network: "BSC",
+        address: usdcAddress,
+        feePercent: feePercent,
+        status: "deployed",
+        deployedAt: new Date(),
       },
       { upsert: true }
     );
     console.log(`💾 USDC contract saved to database`);
 
-    deployedContracts.push({ token: 'USDC', address: usdcAddress });
+    deployedContracts.push({ token: "USDC", address: usdcAddress });
   } catch (error) {
     console.error(`❌ Error deploying USDC contract:`, error);
     throw error;
@@ -125,11 +136,10 @@ async function main() {
   });
 
   await mongoose.disconnect();
-  console.log('✅ Disconnected from MongoDB');
+  console.log("✅ Disconnected from MongoDB");
 }
 
 main().catch((e) => {
   console.error(e);
   process.exit(1);
 });
-

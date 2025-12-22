@@ -1,4 +1,4 @@
-const config = require('../../config');
+const config = require("../../config");
 
 /**
  * Middleware to authenticate admin users
@@ -11,7 +11,7 @@ function requireAdmin() {
       const username = ctx.from?.username;
 
       const adminIds = config.getAllAdminIds();
-      if (adminIds.some(adminId => userId === parseInt(adminId))) {
+      if (adminIds.some((adminId) => userId === parseInt(adminId))) {
         return next();
       }
 
@@ -20,11 +20,10 @@ function requireAdmin() {
         return next();
       }
 
-      await ctx.reply('❌ Access denied. Admin privileges required.');
-      
+      await ctx.reply("❌ Access denied. Admin privileges required.");
     } catch (error) {
-      console.error('Error in admin auth middleware:', error);
-      await ctx.reply('❌ Authentication error. Please try again.');
+      console.error("Error in admin auth middleware:", error);
+      await ctx.reply("❌ Authentication error. Please try again.");
     }
   };
 }
@@ -37,7 +36,7 @@ function isAdmin(ctx) {
   const username = ctx.from?.username;
 
   const adminIds = config.getAllAdminIds();
-  if (adminIds.some(adminId => userId === parseInt(adminId))) {
+  if (adminIds.some((adminId) => userId === parseInt(adminId))) {
     return true;
   }
 
@@ -51,5 +50,5 @@ function isAdmin(ctx) {
 
 module.exports = {
   requireAdmin,
-  isAdmin
+  isAdmin,
 };
