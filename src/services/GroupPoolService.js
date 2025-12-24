@@ -586,6 +586,11 @@ class GroupPoolService {
           // This is necessary because users who were removed cannot rejoin using the same link
           await this.refreshInviteLink(group.groupId, telegram);
 
+          // Unpin all messages
+          try {
+            await telegram.unpinAllChatMessages(group.groupId);
+          } catch (e) {}
+
           group.status = "available";
           group.assignedEscrowId = null;
           group.assignedAt = null;
@@ -629,6 +634,30 @@ class GroupPoolService {
 
       // Refresh invite link
       await this.refreshInviteLink(group.groupId, telegram);
+
+      // Unpin all messages
+      try {
+        await telegram.unpinAllChatMessages(group.groupId);
+      } catch (unpinErr) {
+        // Ignore if no rights or no pins
+      }
+
+      // Clear recent history (best effort cleanup)
+      // This helps hide history for new users if they join a "Visible History" group
+      // We assume last 100 messages cover the trade flow
+      if (escrow.dealConfirmedMessageId || escrow.tradeStartedMessageId) {
+        const lastId =
+          escrow.dealConfirmedMessageId || escrow.tradeStartedMessageId;
+        // Attempt to delete a range of messages around the known IDs
+        // This is approximate but safer than iterating too much
+        const startId = Math.max(1, lastId - 50);
+        const endId = lastId + 50;
+        for (let i = startId; i <= endId; i++) {
+          try {
+            await telegram.deleteMessage(group.groupId, i);
+          } catch (e) {}
+        }
+      }
 
       // Reset group status
       group.status = "available";

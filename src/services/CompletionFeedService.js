@@ -139,6 +139,15 @@ PARTIES: ${buyerDisplay} & ${sellerDisplay}
 
 ${transactionLine}`;
 
+    // Send DM to participants
+    await this.sendDirectMessageNotification(
+      freshEscrow,
+      telegram,
+      "completed",
+      releaseAmount,
+      transactionHash || freshEscrow.releaseTransactionHash
+    );
+
     try {
       await telegram.sendMessage(this.chatId, message, {
         parse_mode: "HTML",
@@ -348,6 +357,209 @@ ${transactionLine}`;
         error.message
       );
     }
+  }
+
+  /**
+   * Handle refund logging
+   * @param {Object} escrow - The escrow object
+   * @param {number} refundAmount - The refund amount
+   * @param {string} transactionHash - The transaction hash
+   * @param {Object} telegram - Telegram bot instance
+   */
+  async handleRefund({ escrow, refundAmount, transactionHash, telegram }) {
+    if (!this.chatId) {
+      return;
+    }
+
+    if (!escrow || !telegram) {
+      return;
+    }
+
+    const amount = Number(refundAmount || 0);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return;
+    }
+
+    const Escrow = require("../models/Escrow");
+    const freshEscrow = await Escrow.findById(escrow._id || escrow.id);
+
+    if (!freshEscrow) {
+      return;
+    }
+
+    if (freshEscrow.refundLogSent) {
+      if (
+        transactionHash &&
+        freshEscrow.refundTransactionHash &&
+        freshEscrow.refundTransactionHash.toLowerCase() ===
+          transactionHash.toLowerCase()
+      ) {
+        return;
+      }
+    }
+
+    const buyerDisplay = formatParticipantById(
+      freshEscrow,
+      freshEscrow.buyerId,
+      "Buyer",
+      { html: true, mask: true }
+    );
+    const sellerDisplay = formatParticipantById(
+      freshEscrow,
+      freshEscrow.sellerId,
+      "Seller",
+      { html: true, mask: true }
+    );
+    const token = (freshEscrow.token || "USDT").toUpperCase();
+    const network = (freshEscrow.chain || "BSC").toUpperCase();
+    const explorerLink = this.getExplorerLink(network, transactionHash);
+    const amountDisplay = this.formatAmount(amount);
+
+    // Determine if full or partial
+    // If refund amount >= total confirmed amount, it's a full refund
+    const totalDeposited =
+      freshEscrow.accumulatedDepositAmount ||
+      freshEscrow.depositAmount ||
+      freshEscrow.confirmedAmount ||
+      0;
+    const isFullRefund = amount >= totalDeposited - 0.01;
+    const typeText = isFullRefund ? "FULL REFUND" : "PARTIAL REFUND";
+    const statusEmoji = isFullRefund ? "🔄" : "⚠️";
+
+    const transactionLine = explorerLink
+      ? `🔗 Transaction: <a href="${explorerLink}">Link</a>`
+      : transactionHash
+      ? `🔗 Transaction: <code>${transactionHash.substring(0, 10)}...</code>`
+      : "";
+
+    // Update global stats
+    const stats = await Stats.findOneAndUpdate(
+      { key: "global" },
+      {
+        $setOnInsert: {
+          key: "global",
+        },
+        $inc: {
+          totalRefundedVolume: amount,
+          totalRefundedTrades: 1,
+        },
+      },
+      { upsert: true, new: true }
+    );
+
+    const newRefundedVolume = stats.totalRefundedVolume || 0;
+
+    const message = `${statusEmoji} <b>TRADE ${typeText}</b>
+
+PARTIES: ${buyerDisplay} & ${sellerDisplay}
+
+🪙 Token: <code>${token}</code>
+🌐 Chain: <code>${network}</code>
+💰 Refunded: <code>${amountDisplay} ${token}</code>
+💸 Total Refunded: <code>$${this.formatLargeNumber(newRefundedVolume)}</code>
+${transactionLine}`;
+
+    // Send DM to participants
+    await this.sendDirectMessageNotification(
+      freshEscrow,
+      telegram,
+      isFullRefund ? "refunded" : "partial_refund",
+      amount,
+      transactionHash
+    );
+
+    try {
+      await telegram.sendMessage(this.chatId, message, {
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+      });
+
+      freshEscrow.refundLogSent = true;
+      if (transactionHash) {
+        freshEscrow.refundTransactionHash = transactionHash;
+      }
+      await freshEscrow.save();
+
+      console.log(
+        `CompletionFeedService: Successfully sent refund log for escrow ${freshEscrow.escrowId}`
+      );
+    } catch (error) {
+      console.error(
+        "CompletionFeedService: Failed to send refund log:",
+        error.message
+      );
+    }
+  }
+
+  async sendDirectMessageNotification(
+    escrow,
+    telegram,
+    type, // "completed" | "refunded" | "partial_deposit" | "partial_refund"
+    amount,
+    transactionHash,
+    extraData = {} // For additional context like remaining amount
+  ) {
+    if (!escrow || !telegram) return;
+
+    // Use fresh escrow data
+    const Escrow = require("../models/Escrow");
+    const freshEscrow =
+      (await Escrow.findById(escrow._id || escrow.id)) || escrow;
+
+    const buyerId = freshEscrow.buyerId;
+    const sellerId = freshEscrow.sellerId;
+    const token = (freshEscrow.token || "USDT").toUpperCase();
+    const network = (freshEscrow.chain || "BSC").toUpperCase();
+    const amountDisplay = this.formatAmount(amount);
+
+    let titleIcon = "ℹ️";
+    let titleText = "Trade Update";
+    let messageBody = "";
+
+    // Determine specific message content based on type
+    if (type === "completed") {
+      titleIcon = "✅";
+      titleText = "TRADE COMPLETED SUCCESSFULLY";
+      messageBody = `
+💰 <b>Released Amount:</b> ${amountDisplay} ${token}
+🌐 <b>Chain:</b> ${network}
+🔗 <b>Transaction:</b> <code>${transactionHash || "N/A"}</code>
+
+The funds have been released to the buyer. Thank you for using our escrow service!`;
+    } else if (type === "refunded" || type === "partial_refund") {
+      titleIcon = type === "refunded" ? "🔄" : "⚠️";
+      titleText = type === "refunded" ? "TRADE REFUNDED" : "PARTIAL REFUND";
+      messageBody = `
+💰 <b>Refunded Amount:</b> ${amountDisplay} ${token}
+🌐 <b>Chain:</b> ${network}
+🔗 <b>Transaction:</b> <code>${transactionHash || "N/A"}</code>
+
+The funds have been refunded to the seller.`;
+    }
+
+    const fullMessage = `${titleIcon} <b>${titleText}</b>
+
+<b>Trade ID:</b> ${freshEscrow.escrowId}
+${messageBody}`;
+
+    const sendToUser = async (userId) => {
+      if (!userId) return;
+      try {
+        await telegram.sendMessage(userId, fullMessage, {
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
+        });
+      } catch (error) {
+        // Ignore if bot can't initiate convo with user or blocked
+        console.log(
+          `CompletionFeedService: Could not DM user ${userId}: ${error.message}`
+        );
+      }
+    };
+
+    // Send to both parties
+    if (buyerId) await sendToUser(buyerId);
+    if (sellerId) await sendToUser(sellerId);
   }
 
   escapeHtml(text = "") {

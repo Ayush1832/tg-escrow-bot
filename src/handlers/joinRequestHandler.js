@@ -184,12 +184,26 @@ async function joinRequestHandler(ctx) {
     try {
       await ctx.telegram.approveChatJoinRequest(chatId, user.id);
     } catch (approveError) {
-      console.error(
-        `Failed to approve join request for user ${user.id} in group ${chatId}:`,
-        approveError
-      );
-      // Don't save approval if the API call failed
-      return;
+      const description =
+        approveError?.response?.description ||
+        approveError?.description ||
+        approveError?.message ||
+        "";
+
+      // If user is already a participant, that's fine - just continue
+      if (
+        description.includes("USER_ALREADY_PARTICIPANT") ||
+        description.includes("user is already a member")
+      ) {
+        // Proceed as if approved
+      } else {
+        console.error(
+          `Failed to approve join request for user ${user.id} in group ${chatId}:`,
+          approveError
+        );
+        // Don't save approval if the API call failed (and it wasn't because they're already in)
+        return;
+      }
     }
 
     // Use atomic update to avoid race conditions

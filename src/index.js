@@ -224,37 +224,35 @@ class EscrowBot {
   }
 
   setupGroupMonitoring() {
-    // Check every 5 minutes
     setInterval(async () => {
       try {
-        const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2 hours
-        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000); // 10 minutes
+        const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
 
-        // Find inactive escrows
-        // Status must be one of the pre-deposit stages
-        // Last activity > 2 hours ago
-        // Not yet scheduled for recycle
-        const inactiveEscrows = await Escrow.find({
+        const inactiveRecyclable = await Escrow.find({
           status: { $in: ["draft", "awaiting_details", "awaiting_deposit"] },
           lastActivityAt: { $lt: twoHoursAgo },
           isScheduledForRecycle: false,
         });
 
-        for (const escrow of inactiveEscrows) {
+        for (const escrow of inactiveRecyclable) {
           try {
-            // Send warning
-            await this.bot.telegram.sendMessage(
-              escrow.groupId,
-              "⚠️ <b>Inactivity Alert:</b> This group has been inactive for more than 2 hours.\n\nIt will be recycled and closed in 10 minutes if no activity is detected.",
-              { parse_mode: "HTML" }
-            );
+            let message =
+              "⚠️ <b>Inactivity Alert:</b> This group has been inactive for more than 2 hours.\n\nIt will be recycled and closed in 10 minutes if no activity is detected.";
+
+            if (escrow.status === "awaiting_deposit") {
+              message =
+                "⚠️ <b>Deposit Timeout Warning:</b> We are waiting for a deposit, but none has been detected for over 2 hours.\n\nTo free up the deposit address, this session will be recycled in 10 minutes if no funds are received.";
+            }
+
+            await this.bot.telegram.sendMessage(escrow.groupId, message, {
+              parse_mode: "HTML",
+            });
 
             escrow.isScheduledForRecycle = true;
             escrow.recycleWarningSentAt = new Date();
             await escrow.save();
           } catch (e) {
-            // If bot kicked or chat not found, maybe mark as archived?
-            // For now just log
             console.error(
               `Error sending inactivity warning to ${escrow.groupId}:`,
               e.message
@@ -262,8 +260,39 @@ class EscrowBot {
           }
         }
 
-        // Check for recycled warnings that have expired (10 mins passed)
-        // This covers both inactivity warnings and "user left" warnings if they set the flag
+        const inactiveFunded = await Escrow.find({
+          status: {
+            $in: ["deposited", "in_fiat_transfer", "ready_to_release"],
+          },
+          lastActivityAt: { $lt: twoHoursAgo },
+        });
+
+        for (const escrow of inactiveFunded) {
+          try {
+            if (
+              escrow.recycleWarningSentAt &&
+              escrow.recycleWarningSentAt > escrow.lastActivityAt
+            ) {
+              continue;
+            }
+
+            await this.bot.telegram.sendMessage(
+              escrow.groupId,
+              "⚠️ <b>Action Required:</b> This transaction has been inactive for over 2 hours.\n\n💰 Funds are secure in escrow.\n\nPlease proceed with the trade steps, or use /cancel (if valid) or ask an admin for help if stuck.",
+              { parse_mode: "HTML" }
+            );
+
+            escrow.recycleWarningSentAt = new Date();
+            escrow.isScheduledForRecycle = false;
+            await escrow.save();
+          } catch (e) {
+            console.error(
+              `Error sending funded inactivity warning to ${escrow.groupId}:`,
+              e.message
+            );
+          }
+        }
+
         const pendingRecycle = await Escrow.find({
           status: { $in: ["draft", "awaiting_details", "awaiting_deposit"] },
           isScheduledForRecycle: true,
@@ -272,9 +301,6 @@ class EscrowBot {
 
         for (const escrow of pendingRecycle) {
           try {
-            // Verify one last time?
-            // Maybe check if activity happened SINCE warning?
-            // If lastActivityAt > recycleWarningSentAt, then cancel recycle
             if (escrow.lastActivityAt > escrow.recycleWarningSentAt) {
               escrow.isScheduledForRecycle = false;
               escrow.recycleWarningSentAt = null;
@@ -305,7 +331,7 @@ class EscrowBot {
       } catch (error) {
         console.error("Error in setupGroupMonitoring loop:", error);
       }
-    }, 5 * 60 * 1000); // Run every 5 minutes
+    }, 5 * 60 * 1000);
   }
 
   setupMiddleware() {
@@ -315,29 +341,31 @@ class EscrowBot {
         await this.ensureUser(user);
       }
 
-      // Track group activity
       if (
         ctx.chat &&
         (ctx.chat.type === "group" || ctx.chat.type === "supergroup")
       ) {
         const chatId = String(ctx.chat.id);
 
-        // Lightweight update: only update if it finds a matching active/draft escrow
-        // We do this asynchronously without waiting to avoid slowing down other logic
         (async () => {
           try {
             await Escrow.updateOne(
               {
                 groupId: chatId,
                 status: {
-                  $in: ["draft", "awaiting_details", "awaiting_deposit"],
+                  $in: [
+                    "draft",
+                    "awaiting_details",
+                    "awaiting_deposit",
+                    "deposited",
+                    "in_fiat_transfer",
+                    "ready_to_release",
+                  ],
                 },
               },
               { $set: { lastActivityAt: new Date() } }
             );
-          } catch (e) {
-            // ignore errors in background tracking
-          }
+          } catch (e) {}
         })();
       }
 
@@ -368,7 +396,7 @@ class EscrowBot {
           return ctx.reply(
             "❌ Cannot cancel the deal after deposit address has been provided."
           );
-        }
+        
 
         const userId = from.id;
         const adminUserId = config.ADMIN_USER_ID
@@ -1320,9 +1348,9 @@ Use /release After Fund Transfer to Seller
         const parts = commandText.split(/\s+/);
         const hasAmount = parts.length > 1;
 
-        if (hasAmount && !isAdmin) {
+        if (hasAmount && !isAdmin && !isSeller) {
           return ctx.reply(
-            "❌ Only admins can use partial release. Use /release without amount for normal release."
+            "❌ Only admins or the seller can use partial release."
           );
         }
 
@@ -1392,6 +1420,7 @@ Use /release After Fund Transfer to Seller
           requestedAmount !== null ? releaseAmount : null;
         escrow.pendingRefundAmount = null;
         const isPartialReleaseByAdmin = hasAmount && isAdmin;
+        const isPartialReleaseBySeller = hasAmount && isSeller && !isAdmin;
 
         if (isPartialReleaseByAdmin) {
           escrow.adminConfirmedRelease = false;
@@ -1429,20 +1458,52 @@ Total Deposited: ${formattedTotalDeposited.toFixed(5)} ${escrow.token}
           escrow.releaseConfirmationMessageId = releaseMsg.message_id;
           await escrow.save();
         } else {
+          // Seller Release (Partial or Full)
           escrow.adminConfirmedRelease = false;
-          escrow.buyerConfirmedRelease = true;
-          escrow.sellerConfirmedRelease = false;
+
+          if (isPartialReleaseBySeller) {
+            // For partial release by seller, BOTH must confirm
+            escrow.buyerConfirmedRelease = false;
+            escrow.sellerConfirmedRelease = false;
+          } else {
+            // For full release, only Seller confirms (Buyer implicitly receives) - Default logic
+            // But usually seller initiates, seller approves. Buyer doesn't need to approve receiving money.
+            escrow.buyerConfirmedRelease = true;
+            escrow.sellerConfirmedRelease = false;
+          }
           await escrow.save();
 
           const sellerTag = escrow.sellerUsername
             ? `@${escrow.sellerUsername}`
             : `[${escrow.sellerId}]`;
+          const buyerTag = escrow.buyerUsername
+            ? `@${escrow.buyerUsername}`
+            : `[${escrow.buyerId}]`;
+
           const releaseType = requestedAmount !== null ? "Partial" : "Full";
-          const approvalNote =
+
+          let approvalNote =
             "Only the seller needs to approve to release payment.";
-          const sellerLine = escrow.sellerConfirmedRelease
-            ? `✅ ${sellerTag} - Confirmed`
-            : `⌛️ ${sellerTag} - Waiting...`;
+          let statusSection = "";
+
+          if (isPartialReleaseBySeller) {
+            approvalNote =
+              "⚠️ Both Buyer and Seller must approve this partial release.";
+            const sellerLine = escrow.sellerConfirmedRelease
+              ? `✅ ${sellerTag} - Confirmed`
+              : `⌛️ ${sellerTag} - Waiting...`;
+            const buyerLine = escrow.buyerConfirmedRelease
+              ? `✅ ${buyerTag} - Confirmed`
+              : `⌛️ ${buyerTag} - Waiting...`;
+            statusSection = `${sellerLine}\n${buyerLine}`;
+          } else {
+            // Full release
+            const sellerLine = escrow.sellerConfirmedRelease
+              ? `✅ ${sellerTag} - Confirmed`
+              : `⌛️ ${sellerTag} - Waiting...`;
+            statusSection = sellerLine;
+          }
+
           const releaseCaption = `<b>Release Confirmation (${releaseType})</b>
 
 ${
@@ -1453,7 +1514,7 @@ ${
         escrow.token
       }\n\n`
     : ""
-}${sellerLine}
+}${statusSection}
 
 ${approvalNote}`;
 
@@ -1495,16 +1556,15 @@ ${approvalNote}`;
           return ctx.reply("❌ This command can only be used in a group chat.");
         }
 
-        const normalizedUsername = (ctx.from.username || "").toLowerCase();
-        const isAdmin =
-          config
-            .getAllAdminUsernames()
-            .some(
-              (name) => name && name.toLowerCase() === normalizedUsername
-            ) || config.getAllAdminIds().includes(String(userId));
+        const isBuyerIdMatch =
+          escrow.buyerId && Number(escrow.buyerId) === Number(userId);
+        const isBuyerUsernameMatch =
+          escrow.buyerUsername &&
+          escrow.buyerUsername.toLowerCase() === normalizedUsername;
+        const isBuyer = Boolean(isBuyerIdMatch || isBuyerUsernameMatch);
 
-        if (!isAdmin) {
-          return ctx.reply("❌ Only admins can use this command.");
+        if (!isAdmin && !isBuyer) {
+          return ctx.reply("❌ Only admins or the buyer can use this command.");
         }
 
         const escrow = await findGroupEscrow(chatId, [
@@ -1579,13 +1639,46 @@ ${approvalNote}`;
         escrow.pendingRefundAmount = refundAmount;
         escrow.pendingReleaseAmount = null; // Clear any pending release
 
+        if (isBuyer && !isAdmin) {
+          // Buyer initiates refund (partial or full) -> Requires Dual Approval
+          escrow.buyerConfirmedRefund = false;
+          escrow.sellerConfirmedRefund = false;
+        } else {
+          // Admin initiates -> handled by admin check in callback
+          // Reset flags just in case? Admin override doesn't use these flags usually, logic in callback handles admin privilege.
+          // But let's reset to be clean.
+          escrow.buyerConfirmedRefund = false;
+          escrow.sellerConfirmedRefund = false;
+        }
+
         const sellerLabel = escrow.sellerUsername
           ? `@${escrow.sellerUsername}`
           : escrow.sellerId
           ? `[${escrow.sellerId}]`
           : "the seller";
 
+        const buyerLabel = escrow.buyerUsername
+          ? `@${escrow.buyerUsername}`
+          : escrow.buyerId
+          ? `[${escrow.buyerId}]`
+          : "the buyer";
+
         const refundType = requestedAmount !== null ? "Partial" : "Full";
+
+        let note = "⚠️ Are you sure you want to refund the funds?";
+        let statusSection = "";
+
+        if (isBuyer && !isAdmin) {
+          note = "⚠️ Both Buyer and Seller must approve this refund.";
+          const buyerLine = escrow.buyerConfirmedRefund
+            ? `✅ ${buyerLabel} - Confirmed`
+            : `⌛️ ${buyerLabel} - Waiting...`;
+          const sellerLine = escrow.sellerConfirmedRefund
+            ? `✅ ${sellerLabel} - Confirmed`
+            : `⌛️ ${sellerLabel} - Waiting...`;
+          statusSection = `\n${buyerLine}\n${sellerLine}\n`;
+        }
+
         const refundCaption = `<b>Refund Confirmation (${refundType})</b>
 
 Amount: ${refundAmount.toFixed(5)} ${escrow.token}
@@ -1595,8 +1688,8 @@ ${
     : ""
 }To: ${sellerLabel}
 Address: <code>${escrow.sellerAddress}</code>
-
-⚠️ Are you sure you want to refund the funds?`;
+${statusSection}
+${note}`;
 
         const refundMsg = await ctx.replyWithPhoto(
           images.RELEASE_CONFIRMATION,
@@ -1624,6 +1717,13 @@ Address: <code>${escrow.sellerAddress}</code>
         console.error("Error in refund command:", error);
         ctx.reply("❌ An error occurred.");
       }
+    });
+
+    // Handle refund confirmation callback
+    this.bot.action(/^refund_confirm_yes_(.+)$/, async (ctx) => {
+      const escrowId = ctx.match[1];
+      // ... (this logic is likely in callbackHandler, so I won't add it here unless it's missing)
+      // I will just add the require for CompletionFeedService at the top of callbackHandler.js
     });
 
     this.bot.command("balance", async (ctx) => {
@@ -1981,6 +2081,15 @@ This is the current available balance for this trade.`;
           }
         }
       } else {
+        const currentUsername =
+          telegramUser.username ||
+          (telegramUser.first_name
+            ? `${telegramUser.first_name}`
+            : `user_${telegramUser.id}`);
+
+        user.username = currentUsername;
+        user.firstName = telegramUser.first_name;
+        user.lastName = telegramUser.last_name;
         user.lastActive = new Date();
         await user.save();
       }

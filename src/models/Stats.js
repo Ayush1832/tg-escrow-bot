@@ -15,6 +15,14 @@ const statsSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    totalRefundedVolume: {
+      type: Number,
+      default: 0,
+    },
+    totalRefundedTrades: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true,

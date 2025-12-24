@@ -114,8 +114,12 @@ async function updateTradeStartedMessage(
     } catch (e) {
       const description =
         e?.response?.description || e?.description || e?.message || "";
-      // Ignore harmless \"message is not modified\" errors
-      if (description.includes("message is not modified")) {
+      // Ignore harmless errors
+      if (
+        description.includes("message is not modified") ||
+        description.includes("message into found") ||
+        description.includes("message to edit not found")
+      ) {
         return;
       }
       console.error("Error updating trade started message:", e);
@@ -625,29 +629,44 @@ ${approvalStatus}`;
           { parse_mode: "HTML", reply_markup: replyMarkup }
         );
       } catch (captionError) {
-        // If that fails, try editing as text (if it's a text message)
-        try {
-          await ctx.telegram.editMessageText(
-            updatedEscrow.groupId,
-            updatedEscrow.dealSummaryMessageId,
-            null,
-            summaryText,
-            { parse_mode: "HTML", reply_markup: replyMarkup }
-          );
-        } catch (textError) {
-          // If both fail, try sending new message with image
+        const description =
+          captionError?.response?.description ||
+          captionError?.description ||
+          captionError?.message ||
+          "";
+
+        // If caption edit failed because message is not modified or not found, do NOT try to edit as text
+        // (Editing as text on a photo message causes "there is no text in the message to edit")
+        if (
+          description.includes("message is not modified") ||
+          description.includes("message to edit not found")
+        ) {
+          // Do nothing, just return/continue
+        } else {
+          // If that fails (and it's not one of the above errors), try editing as text (if it's a text message)
           try {
-            await ctx.telegram.sendPhoto(
+            await ctx.telegram.editMessageText(
               updatedEscrow.groupId,
-              images.CONFIRM_SUMMARY,
-              {
-                caption: summaryText,
-                parse_mode: "HTML",
-                reply_markup: replyMarkup,
-              }
+              updatedEscrow.dealSummaryMessageId,
+              null,
+              summaryText,
+              { parse_mode: "HTML", reply_markup: replyMarkup }
             );
-          } catch (sendErr) {
-            console.error("Error updating deal summary:", textError);
+          } catch (textError) {
+            // If both fail, try sending new message with image
+            try {
+              await ctx.telegram.sendPhoto(
+                updatedEscrow.groupId,
+                images.CONFIRM_SUMMARY,
+                {
+                  caption: summaryText,
+                  parse_mode: "HTML",
+                  reply_markup: replyMarkup,
+                }
+              );
+            } catch (sendErr) {
+              console.error("Error updating deal summary:", textError);
+            }
           }
         }
       }
@@ -705,7 +724,8 @@ ${approvalStatus}`;
         try {
           await ctx.telegram.pinChatMessage(
             updatedEscrow.groupId,
-            confirmedMsg.message_id
+            confirmedMsg.message_id,
+            { disable_notification: true }
           );
         } catch (pinErr) {
           console.error("Failed to pin message:", pinErr);
@@ -1935,22 +1955,60 @@ Thank you for using our safe escrow system.`;
       const sellerTag = updatedEscrow.sellerUsername
         ? `@${updatedEscrow.sellerUsername}`
         : `[${updatedEscrow.sellerId}]`;
+      const buyerTag = updatedEscrow.buyerUsername
+        ? `@${updatedEscrow.buyerUsername}`
+        : `[${updatedEscrow.buyerId}]`;
 
-      const sellerLine = updatedEscrow.sellerConfirmedRelease
-        ? `✅ ${sellerTag} - Confirmed`
-        : `⌛️ ${sellerTag} - Waiting...`;
-      const approvalNote = updatedEscrow.sellerConfirmedRelease
-        ? "✅ All approvals received. Processing release..."
-        : "Only the seller needs to approve to release payment.";
-      const releaseCaption = `<b>Release Confirmation</b>
+      const isPartialRelease = updatedEscrow.pendingReleaseAmount !== null;
+      let approvalNote = "";
+      let statusSection = "";
 
-${sellerLine}
+      if (isPartialRelease) {
+        approvalNote =
+          updatedEscrow.buyerConfirmedRelease &&
+          updatedEscrow.sellerConfirmedRelease
+            ? "✅ All approvals received. Processing release..."
+            : "⚠️ Both requests required for partial release.";
+
+        const sellerLine = updatedEscrow.sellerConfirmedRelease
+          ? `✅ ${sellerTag} - Confirmed`
+          : `⌛️ ${sellerTag} - Waiting...`;
+        const buyerLine = updatedEscrow.buyerConfirmedRelease
+          ? `✅ ${buyerTag} - Confirmed`
+          : `⌛️ ${buyerTag} - Waiting...`;
+        statusSection = `${sellerLine}\n${buyerLine}`;
+      } else {
+        statusSection = updatedEscrow.sellerConfirmedRelease
+          ? `✅ ${sellerTag} - Confirmed`
+          : `⌛️ ${sellerTag} - Waiting...`;
+        approvalNote = updatedEscrow.sellerConfirmedRelease
+          ? "✅ All approvals received. Processing release..."
+          : "Only the seller needs to approve to release payment.";
+      }
+
+      const releaseCaption = `<b>Release Confirmation${
+        isPartialRelease ? " (Partial)" : ""
+      }</b>
+
+${statusSection}
 
 ${approvalNote}`;
 
       // Update the message
       if (updatedEscrow.releaseConfirmationMessageId) {
         try {
+          // Determine if we show buttons
+          let showButtons = true;
+          if (isPartialRelease) {
+            if (
+              updatedEscrow.buyerConfirmedRelease &&
+              updatedEscrow.sellerConfirmedRelease
+            )
+              showButtons = false;
+          } else {
+            if (updatedEscrow.sellerConfirmedRelease) showButtons = false;
+          }
+
           await ctx.telegram.editMessageCaption(
             updatedEscrow.groupId,
             updatedEscrow.releaseConfirmationMessageId,
@@ -1958,24 +2016,22 @@ ${approvalNote}`;
             releaseCaption,
             {
               parse_mode: "HTML",
-              reply_markup:
-                updatedEscrow.buyerConfirmedRelease &&
-                updatedEscrow.sellerConfirmedRelease
-                  ? undefined
-                  : {
-                      inline_keyboard: [
-                        [
-                          Markup.button.callback(
-                            "✅ Approve",
-                            `release_confirm_yes_${updatedEscrow.escrowId}`
-                          ),
-                          Markup.button.callback(
-                            "❌ Decline",
-                            `release_confirm_no_${updatedEscrow.escrowId}`
-                          ),
-                        ],
+              reply_markup: !showButtons
+                ? undefined
+                : {
+                    inline_keyboard: [
+                      [
+                        Markup.button.callback(
+                          "✅ Approve",
+                          `release_confirm_yes_${updatedEscrow.escrowId}`
+                        ),
+                        Markup.button.callback(
+                          "❌ Decline",
+                          `release_confirm_no_${updatedEscrow.escrowId}`
+                        ),
                       ],
-                    },
+                    ],
+                  },
             }
           );
         } catch (e) {
@@ -2428,6 +2484,283 @@ Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${
       }
 
       return;
+    } else if (callbackData.startsWith("release_confirm_no_")) {
+      const escrowId = callbackData.replace("release_confirm_no_", "");
+      const escrow = await Escrow.findOne({ escrowId });
+      if (!escrow) return safeAnswerCbQuery(ctx, "❌ Escrow not found.");
+
+      const userId = ctx.from.id;
+      const { isAdmin } = require("../middleware/adminAuth");
+      const isUserAdmin = isAdmin(ctx);
+
+      const canDecline =
+        escrow.buyerId == userId || escrow.sellerId == userId || isUserAdmin;
+      if (!canDecline) return safeAnswerCbQuery(ctx, "❌ Access denied.");
+
+      escrow.buyerConfirmedRelease = false;
+      escrow.sellerConfirmedRelease = false;
+      escrow.pendingReleaseAmount = null;
+      await escrow.save();
+
+      if (escrow.releaseConfirmationMessageId) {
+        try {
+          await ctx.telegram.editMessageCaption(
+            escrow.groupId,
+            escrow.releaseConfirmationMessageId,
+            null,
+            "❌ Release request was declined/cancelled.",
+            { parse_mode: "HTML" }
+          );
+        } catch (e) {}
+      }
+      await safeAnswerCbQuery(ctx, "❌ Request declined.");
+    } else if (callbackData.startsWith("refund_confirm_yes_")) {
+      const escrowId = callbackData.replace("refund_confirm_yes_", "");
+      const callbackMessageId = ctx.callbackQuery?.message?.message_id;
+      const escrow = await Escrow.findOne({ escrowId });
+      if (!escrow) return safeAnswerCbQuery(ctx, "❌ Escrow not found.");
+
+      if (
+        !escrow.refundConfirmationMessageId ||
+        (callbackMessageId &&
+          escrow.refundConfirmationMessageId !== callbackMessageId)
+      ) {
+        return safeAnswerCbQuery(ctx, "❌ Expired request.");
+      }
+
+      const userId = ctx.from.id;
+      const isBuyer = Number(escrow.buyerId) === Number(userId);
+      const isSeller = Number(escrow.sellerId) === Number(userId);
+      const { isAdmin } = require("../middleware/adminAuth");
+      const isUserAdmin = isAdmin(ctx);
+
+      if (!isBuyer && !isSeller && !isUserAdmin)
+        return safeAnswerCbQuery(ctx, "❌ Access denied.");
+
+      if (isBuyer) escrow.buyerConfirmedRefund = true;
+      if (isSeller) escrow.sellerConfirmedRefund = true;
+      if (isUserAdmin && !isBuyer && !isSeller) {
+        escrow.buyerConfirmedRefund = true;
+        escrow.sellerConfirmedRefund = true;
+      }
+      await escrow.save();
+
+      // Update Message
+      const updatedEscrow = await Escrow.findById(escrow._id);
+      const sellerTag = updatedEscrow.sellerUsername
+        ? `@${updatedEscrow.sellerUsername}`
+        : `[Seller]`;
+      const buyerTag = updatedEscrow.buyerUsername
+        ? `@${updatedEscrow.buyerUsername}`
+        : `[Buyer]`;
+
+      const isPartialRefund = updatedEscrow.pendingRefundAmount !== null;
+
+      let statusSection = "";
+      if (isPartialRefund) {
+        const sLine = updatedEscrow.sellerConfirmedRefund
+          ? `✅ ${sellerTag} - Confirmed`
+          : `⌛️ ${sellerTag} - Waiting...`;
+        const bLine = updatedEscrow.buyerConfirmedRefund
+          ? `✅ ${buyerTag} - Confirmed`
+          : `⌛️ ${buyerTag} - Waiting...`;
+        statusSection = `${sLine}\n${bLine}`;
+      }
+
+      const refundCaption = `<b>Refund Confirmation${
+        isPartialRefund ? " (Partial)" : ""
+      }</b>\n\n${statusSection}`;
+
+      let showButtons = true;
+      if (
+        updatedEscrow.buyerConfirmedRefund &&
+        updatedEscrow.sellerConfirmedRefund
+      )
+        showButtons = false;
+
+      if (showButtons) {
+        try {
+          await ctx.telegram.editMessageCaption(
+            updatedEscrow.groupId,
+            updatedEscrow.refundConfirmationMessageId,
+            null,
+            refundCaption,
+            {
+              parse_mode: "HTML",
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    Markup.button.callback(
+                      "✅ Confirm Refund",
+                      `refund_confirm_yes_${escrowId}`
+                    ),
+                    Markup.button.callback(
+                      "❌ Cancel",
+                      `refund_confirm_no_${escrowId}`
+                    ),
+                  ],
+                ],
+              },
+            }
+          );
+          return safeAnswerCbQuery(
+            ctx,
+            "✅ Confirmed. Waiting for other party..."
+          );
+        } catch (e) {}
+      }
+
+      // EXECUTE REFUND
+      if (
+        updatedEscrow.buyerConfirmedRefund &&
+        updatedEscrow.sellerConfirmedRefund
+      ) {
+        await safeAnswerCbQuery(ctx, "🔄 Processing refund...");
+
+        const totalDeposited = Number(
+          updatedEscrow.accumulatedDepositAmount ||
+            updatedEscrow.depositAmount ||
+            0
+        );
+        const pendingAmt = updatedEscrow.pendingRefundAmount || totalDeposited;
+        const refundAmount = Math.min(pendingAmt, totalDeposited);
+
+        if (refundAmount <= 0)
+          return safeAnswerCbQuery(ctx, "❌ Invalid amount.");
+
+        // Calculate Wei
+        const decimals = BlockchainService.getTokenDecimals(
+          updatedEscrow.token,
+          updatedEscrow.chain
+        );
+        let amountWeiOverride = null;
+        const EPSILON = 0.00001;
+        const isFullAmount = Math.abs(refundAmount - totalDeposited) < EPSILON;
+
+        if (
+          isFullAmount &&
+          updatedEscrow.accumulatedDepositAmountWei &&
+          updatedEscrow.accumulatedDepositAmountWei !== "0"
+        ) {
+          amountWeiOverride = updatedEscrow.accumulatedDepositAmountWei;
+        }
+
+        // Ensure refundAmountStr is fixed to decimals to avoid float issues in parseUnits
+        const refundAmountStr = refundAmount.toFixed(decimals);
+
+        try {
+          await ctx.editMessageCaption(
+            updatedEscrow.groupId,
+            updatedEscrow.refundConfirmationMessageId,
+            null,
+            "🔄 Refund in progress...",
+            { parse_mode: "HTML" }
+          );
+        } catch (e) {}
+
+        try {
+          const refundResult = await BlockchainService.refundFunds(
+            updatedEscrow.token,
+            updatedEscrow.chain,
+            updatedEscrow.sellerAddress,
+            refundAmountStr, // Pass string fixed to decimals
+            amountWeiOverride,
+            updatedEscrow.groupId
+          );
+
+          updatedEscrow.refundTransactionHash = refundResult.transactionHash;
+
+          const isPartial = !isFullAmount;
+
+          if (isPartial) {
+            const remaining = totalDeposited - refundAmount;
+            if (remaining < EPSILON) {
+              updatedEscrow.status = "refunded";
+              updatedEscrow.accumulatedDepositAmount = 0;
+              updatedEscrow.depositAmount = 0;
+              updatedEscrow.confirmedAmount = 0;
+            } else {
+              updatedEscrow.accumulatedDepositAmount = remaining;
+              updatedEscrow.depositAmount = remaining;
+              updatedEscrow.confirmedAmount = remaining;
+              // Status stays
+            }
+          } else {
+            updatedEscrow.status = "refunded";
+            updatedEscrow.accumulatedDepositAmount = 0;
+            updatedEscrow.depositAmount = 0;
+            updatedEscrow.confirmedAmount = 0;
+          }
+          updatedEscrow.pendingRefundAmount = null;
+          await updatedEscrow.save();
+
+          // Success Message
+          const explorerUrl = CompletionFeedService.getExplorerLink(
+            updatedEscrow.chain || "BSC",
+            refundResult.transactionHash
+          );
+          const linkLine = explorerUrl
+            ? `<a href="${explorerUrl}">Click Here</a>`
+            : `<code>${refundResult.transactionHash}</code>`;
+
+          const successText = `✅ <b>Refund Partial/Full Complete!</b>
+Amount Refunded: ${refundAmount.toFixed(5)} ${updatedEscrow.token}
+Transaction: ${linkLine}`;
+
+          await ctx.telegram.sendMessage(updatedEscrow.groupId, successText, {
+            parse_mode: "HTML",
+          });
+
+          // Stats & Feed
+          await CompletionFeedService.handleRefund({
+            escrow: updatedEscrow,
+            refundAmount: refundAmount,
+            transactionHash: refundResult.transactionHash,
+            telegram: ctx.telegram,
+          });
+
+          // Update Trade Started Msg
+          await updateTradeStartedMessage(
+            updatedEscrow,
+            ctx.telegram,
+            updatedEscrow.status,
+            refundResult.transactionHash
+          );
+        } catch (error) {
+          console.error("Refund failed:", error);
+          await ctx.telegram.sendMessage(
+            updatedEscrow.groupId,
+            "❌ Refund failed: " + error.message
+          );
+        }
+      }
+    } else if (callbackData.startsWith("refund_confirm_no_")) {
+      const escrowId = callbackData.replace("refund_confirm_no_", "");
+      const escrow = await Escrow.findOne({ escrowId });
+      if (!escrow) return safeAnswerCbQuery(ctx, "❌ Not found.");
+
+      const userId = ctx.from.id;
+      const { isAdmin } = require("../middleware/adminAuth");
+      // Allow participants to cancel
+      const can =
+        escrow.buyerId == userId || escrow.sellerId == userId || isAdmin(ctx);
+      if (!can) return safeAnswerCbQuery(ctx, "❌ Denied.");
+
+      escrow.buyerConfirmedRefund = false;
+      escrow.sellerConfirmedRefund = false;
+      escrow.pendingRefundAmount = null;
+      await escrow.save();
+
+      try {
+        await ctx.editMessageCaption(
+          escrow.groupId,
+          escrow.refundConfirmationMessageId,
+          null,
+          "❌ Refund cancelled.",
+          { parse_mode: "HTML" }
+        );
+      } catch (e) {}
+      await safeAnswerCbQuery(ctx, "❌ Cancelled.");
     } else if (callbackData.startsWith("partial_continue_")) {
       const escrowId = callbackData.replace("partial_continue_", "");
       const escrow = await Escrow.findOne({
@@ -2865,6 +3198,18 @@ Use /release After Fund Transfer to Seller
 
         // Reload escrow to get latest state
         const updatedEscrow = await Escrow.findById(escrow._id);
+
+        try {
+          // Log refund to completion feed (supports both full and partial)
+          await CompletionFeedService.handleRefund({
+            escrow: updatedEscrow,
+            refundAmount: refundAmount,
+            transactionHash: refundResult.transactionHash,
+            telegram: ctx.telegram,
+          });
+        } catch (feedError) {
+          console.error("Error logging refund to feed:", feedError);
+        }
 
         let successMessage = `✅ ${refundAmount.toFixed(5)} ${
           updatedEscrow.token

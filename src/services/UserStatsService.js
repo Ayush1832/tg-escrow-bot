@@ -12,9 +12,12 @@ class UserStatsService {
       user = await User.findOne({ telegramId: Number(telegramId) });
     } else if (username) {
       // Case-insensitive username search
-      user = await User.findOne({
+      const users = await User.find({
         username: { $regex: new RegExp(`^${username}$`, "i") },
-      });
+      })
+        .sort({ lastActive: -1 })
+        .limit(1);
+      user = users[0];
     }
 
     if (!user) {
@@ -208,19 +211,17 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
       quantity,
       token,
       escrowId,
-      createdAt,
     } = escrow;
 
     const amount = Number(quantity || 0);
     const tradeDate = new Date();
 
-    // specific logic for buyer
     await User.findOneAndUpdate(
-      { telegramId: buyerId },
+      { telegramId: Number(buyerId) },
       {
         $setOnInsert: {
+          telegramId: Number(buyerId),
           username: buyerUsername || `user_${buyerId}`,
-          telegramId: buyerId,
         },
         $inc: {
           totalBoughtVolume: amount,
@@ -244,13 +245,12 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
       { upsert: true }
     );
 
-    // specific logic for seller
     await User.findOneAndUpdate(
-      { telegramId: sellerId },
+      { telegramId: Number(sellerId) },
       {
         $setOnInsert: {
+          telegramId: Number(sellerId),
           username: sellerUsername || `user_${sellerId}`,
-          telegramId: sellerId,
         },
         $inc: {
           totalSoldVolume: amount,
@@ -273,6 +273,10 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
       },
       { upsert: true }
     );
+  }
+
+  async recordTrade(escrow) {
+    return this.updateUserStats(escrow);
   }
 }
 
