@@ -396,7 +396,7 @@ class EscrowBot {
           return ctx.reply(
             "❌ Cannot cancel the deal after deposit address has been provided."
           );
-        
+        }
 
         const userId = from.id;
         const adminUserId = config.ADMIN_USER_ID
