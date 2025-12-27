@@ -96,47 +96,89 @@ async function main() {
       ESCROW_VAULT_ABI,
       wallet
     );
-    const owner = await vaultContract.owner();
-    if (owner.toLowerCase() !== wallet.address.toLowerCase()) {
-      console.log("⚠️  Skipping: wallet is not the owner");
-      skipped += 1;
-      continue;
+
+    try {
+      const owner = await vaultContract.owner();
+      if (owner.toLowerCase() !== wallet.address.toLowerCase()) {
+        console.log("⚠️  Skipping: wallet is not the owner");
+        skipped += 1;
+        continue;
+      }
+
+      const balanceRaw = await tokenContract.balanceOf(contractAddress);
+      const balance = Number(ethers.formatUnits(balanceRaw, decimals));
+      console.log(`   💰 Contract Balance: ${balance.toFixed(6)} USDT`);
+
+      if (balance <= reserveAmount + epsilon) {
+        console.log("   ℹ️  Balance within reserve threshold, skipping");
+        skipped += 1;
+        continue;
+      }
+
+      // Check Wallet Balance Before
+      const walletBalanceBefore = await tokenContract.balanceOf(wallet.address);
+      const walletBalBeforeNum = Number(
+        ethers.formatUnits(walletBalanceBefore, decimals)
+      );
+      console.log(
+        `   👛 Wallet Balance (Before): ${walletBalBeforeNum.toFixed(6)} USDT`
+      );
+
+      console.log("   🚀 Withdrawing full balance to hot wallet...");
+      const withdrawTx = await vaultContract.withdrawToken(
+        tokenAddress,
+        wallet.address
+      );
+      console.log(`   ⏳ Waiting for withdrawal tx ${withdrawTx.hash}...`);
+      await withdrawTx.wait();
+      console.log("   ✅ Withdrawal confirmed");
+
+      // Check Wallet Balance After
+      const walletBalanceAfter = await tokenContract.balanceOf(wallet.address);
+      const walletBalAfterNum = Number(
+        ethers.formatUnits(walletBalanceAfter, decimals)
+      );
+      console.log(
+        `   👛 Wallet Balance (After): ${walletBalAfterNum.toFixed(6)} USDT`
+      );
+
+      if (walletBalanceAfter < reserveWei) {
+        console.error(
+          "   ❌ Error: Insufficient wallet balance for re-deposit. Withdrawal might have failed silently."
+        );
+        continue;
+      }
+
+      console.log(
+        `   🔄 Re-depositing ${reserveAmount} USDT back to contract...`
+      );
+
+      try {
+        // Explicitly encode data to debug if needed, but rely on standard transfer first
+        const depositTx = await tokenWithSigner.transfer(
+          contractAddress,
+          reserveWei
+        );
+        console.log(`   ⏳ Waiting for deposit tx ${depositTx.hash}...`);
+        await depositTx.wait();
+        console.log("   ✅ Deposit confirmed");
+      } catch (depositError) {
+        console.error(`   ❌ Deposit Failed: ${depositError.message}`);
+        if (depositError.transaction) {
+          console.error(`      Tx Data: ${depositError.transaction.data}`);
+        }
+      }
+
+      processed += 1;
+
+      // Small delay to avoid nonce contention
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    } catch (err) {
+      console.error(
+        `   ❌ Error processing contract ${contractAddress}:`,
+        err.message
+      );
     }
-
-    const balanceRaw = await tokenContract.balanceOf(contractAddress);
-    const balance = Number(ethers.formatUnits(balanceRaw, decimals));
-    console.log(`   💰 Balance: ${balance.toFixed(6)} USDT`);
-
-    if (balance <= reserveAmount + epsilon) {
-      console.log("   ℹ️  Balance within reserve threshold, skipping");
-      skipped += 1;
-      continue;
-    }
-
-    console.log("   🚀 Withdrawing full balance to hot wallet...");
-    const withdrawTx = await vaultContract.withdrawToken(
-      tokenAddress,
-      wallet.address
-    );
-    console.log(`   ⏳ Waiting for withdrawal tx ${withdrawTx.hash}...`);
-    await withdrawTx.wait();
-    console.log("   ✅ Withdrawal confirmed");
-
-    console.log(
-      `   🔄 Re-depositing ${reserveAmount} USDT back to contract...`
-    );
-    const depositTx = await tokenWithSigner.transfer(
-      contractAddress,
-      reserveWei
-    );
-    console.log(`   ⏳ Waiting for deposit tx ${depositTx.hash}...`);
-    await depositTx.wait();
-    console.log("   ✅ Deposit confirmed");
-
-    processed += 1;
-
-    // Small delay to avoid nonce contention
-    await new Promise((resolve) => setTimeout(resolve, 1500));
   }
 
   console.log("\n" + "=".repeat(80));
