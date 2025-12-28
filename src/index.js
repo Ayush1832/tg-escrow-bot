@@ -1,3 +1,4 @@
+require("./utils/logger"); // Apply IST timestamp logging globally
 const { Telegraf, Markup } = require("telegraf");
 const { ethers } = require("ethers");
 const mongoose = require("mongoose");
@@ -1007,10 +1008,19 @@ class EscrowBot {
             }
           }
 
-          try {
-            await ctx.telegram.deleteMessage(chatId, ctx.message.message_id);
-          } catch (e) {
-            console.error("Failed to delete transaction link message:", e);
+          // Delete the user's message containing the link/hash
+          if (ctx.message && ctx.message.message_id) {
+            try {
+              await ctx.telegram.deleteMessage(chatId, ctx.message.message_id);
+            } catch (e) {
+              const desc = e?.response?.description || e?.message || "";
+              if (
+                !desc.includes("message identifier is not specified") &&
+                !desc.includes("message to delete not found")
+              ) {
+                console.error("Failed to delete transaction link message:", e);
+              }
+            }
           }
 
           const txHashShort = txHash.substring(0, 10) + "...";

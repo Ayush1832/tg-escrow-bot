@@ -191,9 +191,11 @@ async function joinRequestHandler(ctx) {
         "";
 
       // If user is already a participant, that's fine - just continue
+      const descLower = description.toLowerCase();
       if (
-        description.includes("USER_ALREADY_PARTICIPANT") ||
-        description.includes("user is already a member")
+        descLower.includes("user_already_participant") ||
+        descLower.includes("user is already a member") ||
+        descLower.includes("already_participant")
       ) {
         // Proceed as if approved
       } else {

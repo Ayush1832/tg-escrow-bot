@@ -477,6 +477,27 @@ class BlockchainService {
         }
       }
 
+      // SAFETY CHECK: Verify Contract Balance
+      // Re-initialize token contract to check balance
+      const tokenAddressForCheck = await vaultContract.token();
+      const tokenContractForCheck = new ethers.Contract(
+        tokenAddressForCheck,
+        ["function balanceOf(address) view returns (uint256)"],
+        provider
+      );
+      const contractBalanceWei = await tokenContractForCheck.balanceOf(
+        contractAddress
+      );
+
+      if (contractBalanceWei < amountWei) {
+        throw new Error(
+          `Insufficient Vault Balance: Contract has ${ethers.formatUnits(
+            contractBalanceWei,
+            decimals
+          )} but needs ${ethers.formatUnits(amountWei, decimals)}`
+        );
+      }
+
       const tx = await vaultContract.release(buyerAddress, amountWei, {
         nonce: nonce,
       });
@@ -491,6 +512,44 @@ class BlockchainService {
         blockNumber: receipt.blockNumber,
       };
     } catch (error) {
+      // Handle "already known" / nonce errors
+      // Handle "already known" / nonce errors
+      // Use exhaustive check for various provider error formats
+      const isNonceError =
+        (error?.code === -32000 && error?.message === "already known") ||
+        (error?.message && error?.message.includes("already known")) ||
+        (error?.message &&
+          error?.message.includes("could not coalesce error")) ||
+        (error?.shortMessage &&
+          error?.shortMessage.includes("could not coalesce error")) ||
+        error?.error?.message === "already known" ||
+        error?.info?.error?.message === "already known";
+
+      if (isNonceError) {
+        console.warn(
+          `⚠️ Nonce error detected in releaseFunds. Retrying with fresh nonce...`
+        );
+        try {
+          const freshNonce = await provider.getTransactionCount(
+            wallet.address,
+            "latest"
+          );
+          const tx = await vaultContract.release(buyerAddress, amountWei, {
+            nonce: freshNonce + 1, // Try incrementing if strictly needed, but fresh fetch usually enough
+          });
+          const receipt = await tx.wait();
+          return {
+            success: true,
+            transactionHash: receipt.transactionHash || receipt.hash || tx.hash,
+            blockNumber: receipt.blockNumber,
+          };
+        } catch (retryError) {
+          console.error("Retry failed:", retryError);
+          // Verify if it actually succeeded despite error (idempotency check would be ideal here but complex)
+          throw retryError;
+        }
+      }
+
       // Provide a concise log for common provider errors (like insufficient gas funds)
       const code = error?.code || error?.shortMessage || "";
       const providerMessage =
@@ -574,6 +633,27 @@ class BlockchainService {
         }
       }
 
+      // SAFETY CHECK: Verify Contract Balance
+      // Re-initialize token contract to check balance
+      const tokenAddressForCheck = await vaultContract.token();
+      const tokenContractForCheck = new ethers.Contract(
+        tokenAddressForCheck,
+        ["function balanceOf(address) view returns (uint256)"],
+        provider
+      );
+      const contractBalanceWei = await tokenContractForCheck.balanceOf(
+        contractAddress
+      );
+
+      if (contractBalanceWei < amountWei) {
+        throw new Error(
+          `Insufficient Vault Balance: Contract has ${ethers.formatUnits(
+            contractBalanceWei,
+            decimals
+          )} but needs ${ethers.formatUnits(amountWei, decimals)}`
+        );
+      }
+
       const tx = await vaultContract.refund(sellerAddress, amountWei, {
         nonce: nonce,
       });
@@ -588,6 +668,42 @@ class BlockchainService {
         blockNumber: receipt.blockNumber,
       };
     } catch (error) {
+      // Handle "already known" / nonce errors
+      // Use exhaustive check for various provider error formats
+      const isNonceError =
+        (error?.code === -32000 && error?.message === "already known") ||
+        (error?.message && error?.message.includes("already known")) ||
+        (error?.message &&
+          error?.message.includes("could not coalesce error")) ||
+        (error?.shortMessage &&
+          error?.shortMessage.includes("could not coalesce error")) ||
+        error?.error?.message === "already known" ||
+        error?.info?.error?.message === "already known";
+
+      if (isNonceError) {
+        console.warn(
+          `⚠️ Nonce error detected in refundFunds. Retrying with fresh nonce...`
+        );
+        try {
+          const freshNonce = await provider.getTransactionCount(
+            wallet.address,
+            "latest"
+          );
+          const tx = await vaultContract.refund(sellerAddress, amountWei, {
+            nonce: freshNonce + 1,
+          });
+          const receipt = await tx.wait();
+          return {
+            success: true,
+            transactionHash: receipt.transactionHash || receipt.hash || tx.hash,
+            blockNumber: receipt.blockNumber,
+          };
+        } catch (retryError) {
+          console.error("Retry failed:", retryError);
+          throw retryError;
+        }
+      }
+
       // Provide a concise log for common provider errors (like insufficient gas funds)
       const code = error?.code || error?.shortMessage || "";
       const providerMessage =

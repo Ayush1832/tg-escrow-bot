@@ -114,11 +114,12 @@ async function updateTradeStartedMessage(
     } catch (e) {
       const description =
         e?.response?.description || e?.description || e?.message || "";
+      const descLower = description.toLowerCase();
       // Ignore harmless errors
       if (
-        description.includes("message is not modified") ||
-        description.includes("message into found") ||
-        description.includes("message to edit not found")
+        descLower.includes("message is not modified") ||
+        descLower.includes("message into found") ||
+        descLower.includes("message to edit not found")
       ) {
         return;
       }
@@ -380,10 +381,11 @@ async function updateRoleSelectionMessage(ctx, escrow) {
     } catch (editError) {
       const description =
         editError?.response?.description || editError?.message || "";
-      if (description.includes("message is not modified")) {
+      if (description.toLowerCase().includes("message is not modified")) {
         return;
       }
-      throw editError;
+      console.error("Error updating role selection message:", editError);
+      // throw editError; // Don't throw, just log so flow continues
     }
   } catch (error) {
     console.error("Error updating role selection message:", error);
@@ -1800,14 +1802,20 @@ Thank you for using our safe escrow system.`;
           };
 
           try {
-            const summaryMsg = await ctx.telegram.sendPhoto(
-              finalEscrow.groupId,
-              images.DEAL_COMPLETE,
-              {
-                caption: completionText,
-                parse_mode: "HTML",
-                reply_markup: closeTradeKeyboard,
-              }
+            const withRetry = require("../utils/retry");
+            const summaryMsg = await withRetry(
+              () =>
+                ctx.telegram.sendPhoto(
+                  finalEscrow.groupId,
+                  images.DEAL_COMPLETE,
+                  {
+                    caption: completionText,
+                    parse_mode: "HTML",
+                    reply_markup: closeTradeKeyboard,
+                  }
+                ),
+              3,
+              2000
             );
 
             if (summaryMsg) {
@@ -2453,7 +2461,7 @@ Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${
             );
           } catch (e) {
             const description = e?.response?.description || e?.message || "";
-            if (description.includes("message is not modified")) {
+            if (description.toLowerCase().includes("message is not modified")) {
               // Safe to ignore - message is already in correct state
             } else {
               try {
@@ -2465,7 +2473,7 @@ Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${
                 await ctx.editMessageText(releaseStatusText);
               } catch (e2) {
                 const desc2 = e2?.response?.description || e2?.message || "";
-                if (!desc2.includes("message is not modified")) {
+                if (!desc2.toLowerCase().includes("message is not modified")) {
                   // Only log if it's not the "message is not modified" error
                 }
               }

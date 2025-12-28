@@ -7,41 +7,29 @@ class GroupPoolService {
    */
   async assignGroup(escrowId, telegram = null) {
     try {
-      const availableGroup = await GroupPool.findOne({
-        status: "available",
-      });
+      // Use findOneAndUpdate for atomic assignment to prevent race conditions
+      const updatedGroup = await GroupPool.findOneAndUpdate(
+        { status: "available" },
+        {
+          $set: {
+            status: "assigned",
+            assignedEscrowId: escrowId,
+            assignedAt: new Date(),
+          },
+        },
+        { new: true, sort: { createdAt: 1 } } // Assign oldest available group first
+      );
 
-      if (!availableGroup) {
+      if (!updatedGroup) {
+        // Double check if any groups exist at all to give better error message
+        const anyGroup = await GroupPool.findOne({});
+        if (!anyGroup) {
+          throw new Error("No groups in pool. Please add a group.");
+        }
         throw new Error(
           "No available groups in pool. All groups are currently occupied."
         );
       }
-
-      const recheckGroup = await GroupPool.findOne({
-        _id: availableGroup._id,
-        status: "available",
-      });
-
-      if (!recheckGroup) {
-        throw new Error(
-          "Group was assigned to another escrow. Please try again."
-        );
-      }
-
-      const updateResult = await GroupPool.updateOne(
-        { _id: availableGroup._id, status: "available" },
-        {
-          status: "assigned",
-          assignedEscrowId: escrowId,
-          assignedAt: new Date(),
-        }
-      );
-
-      if (updateResult.modifiedCount === 0) {
-        throw new Error("Group assignment failed. Please try again.");
-      }
-
-      const updatedGroup = await GroupPool.findById(availableGroup._id);
 
       if (telegram) {
         await this.ensureAdminInGroup(updatedGroup.groupId, telegram);
