@@ -531,6 +531,7 @@ async function adminHelp(ctx) {
 • \`/admin_init_addresses\` - Verify deployed EscrowVault contracts
 • \`/admin_cleanup_addresses\` - Cleanup abandoned addresses
 • \`/admin_withdraw_bsc_usdt\` - Withdraw excess USDT from BSC escrow contracts to admin wallet (private chat only)
+• \`/withdraw_fees [chain] [token]\` - Withdraw accumulated fees (e.g., /withdraw_fees BSC USDT)
 
 📋 **AUTOMATIC FEATURES:**
 ✅ **Group Recycling**: Automatic 15-minute delayed recycling after trade completion
@@ -993,6 +994,8 @@ async function adminRecentTrades(ctx) {
     message += `💡 <b>Commands:</b>\n`;
     message += `• <code>/admin_recent_trades 20</code> - Show 20 recent trades\n`;
     message += `• <code>/admin_export_trades</code> - Export all trades to CSV\n`;
+    message += `• <code>/admin_help</code> - Show admin commands\n`;
+    message += `• <code>/withdraw_fees [chain] [token]</code> - Withdraw accumulated fees (e.g., /withdraw_fees BSC USDT)\n`;
     message += `• <code>/admin_trade_stats</code> - View statistics by fee percentage`;
 
     await ctx.reply(message, { parse_mode: "HTML" });
@@ -2017,24 +2020,125 @@ All excess funds have been withdrawn successfully.`;
   }
 }
 
-module.exports = {
-  adminStats,
-  adminGroupPool,
-  adminPoolAdd,
-  adminPoolList,
-  adminPoolDeleteAll,
-  adminPoolDelete,
-  adminHelp,
-  adminTradeStats,
-  adminExportTrades,
-  adminRecentTrades,
-  adminAddressPool,
-  adminInitAddresses,
-  adminCleanupAddresses,
-  adminGroupReset,
-  adminResetForce,
-  adminResetAllGroups,
-  adminWithdrawExcess,
-  requestWithdrawConfirmation,
-  executeWithdrawExcess,
+module.exports = (bot) => {
+  bot.command("withdraw_fees", async (ctx) => {
+    if (!isAdmin(ctx)) return;
+
+    const args = ctx.message.text.split(" ").slice(1);
+    const network = (args[0] || "BSC").toUpperCase();
+    const token = (args[1] || "USDT").toUpperCase();
+
+    try {
+      const blockchainService = new BlockchainService();
+      await blockchainService.initialize();
+
+      const settings = await blockchainService.getFeeSettings(token, network);
+      const accumulated = settings.accumulated;
+
+      if (parseFloat(accumulated) === 0) {
+        return ctx.reply(`⚠️ No fees accumulated for ${token} on ${network}.`);
+      }
+
+      const wallet1Share = (parseFloat(accumulated) * 0.7).toFixed(6);
+      const wallet2Share = (parseFloat(accumulated) * 0.3).toFixed(6);
+
+      let msg = `💰 <b>Withdraw Fee Confirmation</b>\n\n`;
+      msg += `<b>Chain:</b> ${network}\n`;
+      msg += `<b>Token:</b> ${token}\n`;
+      msg += `<b>Total Fees:</b> ${accumulated}\n\n`;
+      msg += `<b>Wallet 1:</b> <code>${settings.wallet1}</code>\n`;
+      msg += `├ Share: 70%\n`;
+      msg += `└ Amount: ${wallet1Share}\n\n`;
+      msg += `<b>Wallet 2:</b> <code>${settings.wallet2}</code>\n`;
+      msg += `├ Share: 30%\n`;
+      msg += `└ Amount: ${wallet2Share}\n\n`;
+      msg += `❓ Do you confirm this withdrawal?`;
+
+      await ctx.reply(msg, {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: "✅ Yes, Withdraw",
+                callback_data: `confirm_withdraw_${network}_${token}`,
+              },
+              {
+                text: "❌ Cancel",
+                callback_data: `cancel_withdraw`,
+              },
+            ],
+          ],
+        },
+      });
+    } catch (error) {
+      console.error("Fee check error:", error);
+      const errParams = error?.message || "Unknown error";
+      await ctx.reply(`❌ Failed to fetch fee details: ${errParams}`);
+    }
+  });
+
+  bot.action(/^confirm_withdraw_([^_]+)_([^_]+)$/, async (ctx) => {
+    if (!isAdmin(ctx)) return ctx.answerCbQuery("Unauthorized");
+
+    // We match network (group 1) and token (group 2)
+    const network = ctx.match[1];
+    const token = ctx.match[2];
+
+    try {
+      await ctx.answerCbQuery("Processing withdrawal...");
+      await ctx.editMessageText(
+        `⏳ Withdrawing fees for ${token} on ${network}...`,
+        { parse_mode: "HTML" }
+      );
+
+      const blockchainService = new BlockchainService();
+      await blockchainService.initialize();
+      const result = await blockchainService.withdrawFees(token, network);
+
+      let msg = `✅ <b>Fees Withdrawn Successfully!</b>\n\n`;
+      msg += `<b>Chain:</b> ${network}\n`;
+      msg += `<b>Token:</b> ${token}\n`;
+      msg += `<b>Block:</b> ${result.blockNumber}\n`;
+      msg += `<b>Tx Hash:</b> <code>${result.transactionHash}</code>`;
+
+      await ctx.editMessageText(msg, { parse_mode: "HTML" });
+    } catch (error) {
+      console.error("Withdraw fees error:", error);
+      const errParams = error?.message || "Unknown error";
+      await ctx.editMessageText(`❌ Failed to withdraw fees: ${errParams}`);
+    }
+  });
+
+  bot.action("cancel_withdraw", async (ctx) => {
+    if (!isAdmin(ctx)) return ctx.answerCbQuery("Unauthorized");
+    await ctx.answerCbQuery("Cancelled");
+    await ctx.deleteMessage();
+  });
+
+  bot.command("admin_help", adminHelp);
+  bot.command("admin_stats", adminStats);
+  bot.command("admin_pool", adminGroupPool);
+  bot.command("admin_pool_add", adminPoolAdd);
+  bot.command("admin_pool_list", adminPoolList);
+  bot.command("admin_pool_delete", adminPoolDelete);
+  bot.command("admin_pool_delete_all", adminPoolDeleteAll);
+  bot.command("admin_address_pool", adminAddressPool);
+  bot.command("admin_init_addresses", adminInitAddresses);
+  bot.command("admin_cleanup_addresses", adminCleanupAddresses);
+  bot.command("admin_warn_inactive", adminWarnInactive);
+  bot.command("admin_remove_inactive", adminRemoveInactive);
+
+  // Stats commands
+  bot.command("admin_trade_stats", adminTradeStats);
+  bot.command("admin_recent_trades", adminRecentTrades);
+  bot.command("admin_export_trades", adminExportTrades);
+
+  // Group reset commands
+  bot.command("admin_group_reset", adminGroupReset);
+  bot.command("admin_reset_force", adminResetForce);
+  bot.command("admin_reset_all_groups", adminResetAllGroups);
+
+  // Withdraw excess funds
+  bot.command("admin_withdraw_bsc_usdt", adminWithdrawBscUsdt);
 };

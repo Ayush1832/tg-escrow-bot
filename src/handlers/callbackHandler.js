@@ -103,13 +103,17 @@ async function updateTradeStartedMessage(
 💰 <b>Amount:</b> ${amountDisplay}
 ⏱️ <b>Time Taken:</b> ${minutesTaken} min(s)`;
 
+    const withRetry = require("../utils/retry");
+
     try {
-      await telegram.editMessageText(
-        escrow.originChatId,
-        escrow.tradeStartedMessageId,
-        null,
-        updatedMessage,
-        { parse_mode: "HTML" }
+      await withRetry(() =>
+        telegram.editMessageText(
+          escrow.originChatId,
+          escrow.tradeStartedMessageId,
+          null,
+          updatedMessage,
+          { parse_mode: "HTML" }
+        )
       );
     } catch (e) {
       const description =
@@ -118,8 +122,11 @@ async function updateTradeStartedMessage(
       // Ignore harmless errors
       if (
         descLower.includes("message is not modified") ||
-        descLower.includes("message into found") ||
-        descLower.includes("message to edit not found")
+        descLower.includes("message into found") || // Typo handle
+        descLower.includes("message to edit not found") ||
+        descLower.includes("message identifier is not specified") ||
+        // Also suppress if it's a 400 Bad Request which usually means message is gone/invalid
+        e?.response?.error_code === 400
       ) {
         return;
       }
@@ -370,13 +377,17 @@ async function updateRoleSelectionMessage(ctx, escrow) {
             ],
           };
 
+    const withRetry = require("../utils/retry");
+
     try {
-      await ctx.telegram.editMessageCaption(
-        escrow.groupId,
-        escrow.roleSelectionMessageId,
-        null,
-        messageText,
-        { reply_markup: replyMarkup, parse_mode: "HTML" }
+      await withRetry(() =>
+        ctx.telegram.editMessageCaption(
+          escrow.groupId,
+          escrow.roleSelectionMessageId,
+          null,
+          messageText,
+          { reply_markup: replyMarkup, parse_mode: "HTML" }
+        )
       );
     } catch (editError) {
       const description =

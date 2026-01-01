@@ -56,7 +56,8 @@
 
 ### System
 
-`/admin_withdraw_bsc_usdt` - Withdraw accumulated fees
+`/admin_withdraw_bsc_usdt` - Withdraw excess USDT (Legacy)
+`/withdraw_fees [chain] [token]` - Withdraw accumulated fees
 `/admin_help` - Show this list
 
 ---

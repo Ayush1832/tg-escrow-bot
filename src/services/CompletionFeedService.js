@@ -148,11 +148,14 @@ ${transactionLine}`;
       transactionHash || freshEscrow.releaseTransactionHash
     );
 
+    const withRetry = require("../utils/retry");
     try {
-      await telegram.sendMessage(this.chatId, message, {
-        parse_mode: "HTML",
-        disable_web_page_preview: true,
-      });
+      await withRetry(() =>
+        telegram.sendMessage(this.chatId, message, {
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
+        })
+      );
 
       freshEscrow.completionLogSent = true;
       await freshEscrow.save();
@@ -339,11 +342,14 @@ ${transactionLine}`;
 📊 Remaining: ${this.formatAmount(remainingAmount)} ${token}
 ${transactionLine}`;
 
+    const withRetry = require("../utils/retry");
     try {
-      await telegram.sendMessage(this.chatId, message, {
-        parse_mode: "HTML",
-        disable_web_page_preview: true,
-      });
+      await withRetry(() =>
+        telegram.sendMessage(this.chatId, message, {
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
+        })
+      );
 
       freshEscrow.partialDepositLogSent = true;
       await freshEscrow.save();
@@ -468,11 +474,14 @@ ${transactionLine}`;
       transactionHash
     );
 
+    const withRetry = require("../utils/retry");
     try {
-      await telegram.sendMessage(this.chatId, message, {
-        parse_mode: "HTML",
-        disable_web_page_preview: true,
-      });
+      await withRetry(() =>
+        telegram.sendMessage(this.chatId, message, {
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
+        })
+      );
 
       freshEscrow.refundLogSent = true;
       if (transactionHash) {

@@ -3,7 +3,11 @@ pragma solidity ^0.8.24;
 
 interface IERC20 {
     function transfer(address to, uint256 amount) external returns (bool);
-    function transferFrom(address from, address to, uint256 amount) external returns (bool);
+    function transferFrom(
+        address from,
+        address to,
+        uint256 amount
+    ) external returns (bool);
     function balanceOf(address account) external view returns (uint256);
     function decimals() external view returns (uint8);
 }
@@ -13,18 +17,39 @@ contract EscrowVault {
     IERC20 public immutable token; // USDT (BEP-20)
 
     // Fee wallets and split
+    // Fee wallets and split
     address public feeWallet1;
     address public feeWallet2;
     // feePercent in basis points (e.g., 100 = 1.00%)
     uint256 public feePercent;
 
-    event Released(address indexed to, uint256 grossAmount, uint256 netAmount, uint256 feeAmount);
-    event Refunded(address indexed to, uint256 grossAmount, uint256 netAmount, uint256 feeAmount);
+    // Accumulate fees in contract instead of sending immediately
+    uint256 public accumulatedFees;
+
+    event Released(
+        address indexed to,
+        uint256 grossAmount,
+        uint256 netAmount,
+        uint256 feeAmount
+    );
+    event Refunded(
+        address indexed to,
+        uint256 grossAmount,
+        uint256 netAmount,
+        uint256 feeAmount
+    );
+    event FeesWithdrawn(
+        uint256 amount,
+        address wallet1,
+        uint256 amount1,
+        address wallet2,
+        uint256 amount2
+    );
     event FeeWalletsUpdated(address w1, address w2);
     event FeePercentUpdated(uint256 feePercent);
 
     modifier onlyOwner() {
-        require(msg.sender == owner, 'not-owner');
+        require(msg.sender == owner, "not-owner");
         _;
     }
 
@@ -47,41 +72,52 @@ contract EscrowVault {
     }
 
     function setFeePercent(uint256 _feePercent) external onlyOwner {
-        require(_feePercent <= 1000, 'too-high'); // <= 10%
+        require(_feePercent <= 1000, "too-high"); // <= 10%
         feePercent = _feePercent;
         emit FeePercentUpdated(_feePercent);
     }
 
-    function _splitAndDistributeFee(uint256 fee) internal {
-        if (fee == 0) return;
+    function withdrawFees() external onlyOwner {
+        uint256 fee = accumulatedFees;
+        require(fee > 0, "no-fees");
+
+        accumulatedFees = 0; // Reset before transfer to prevent re-entrancy
+
         uint256 f1 = (fee * 70) / 100; // 70%
-        uint256 f2 = fee - f1;         // 30% remainder
-        require(token.transfer(feeWallet1, f1), 'fee1-fail');
-        require(token.transfer(feeWallet2, f2), 'fee2-fail');
+        uint256 f2 = fee - f1; // 30% remainder
+
+        require(token.transfer(feeWallet1, f1), "fee1-fail");
+        require(token.transfer(feeWallet2, f2), "fee2-fail");
+
+        emit FeesWithdrawn(fee, feeWallet1, f1, feeWallet2, f2);
     }
 
     function release(address to, uint256 amount) external onlyOwner {
         uint256 fee = (amount * feePercent) / 10000; // basis points
         uint256 net = amount - fee;
-        _splitAndDistributeFee(fee);
-        require(token.transfer(to, net), 'transfer-fail');
+
+        accumulatedFees += fee; // Store fee in contract
+
+        require(token.transfer(to, net), "transfer-fail");
         emit Released(to, amount, net, fee);
     }
 
     function refund(address to, uint256 amount) external onlyOwner {
         uint256 fee = (amount * feePercent) / 10000;
         uint256 net = amount - fee;
-        _splitAndDistributeFee(fee);
-        require(token.transfer(to, net), 'transfer-fail');
+
+        accumulatedFees += fee; // Store fee in contract
+
+        require(token.transfer(to, net), "transfer-fail");
         emit Refunded(to, amount, net, fee);
     }
 
     // Owner utility: sweep any ERC-20 token balance to a specified address
     function withdrawToken(address erc20Token, address to) external onlyOwner {
-        require(to != address(0), 'zero-to');
+        require(to != address(0), "zero-to");
         IERC20 t = IERC20(erc20Token);
         uint256 bal = t.balanceOf(address(this));
-        require(bal > 0, 'no-balance');
-        require(t.transfer(to, bal), 'sweep-fail');
+        require(bal > 0, "no-balance");
+        require(t.transfer(to, bal), "sweep-fail");
     }
 }

@@ -15,12 +15,24 @@ async function withRetry(fn, retries = 3, delay = 1000) {
         (error.message.includes("timeout") ||
           error.message.includes("network")));
 
-    if (!isNetworkError) throw error;
+    const isTelegramRetryable =
+      error?.response?.error_code === 502 ||
+      error?.response?.error_code === 429 ||
+      (error.message && error.message.includes("Bad Gateway")) ||
+      (error.message && error.message.includes("Too Many Requests"));
+
+    if (!isNetworkError && !isTelegramRetryable) throw error;
+
+    let waitTime = delay;
+    // Respect Telegram's retry_after parameter
+    if (error?.response?.parameters?.retry_after) {
+      waitTime = (error.response.parameters.retry_after + 1) * 1000;
+    }
 
     console.warn(
-      `Operation failed, retrying in ${delay}ms... (${retries} attempts left). Error: ${error.message}`
+      `Operation failed, retrying in ${waitTime}ms... (${retries} attempts left). Error: ${error.message}`
     );
-    await wait(delay);
+    await wait(waitTime);
     return withRetry(fn, retries - 1, delay * 2);
   }
 }

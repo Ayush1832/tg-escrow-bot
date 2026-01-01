@@ -199,10 +199,10 @@ async function joinRequestHandler(ctx) {
       ) {
         // Proceed as if approved
       } else {
-        console.error(
-          `Failed to approve join request for user ${user.id} in group ${chatId}:`,
-          approveError
-        );
+        // console.error(
+        //   `Failed to approve join request for user ${user.id} in group ${chatId}:`,
+        //   approveError
+        // );
         // Don't save approval if the API call failed (and it wasn't because they're already in)
         return;
       }

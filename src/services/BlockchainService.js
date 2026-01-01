@@ -12,6 +12,8 @@ const ESCROW_VAULT_ABI = [
   "function release(address to, uint256 amount) external",
   "function refund(address to, uint256 amount) external",
   "function withdrawToken(address erc20Token, address to) external",
+  "function withdrawFees() external",
+  "function accumulatedFees() view returns (uint256)",
 ];
 
 const ERC20_ABI = [
@@ -200,6 +202,107 @@ class BlockchainService {
 
     const tx = await vault.refund(to, amount, { nonce: nonce });
     return await tx.wait();
+  }
+
+  async withdrawFees(token = "USDT", network = "BSC") {
+    try {
+      const vault = await this.getVaultForNetwork(network, token);
+      const wallet = this.wallets[network.toUpperCase()];
+      const provider = this.providers[network.toUpperCase()];
+
+      let nonce;
+      try {
+        nonce = await provider.getTransactionCount(wallet.address, "latest");
+      } catch (nonceError) {
+        try {
+          nonce = await provider.getTransactionCount(wallet.address);
+        } catch (fallbackError) {
+          throw new Error(`Failed to get nonce: ${fallbackError.message}`);
+        }
+      }
+
+      // Check balance before attempting withdrawal
+      const accumulatedFees = await vault.accumulatedFees();
+
+      // Get contract address and check actual token balance
+      const contractAddress = await vault.getAddress();
+      const tokenAddress = await vault.token();
+      const tokenContract = new ethers.Contract(
+        tokenAddress,
+        ["function balanceOf(address) view returns (uint256)"],
+        provider
+      );
+
+      const actualBalance = await tokenContract.balanceOf(contractAddress);
+
+      if (actualBalance < accumulatedFees) {
+        const decimals = this.getTokenDecimals(token, network);
+        const accStr = ethers.formatUnits(accumulatedFees, decimals);
+        const balStr = ethers.formatUnits(actualBalance, decimals);
+
+        throw new Error(
+          `Validation Error: Contract balance (${balStr}) is less than accumulated fees (${accStr}). Withdrawal would fail.`
+        );
+      }
+
+      const tx = await vault.withdrawFees({ nonce });
+      const receipt = await tx.wait();
+
+      return {
+        success: true,
+        transactionHash: receipt.hash || receipt.transactionHash,
+        blockNumber: receipt.blockNumber,
+      };
+    } catch (error) {
+      const errorMessage = error?.message || "";
+      const errorData = JSON.stringify(error);
+
+      if (
+        errorMessage.includes("BEP20: transfer amount exceeds balance") ||
+        errorData.includes("BEP20: transfer amount exceeds balance")
+      ) {
+        console.warn(
+          `⚠️ Transaction Failed: Contract likely has insufficient balance (transfer exceeds balance).`
+        );
+        // Do not log full stack trace
+        throw error;
+      }
+
+      console.error(
+        `Error withdrawing fees for ${token} on ${network}:`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  async getFeeSettings(token = "USDT", network = "BSC") {
+    try {
+      const vault = await this.getVaultForNetwork(network, token);
+
+      const [wallet1, wallet2, feePercent, accumulated] = await Promise.all([
+        vault.feeWallet1(),
+        vault.feeWallet2(),
+        vault.feePercent(),
+        vault.accumulatedFees(),
+      ]);
+
+      return {
+        wallet1,
+        wallet2,
+        feePercent: Number(feePercent),
+        accumulated: ethers.formatUnits(
+          accumulated,
+          this.getTokenDecimals(token, network)
+        ),
+      };
+    } catch (error) {
+      console.error(
+        `Error fetching fee settings for ${token} on ${network}:`,
+        error
+      );
+      throw error;
+    }
   }
 
   async getTokenTransactions(token, network, address, startBlock = 0) {
@@ -522,8 +625,12 @@ class BlockchainService {
           error?.message.includes("could not coalesce error")) ||
         (error?.shortMessage &&
           error?.shortMessage.includes("could not coalesce error")) ||
+        // Check nested error structures often returned by RPCs
         error?.error?.message === "already known" ||
-        error?.info?.error?.message === "already known";
+        error?.info?.error?.message?.includes("nonce") ||
+        error?.info?.error?.message?.includes("already known") ||
+        (error?.error?.code === -32000 &&
+          error?.error?.message?.includes("already known"));
 
       if (isNonceError) {
         console.warn(
@@ -562,8 +669,22 @@ class BlockchainService {
           `Error releasing funds: Insufficient gas balance on ${network}. Details: ${providerMessage}`
         );
       } else {
-        console.error("Error releasing funds:", error);
       }
+
+      const errorMessage = error?.message || "";
+      const errorData = JSON.stringify(error);
+
+      if (
+        errorMessage.includes("BEP20: transfer amount exceeds balance") ||
+        errorData.includes("BEP20: transfer amount exceeds balance")
+      ) {
+        console.warn(
+          `⚠️ Release Failed: Contract likely has insufficient balance (transfer exceeds balance).`
+        );
+        throw error;
+      }
+
+      console.error("Error releasing funds:", error);
       throw error;
     }
   }
@@ -715,9 +836,22 @@ class BlockchainService {
         console.error(
           `Error refunding funds: Insufficient gas balance on ${network}. Details: ${providerMessage}`
         );
-      } else {
-        console.error("Error refunding funds:", error);
       }
+
+      const errorMessage = error?.message || "";
+      const errorData = JSON.stringify(error);
+
+      if (
+        errorMessage.includes("BEP20: transfer amount exceeds balance") ||
+        errorData.includes("BEP20: transfer amount exceeds balance")
+      ) {
+        console.warn(
+          `⚠️ Refund Failed: Contract likely has insufficient balance (transfer exceeds balance).`
+        );
+        throw error;
+      }
+
+      console.error("Error refunding funds:", error);
       throw error;
     }
   }

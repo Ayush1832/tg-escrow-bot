@@ -375,6 +375,8 @@ class EscrowBot {
   }
 
   setupHandlers() {
+    adminHandler(this.bot);
+
     this.bot.command("cancel", async (ctx) => {
       try {
         const chat = ctx.chat;
@@ -999,9 +1001,10 @@ class EscrowBot {
             } catch (e) {
               const desc = e?.response?.description || e?.message || "";
               // Ignore cases where message is already gone or id is invalid
+              const descLower = desc.toLowerCase();
               if (
-                !desc.includes("message identifier is not specified") &&
-                !desc.includes("message to delete not found")
+                !descLower.includes("message identifier is not specified") &&
+                !descLower.includes("message to delete not found")
               ) {
                 console.error("Failed to delete transaction hash message:", e);
               }
