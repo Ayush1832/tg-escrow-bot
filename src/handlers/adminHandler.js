@@ -164,7 +164,6 @@ async function adminGroupPool(ctx) {
 ⚡ *Commands:*
 • \`/admin_pool_add <groupId>\` - Add group to pool
 • \`/admin_pool_list\` - List all groups
-• \`/admin_pool_delete_all\` - Delete all groups from pool
     `;
 
     await ctx.reply(message);
@@ -2119,7 +2118,8 @@ function setupAdminActions(bot) {
         { parse_mode: "HTML" }
       );
 
-      // Log removed
+      const blockchainService = new BlockchainService();
+      await blockchainService.initialize();
       const result = await blockchainService.withdrawFees(token, network);
 
       let msg = `✅ <b>Fees Withdrawn Successfully!</b>\n\n`;

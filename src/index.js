@@ -647,26 +647,11 @@ class EscrowBot {
         }
 
         let txHash = text;
-        const urlPatterns = [
-          /bscscan\.com\/tx\/(0x[a-fA-F0-9]{64})/i,
-          /tronscan\.org\/#\/transaction\/([a-fA-F0-9]{64})/i,
-          /solscan\.io\/tx\/([a-fA-F0-9]{64,})/i,
-          /etherscan\.io\/tx\/(0x[a-fA-F0-9]{64})/i,
-        ];
-
-        for (const pattern of urlPatterns) {
-          const match = text.match(pattern);
-          if (match) {
-            txHash = match[1];
-            if (
-              !txHash.startsWith("0x") &&
-              (pattern.source.includes("bscscan") ||
-                pattern.source.includes("etherscan"))
-            ) {
-              txHash = "0x" + txHash;
-            }
-            break;
-          }
+        // Relaxed hash extraction: matches any 64-char hex string
+        // Handles full URLs, raw hashes, and variations
+        const hashMatch = text.match(/(?:0x)?([a-fA-F0-9]{64})/);
+        if (hashMatch) {
+          txHash = hashMatch[1];
         }
 
         const txChainUpper = (escrow.chain || "").toUpperCase();
@@ -825,9 +810,18 @@ class EscrowBot {
             BlockchainService.providers["BSC"];
 
           try {
-            const tx = await executeRPCWithRetry(async () => {
-              return await provider.getTransaction(txHash);
-            });
+            let tx = null;
+            // Retry loop to handle RPC indexing delays (wait up to ~6s)
+            for (let attempt = 0; attempt < 3; attempt++) {
+              try {
+                tx = await executeRPCWithRetry(async () => {
+                  return await provider.getTransaction(txHash);
+                });
+                if (tx) break; // Found it
+              } catch (ignore) {}
+              // Wait 2s before retrying
+              if (attempt < 2) await new Promise((r) => setTimeout(r, 2000));
+            }
 
             if (!tx) {
               await ctx.reply(
@@ -1933,17 +1927,20 @@ This is the current available balance for this trade.`;
           return ctx.reply("❌ This command can only be used in a group chat.");
         }
 
-        const topUsers = await UserStatsService.getLeaderboard(5);
-        const { topBuyers, topSellers } =
-          await UserStatsService.getTopBuyersAndSellers(3);
-        const leaderboardMessage = UserStatsService.formatLeaderboard(
-          topUsers,
-          {
-            topBuyers,
-            topSellers,
-          }
-        );
-        await ctx.reply(leaderboardMessage, { parse_mode: "HTML" });
+        const stats = await UserStatsService.getHighLevelStats();
+        const message = UserStatsService.formatMainLeaderboard(stats);
+
+        await ctx.reply(message, {
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "Top Buyers", callback_data: "leaderboard_buyers" },
+                { text: "Top Sellers", callback_data: "leaderboard_sellers" },
+              ],
+            ],
+          },
+        });
       } catch (error) {
         console.error("Error in leaderboard command:", error);
         ctx.reply("❌ Unable to fetch leaderboard right now.");

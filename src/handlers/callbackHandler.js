@@ -4102,6 +4102,61 @@ Approved By: ${
       await executeWithdrawExcess(ctx);
 
       return;
+    } else if (callbackData === "leaderboard_buyers") {
+      const topBuyers = await UserStatsService.getTopBuyers(5);
+      const message = UserStatsService.formatTopBuyers(topBuyers);
+
+      await ctx.editMessageText(message, {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: "🔙 Back to Leaderboard",
+                callback_data: "leaderboard_main",
+              },
+            ],
+          ],
+        },
+      });
+      await safeAnswerCbQuery(ctx);
+      return;
+    } else if (callbackData === "leaderboard_sellers") {
+      const topSellers = await UserStatsService.getTopSellers(5);
+      const message = UserStatsService.formatTopSellers(topSellers);
+
+      await ctx.editMessageText(message, {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: "🔙 Back to Leaderboard",
+                callback_data: "leaderboard_main",
+              },
+            ],
+          ],
+        },
+      });
+      await safeAnswerCbQuery(ctx);
+      return;
+    } else if (callbackData === "leaderboard_main") {
+      const stats = await UserStatsService.getHighLevelStats();
+      const message = UserStatsService.formatMainLeaderboard(stats);
+
+      await ctx.editMessageText(message, {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: "Top Buyers", callback_data: "leaderboard_buyers" },
+              { text: "Top Sellers", callback_data: "leaderboard_sellers" },
+            ],
+          ],
+        },
+      });
+      await safeAnswerCbQuery(ctx);
+      return;
     }
   } catch (error) {
     console.error("Error in callback handler:", error);
