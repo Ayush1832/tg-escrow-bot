@@ -829,6 +829,22 @@ Once you’ve sent the amount, tap the button below.`;
         return;
       }
 
+      // Guard: Check if we are past the chain selection step
+      if (
+        escrow.tradeDetailsStep !== "step4_chain_coin" &&
+        escrow.tradeDetailsStep !== "step3_payment" // Allow re-select if coming from payment
+      ) {
+        // If we are already at address step or completed, ignore this
+        if (
+          ["step5_buyer_address", "step6_seller_address", "completed"].includes(
+            escrow.tradeDetailsStep
+          )
+        ) {
+          await safeAnswerCbQuery(ctx, "✅ Step already completed.");
+          return;
+        }
+      }
+
       // Only buyer or seller can select
       if (escrow.buyerId !== userId && escrow.sellerId !== userId) {
         return safeAnswerCbQuery(ctx, "❌ Only buyer or seller can select.");
@@ -907,9 +923,36 @@ Once you’ve sent the amount, tap the button below.`;
         return;
       }
 
+      // Guard: Check if we are past the coin selection step
+      if (escrow.tradeDetailsStep !== "step4_chain_coin") {
+        if (
+          ["step5_buyer_address", "step6_seller_address", "completed"].includes(
+            escrow.tradeDetailsStep
+          )
+        ) {
+          await safeAnswerCbQuery(ctx, "✅ Step already completed.");
+          return;
+        }
+      }
+
       // Only buyer or seller can select
       if (escrow.buyerId !== userId && escrow.sellerId !== userId) {
         return safeAnswerCbQuery(ctx, "❌ Only buyer or seller can select.");
+      }
+
+      // Validate coin against chain
+      const currentChain = (escrow.chain || "BSC").toUpperCase();
+      const validCoins = currentChain === "TRON" ? ["USDT"] : ["USDT", "USDC"];
+
+      if (!validCoins.includes(coin)) {
+        await safeAnswerCbQuery(
+          ctx,
+          `❌ ${coin} is not supported on ${currentChain}`
+        );
+        console.warn(
+          `Invalid coin selection blocked: ${coin} on ${currentChain} (Escrow: ${escrow.escrowId})`
+        );
+        return;
       }
 
       escrow.token = coin;

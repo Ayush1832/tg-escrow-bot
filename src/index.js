@@ -1968,6 +1968,10 @@ This is the current available balance for this trade.`;
       adminResetForce,
       adminResetAllGroups,
       adminWithdrawExcess,
+      adminWithdrawFees,
+      adminWithdrawFeesBscUsdt,
+      adminWithdrawFeesBscUsdc,
+      setupAdminActions,
     } = adminHandler;
     this.bot.command("admin_stats", adminStats);
     this.bot.command("admin_pool", adminGroupPool);
@@ -1986,6 +1990,12 @@ This is the current available balance for this trade.`;
     this.bot.command("admin_reset_force", adminResetForce);
     this.bot.command("admin_reset_all_groups", adminResetAllGroups);
     this.bot.command("admin_withdraw_bsc_usdt", adminWithdrawExcess);
+    this.bot.command("withdraw_fees", adminWithdrawFees);
+    this.bot.command("withdraw_fees_bsc_usdt", adminWithdrawFeesBscUsdt);
+    this.bot.command("withdraw_fees_bsc_usdc", adminWithdrawFeesBscUsdc);
+
+    // Setup admin actions (callbacks)
+    setupAdminActions(this.bot);
 
     this.bot.on("callback_query", callbackHandler);
     this.bot.on("chat_join_request", joinRequestHandler);

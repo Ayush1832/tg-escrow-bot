@@ -2020,64 +2020,91 @@ All excess funds have been withdrawn successfully.`;
   }
 }
 
-module.exports = (bot) => {
-  bot.command("withdraw_fees", async (ctx) => {
-    if (!isAdmin(ctx)) return;
+/**
+ * Admin command to withdraw excess USDT from BSC escrow contracts
+ */
+async function adminWithdrawBscUsdt(ctx) {
+  await executeWithdrawExcess(ctx);
+}
 
-    const args = ctx.message.text.split(" ").slice(1);
-    const network = (args[0] || "BSC").toUpperCase();
-    const token = (args[1] || "USDT").toUpperCase();
+/**
+ * Generic handler for checking and withdrawing accumulated fees
+ */
+const handleWithdrawFees = async (ctx, networkInput, tokenInput) => {
+  if (!isAdmin(ctx)) return;
 
-    try {
-      const blockchainService = new BlockchainService();
-      await blockchainService.initialize();
+  const network = networkInput ? networkInput.toUpperCase() : "BSC";
+  const token = tokenInput ? tokenInput.toUpperCase() : "USDT";
 
-      const settings = await blockchainService.getFeeSettings(token, network);
-      const accumulated = settings.accumulated;
+  try {
+    const blockchainService = new BlockchainService();
+    await blockchainService.initialize();
 
-      if (parseFloat(accumulated) === 0) {
-        return ctx.reply(`⚠️ No fees accumulated for ${token} on ${network}.`);
-      }
+    const settings = await blockchainService.getFeeSettings(token, network);
+    const accumulated = settings.accumulated;
 
-      const wallet1Share = (parseFloat(accumulated) * 0.7).toFixed(6);
-      const wallet2Share = (parseFloat(accumulated) * 0.3).toFixed(6);
-
-      let msg = `💰 <b>Withdraw Fee Confirmation</b>\n\n`;
-      msg += `<b>Chain:</b> ${network}\n`;
-      msg += `<b>Token:</b> ${token}\n`;
-      msg += `<b>Total Fees:</b> ${accumulated}\n\n`;
-      msg += `<b>Wallet 1:</b> <code>${settings.wallet1}</code>\n`;
-      msg += `├ Share: 70%\n`;
-      msg += `└ Amount: ${wallet1Share}\n\n`;
-      msg += `<b>Wallet 2:</b> <code>${settings.wallet2}</code>\n`;
-      msg += `├ Share: 30%\n`;
-      msg += `└ Amount: ${wallet2Share}\n\n`;
-      msg += `❓ Do you confirm this withdrawal?`;
-
-      await ctx.reply(msg, {
-        parse_mode: "HTML",
-        reply_markup: {
-          inline_keyboard: [
-            [
-              {
-                text: "✅ Yes, Withdraw",
-                callback_data: `confirm_withdraw_${network}_${token}`,
-              },
-              {
-                text: "❌ Cancel",
-                callback_data: `cancel_withdraw`,
-              },
-            ],
-          ],
-        },
-      });
-    } catch (error) {
-      console.error("Fee check error:", error);
-      const errParams = error?.message || "Unknown error";
-      await ctx.reply(`❌ Failed to fetch fee details: ${errParams}`);
+    if (parseFloat(accumulated) === 0) {
+      return ctx.reply(`⚠️ No fees accumulated for ${token} on ${network}.`);
     }
-  });
 
+    const wallet1Share = (parseFloat(accumulated) * 0.7).toFixed(6);
+    const wallet2Share = (parseFloat(accumulated) * 0.3).toFixed(6);
+
+    let msg = `💰 <b>Withdraw Fee Confirmation</b>\n\n`;
+    msg += `<b>Chain:</b> ${network}\n`;
+    msg += `<b>Token:</b> ${token}\n`;
+    msg += `<b>Total Fees:</b> ${accumulated}\n\n`;
+    msg += `<b>Wallet 1:</b> <code>${settings.wallet1}</code>\n`;
+    msg += `├ Share: 70%\n`;
+    msg += `└ Amount: ${wallet1Share}\n\n`;
+    msg += `<b>Wallet 2:</b> <code>${settings.wallet2}</code>\n`;
+    msg += `├ Share: 30%\n`;
+    msg += `└ Amount: ${wallet2Share}\n\n`;
+    msg += `❓ Do you confirm this withdrawal?`;
+
+    await ctx.reply(msg, {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: "✅ Yes, Withdraw",
+              callback_data: `confirm_withdraw_${network}_${token}`,
+            },
+            {
+              text: "❌ Cancel",
+              callback_data: `cancel_withdraw`,
+            },
+          ],
+        ],
+      },
+    });
+  } catch (error) {
+    console.error("Fee check error:", error);
+    const errParams = error?.message || "Unknown error";
+    await ctx.reply(`❌ Failed to fetch fee details: ${errParams}`);
+  }
+};
+
+async function adminWithdrawFees(ctx) {
+  const args = ctx.message.text.split(" ").slice(1);
+  await handleWithdrawFees(ctx, args[0], args[1]);
+}
+
+async function adminWithdrawFeesBscUsdt(ctx) {
+  await handleWithdrawFees(ctx, "BSC", "USDT");
+}
+
+async function adminWithdrawFeesBscUsdc(ctx) {
+  await handleWithdrawFees(ctx, "BSC", "USDC");
+}
+
+// Action handlers need to be registered in the bot setup or exported if index.js handles them
+// implementation_plan calls for registering commands in index.js, but actions are usually handled via regex in main bot.
+// Since we are changing to object export, we can't register actions here unless we expose a setup function OR index.js does it.
+// We will export a setup function for actions/listeners AND the individual commands.
+
+function setupAdminActions(bot) {
   bot.action(/^confirm_withdraw_([^_]+)_([^_]+)$/, async (ctx) => {
     if (!isAdmin(ctx)) return ctx.answerCbQuery("Unauthorized");
 
@@ -2092,8 +2119,7 @@ module.exports = (bot) => {
         { parse_mode: "HTML" }
       );
 
-      const blockchainService = new BlockchainService();
-      await blockchainService.initialize();
+      // Log removed
       const result = await blockchainService.withdrawFees(token, network);
 
       let msg = `✅ <b>Fees Withdrawn Successfully!</b>\n\n`;
@@ -2115,30 +2141,34 @@ module.exports = (bot) => {
     await ctx.answerCbQuery("Cancelled");
     await ctx.deleteMessage();
   });
+}
 
-  bot.command("admin_help", adminHelp);
-  bot.command("admin_stats", adminStats);
-  bot.command("admin_pool", adminGroupPool);
-  bot.command("admin_pool_add", adminPoolAdd);
-  bot.command("admin_pool_list", adminPoolList);
-  bot.command("admin_pool_delete", adminPoolDelete);
-  bot.command("admin_pool_delete_all", adminPoolDeleteAll);
-  bot.command("admin_address_pool", adminAddressPool);
-  bot.command("admin_init_addresses", adminInitAddresses);
-  bot.command("admin_cleanup_addresses", adminCleanupAddresses);
-  bot.command("admin_warn_inactive", adminWarnInactive);
-  bot.command("admin_remove_inactive", adminRemoveInactive);
+module.exports = {
+  adminStats,
+  adminGroupPool,
+  adminPoolAdd,
+  adminPoolList,
+  adminPoolDelete,
+  adminPoolDeleteAll,
+  adminAddressPool,
+  adminInitAddresses,
+  adminCleanupAddresses,
+  adminWarnInactive,
+  adminRemoveInactive,
+  adminTradeStats,
+  adminRecentTrades,
+  adminExportTrades,
+  adminGroupReset,
+  adminResetForce,
+  adminResetAllGroups,
+  adminWithdrawBscUsdt: adminWithdrawBscUsdt, // Legacy
+  adminWithdrawExcess: adminWithdrawBscUsdt, // Alias for index.js compatibility
 
-  // Stats commands
-  bot.command("admin_trade_stats", adminTradeStats);
-  bot.command("admin_recent_trades", adminRecentTrades);
-  bot.command("admin_export_trades", adminExportTrades);
+  // New Commands
+  adminWithdrawFees,
+  adminWithdrawFeesBscUsdt,
+  adminWithdrawFeesBscUsdc,
 
-  // Group reset commands
-  bot.command("admin_group_reset", adminGroupReset);
-  bot.command("admin_reset_force", adminResetForce);
-  bot.command("admin_reset_all_groups", adminResetAllGroups);
-
-  // Withdraw excess funds
-  bot.command("admin_withdraw_bsc_usdt", adminWithdrawBscUsdt);
+  // Setup helper
+  setupAdminActions,
 };
