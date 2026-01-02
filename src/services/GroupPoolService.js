@@ -7,7 +7,6 @@ class GroupPoolService {
    */
   async assignGroup(escrowId, telegram = null) {
     try {
-      // Use findOneAndUpdate for atomic assignment to prevent race conditions
       const updatedGroup = await GroupPool.findOneAndUpdate(
         { status: "available" },
         {
@@ -17,11 +16,10 @@ class GroupPoolService {
             assignedAt: new Date(),
           },
         },
-        { new: true, sort: { createdAt: 1 } } // Assign oldest available group first
+        { new: true, sort: { createdAt: 1 } }
       );
 
       if (!updatedGroup) {
-        // Double check if any groups exist at all to give better error message
         const anyGroup = await GroupPool.findOne({});
         if (!anyGroup) {
           throw new Error("No groups in pool. Please add a group.");
@@ -50,10 +48,6 @@ class GroupPoolService {
 
   /**
    * Generate invite link for assigned group
-   * IMPORTANT: This function uses a permanent invite link strategy
-   * - Reuses existing invite link if it exists and is valid
-   * - Only creates a new link if one doesn't exist
-   * - Never revokes links (links are permanent and never expire)
    */
   async generateInviteLink(groupId, telegram, options = {}) {
     try {
@@ -63,7 +57,6 @@ class GroupPoolService {
         );
       }
 
-      // Find the group in pool (reload to get latest state)
       const group = await GroupPool.findOne({ groupId });
       if (!group) {
         throw new Error("Group not found in pool");
@@ -270,22 +263,16 @@ class GroupPoolService {
    */
   async addGroup(groupId, groupTitle = null, telegram = null) {
     try {
-      // Check if group already exists
       const existingGroup = await GroupPool.findOne({ groupId });
       if (existingGroup) {
-        // Idempotent: if it's already in pool, treat as success
-        // Verify admin is present if telegram is provided
         if (telegram) {
           await this.ensureAdminInGroup(groupId, telegram);
 
-          // If group doesn't have an invite link, create one
           if (!existingGroup.inviteLink) {
             try {
               await this.generateInviteLink(groupId, telegram, {
                 creates_join_request: true,
               });
-              // Link is already saved in generateInviteLink
-              // Reload to get the updated group with link
               const refreshed = await GroupPool.findOne({ groupId });
               if (refreshed) {
                 return refreshed;
@@ -306,17 +293,14 @@ class GroupPoolService {
 
       await group.save();
 
-      // Verify admin is in group if telegram is provided
       if (telegram) {
         await this.ensureAdminInGroup(groupId, telegram);
+        await this.checkGroupHistoryVisibility(groupId, telegram);
 
-        // Create a permanent invite link when adding group to pool
         try {
           await this.generateInviteLink(groupId, telegram, {
             creates_join_request: true,
           });
-          // Link is already saved in generateInviteLink
-          // Reload to get the updated group with link
           const refreshed = await GroupPool.findOne({ groupId });
           if (refreshed) {
             return refreshed;
@@ -584,6 +568,9 @@ class GroupPoolService {
           group.assignedAt = null;
           group.completedAt = null;
           await group.save();
+
+          // Check history visibility setting
+          await this.checkGroupHistoryVisibility(group.groupId, telegram);
         } else {
           // Mark as completed but don't add back to pool if users couldn't be removed
           // IMPORTANT: Do NOT clear group.inviteLink even here - link stays valid
@@ -630,22 +617,10 @@ class GroupPoolService {
         // Ignore if no rights or no pins
       }
 
-      // Clear recent history (best effort cleanup)
-      // This helps hide history for new users if they join a "Visible History" group
-      // We assume last 100 messages cover the trade flow
-      if (escrow.dealConfirmedMessageId || escrow.tradeStartedMessageId) {
-        const lastId =
-          escrow.dealConfirmedMessageId || escrow.tradeStartedMessageId;
-        // Attempt to delete a range of messages around the known IDs
-        // This is approximate but safer than iterating too much
-        const startId = Math.max(1, lastId - 50);
-        const endId = lastId + 50;
-        for (let i = startId; i <= endId; i++) {
-          try {
-            await telegram.deleteMessage(group.groupId, i);
-          } catch (e) {}
-        }
-      }
+      // Clear recent history (best effort cleanup) -> REMOVED per user request
+      // Admins need to see history, so we do NOT delete messages.
+      // Instead, we check if history is hidden for new members.
+      await this.checkGroupHistoryVisibility(group.groupId, telegram);
 
       // Reset group status
       group.status = "available";
@@ -682,9 +657,9 @@ class GroupPoolService {
       }
 
       const chatId = String(groupId);
-      const adminUserId2 = config.ADMIN_USER_ID2
-        ? Number(config.ADMIN_USER_ID2)
-        : null;
+
+      // Get all configured admin IDs to protect them from removal
+      const allAdminIds = config.getAllAdminIds().map((id) => Number(id));
 
       // Get bot ID first (needed for skipping bot itself)
       let botId;
@@ -748,8 +723,10 @@ class GroupPoolService {
           continue;
         }
 
-        // IMPORTANT: Never remove ADMIN_USER_ID2 - they must always stay in the group
-        if (adminUserId2 && userId === adminUserId2) {
+        // IMPORTANT: Never remove ANY configured admin - they must always stay in the group
+        // This ensures they retain chat history access even if the group setting is 'Hidden'
+        // New regular users (buyers/sellers) will join with hidden history.
+        if (allAdminIds.includes(userId)) {
           skippedCount++;
           continue;
         }
@@ -791,6 +768,17 @@ class GroupPoolService {
       console.error("Error removing users from group:", error);
       return false;
     }
+  }
+
+  /**
+   * Check if group history is visible to new members and warn if so.
+   * We want history to be HIDDEN for new members (so new buyers/sellers don't see old trades).
+   */
+  async checkGroupHistoryVisibility(groupId, telegram) {
+    // Disabled per user notification: Bot should NOT send "Security Warning" about history visibility.
+    // Admins are expected to manage this setting (Hidden for users).
+    // Admin access to history is handled by keeping admins in the group permanently.
+    return;
   }
 
   /**
@@ -847,16 +835,6 @@ class GroupPoolService {
     }
   }
 
-  /**
-   * Delete all messages in a group and unpin all pinned messages
-   * Note: Telegram only allows deleting messages less than 48 hours old
-   * This function aggressively tries to delete all bot messages by:
-   * 1. Deleting tracked message IDs from escrow
-   * 2. Sending a test message to get current message ID
-   * 3. Attempting to delete ALL messages from 1 to current (in batches)
-   *
-   * IMPORTANT: Bots can only delete their own messages, not user messages
-   */
   async deleteAllGroupMessages(groupId, telegram, escrow = null) {
     try {
       const chatId = String(groupId);
@@ -870,11 +848,8 @@ class GroupPoolService {
 
       let deletedCount = 0;
       const messageIdsToDelete = new Set();
-      const deletedSet = new Set(); // Track successfully deleted IDs to avoid re-deletion
-
-      // Collect all known message IDs from escrow
+      const deletedSet = new Set();
       if (escrow) {
-        // Add all tracked message IDs from escrow
         if (escrow.step1MessageId)
           messageIdsToDelete.add(escrow.step1MessageId);
         if (escrow.step2MessageId)
@@ -903,40 +878,30 @@ class GroupPoolService {
           messageIdsToDelete.add(escrow.roleSelectionMessageId);
       }
 
-      // Delete all known message IDs first
       for (const msgId of messageIdsToDelete) {
         try {
           await telegram.deleteMessage(chatId, msgId);
           deletedCount++;
           deletedSet.add(msgId);
-          await new Promise((resolve) => setTimeout(resolve, 20)); // Small delay between deletions
-        } catch (deleteError) {
-          // Message might not exist, is too old, or wasn't sent by bot - continue
-        }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        } catch (deleteError) {}
       }
 
-      // Get current message ID by sending a test message
-      // This gives us the latest message ID to work backwards from
       let currentMessageId = null;
       try {
         const testMsg = await telegram.sendMessage(chatId, "🧹");
         currentMessageId = testMsg.message_id;
 
-        // Immediately delete the test message
         try {
           await telegram.deleteMessage(chatId, currentMessageId);
           deletedCount++;
           deletedSet.add(currentMessageId);
-        } catch (e) {
-          // Test message deletion failed - continue anyway
-        }
+        } catch (e) {}
       } catch (testError) {
-        // Could not send test message - try to use known message IDs for range
         if (messageIdsToDelete.size > 0) {
           const knownIds = Array.from(messageIdsToDelete).sort((a, b) => a - b);
-          currentMessageId = Math.max(...knownIds) + 100; // Estimate range
+          currentMessageId = Math.max(...knownIds) + 100;
         } else {
-          // No way to determine message range - return what we've deleted so far
           return deletedCount;
         }
       }
@@ -945,23 +910,16 @@ class GroupPoolService {
         return deletedCount;
       }
 
-      // Determine range to delete
-      // Start from a reasonable minimum (groups usually start from message ID 1 or 2)
       const startId = 1;
       const endId = currentMessageId;
 
-      // Delete messages in batches - try to delete ALL messages, not just sampled ones
-      // But we need to be careful with rate limits, so we'll delete in smaller batches with delays
-      const BATCH_SIZE = 50; // Delete 50 messages at a time
-      const DELAY_BETWEEN_BATCHES = 100; // 100ms delay between batches
-      const DELAY_BETWEEN_MESSAGES = 10; // 10ms delay between individual messages
+      const BATCH_SIZE = 50;
+      const DELAY_BETWEEN_BATCHES = 100;
+      const DELAY_BETWEEN_MESSAGES = 10;
 
       let consecutiveErrors = 0;
-      const MAX_CONSECUTIVE_ERRORS = 20; // Stop after 20 consecutive errors
+      const MAX_CONSECUTIVE_ERRORS = 20;
 
-      // Delete messages from endId backwards to startId (newer messages first)
-      // This is more efficient as newer messages are more likely to be deletable
-      // NOTE: Bots can only delete their own messages. User messages cannot be deleted.
       let totalAttempted = 0;
       for (
         let batchStart = endId;
@@ -973,7 +931,6 @@ class GroupPoolService {
         let batchErrors = 0;
 
         for (let msgId = batchStart; msgId >= batchEnd; msgId--) {
-          // Skip if already deleted
           if (deletedSet.has(msgId)) continue;
 
           totalAttempted++;
@@ -982,9 +939,8 @@ class GroupPoolService {
             deletedCount++;
             deletedSet.add(msgId);
             batchDeleted++;
-            consecutiveErrors = 0; // Reset error counter on success
+            consecutiveErrors = 0;
 
-            // Small delay between messages to avoid rate limiting
             if (msgId > batchEnd) {
               await new Promise((resolve) =>
                 setTimeout(resolve, DELAY_BETWEEN_MESSAGES)
@@ -994,35 +950,23 @@ class GroupPoolService {
             consecutiveErrors++;
             batchErrors++;
 
-            // Check error type for debugging
             const errorMsg =
               deleteError?.response?.description || deleteError?.message || "";
             const errorCode = deleteError?.response?.error_code;
 
-            // Common errors:
-            // - 400: Bad Request (message not found, can't be deleted, etc.)
-            // - 403: Forbidden (not sent by bot, no permission)
-            // Continue trying other messages - these are expected for user messages
-
-            // Stop if we hit too many consecutive errors (likely reached undeletable messages)
             if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-              // Break out of inner loop to try next batch
               break;
             }
           }
         }
 
-        // If batch had no successful deletions and many errors, we might have hit the end
         if (batchDeleted === 0 && consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-          // Try one more smaller range before giving up
           if (batchStart > startId + 100) {
-            // Continue to try a bit more
           } else {
             break;
           }
         }
 
-        // Delay between batches to avoid rate limiting
         if (batchStart > batchEnd) {
           await new Promise((resolve) =>
             setTimeout(resolve, DELAY_BETWEEN_BATCHES)

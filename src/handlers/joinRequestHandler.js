@@ -74,6 +74,25 @@ async function joinRequestHandler(ctx) {
           console.log(
             `Admin ${user.id} approved to join group ${chatId} (no escrow found).`
           );
+          // Auto-promote admin
+          try {
+            await ctx.telegram.promoteChatMember(chatId, user.id, {
+              is_anonymous: false,
+              can_manage_chat: true,
+              can_delete_messages: true,
+              can_manage_video_chats: true,
+              can_restrict_members: true,
+              can_promote_members: true,
+              can_change_info: true,
+              can_invite_users: true,
+              can_pin_messages: true,
+            });
+          } catch (promoteError) {
+            console.error(
+              `Failed to promote admin ${user.id} in group ${chatId}:`,
+              promoteError.message
+            );
+          }
         } catch (approveError) {
           console.error(
             `Failed to approve admin ${user.id} for group ${chatId}:`,
@@ -142,6 +161,25 @@ async function joinRequestHandler(ctx) {
           console.log(
             `Admin ${user.id} approved to join group ${chatId} for escrow ${escrow.escrowId}.`
           );
+          // Auto-promote admin
+          try {
+            await ctx.telegram.promoteChatMember(chatId, user.id, {
+              is_anonymous: false,
+              can_manage_chat: true,
+              can_delete_messages: true,
+              can_manage_video_chats: true,
+              can_restrict_members: true,
+              can_promote_members: true,
+              can_change_info: true,
+              can_invite_users: true,
+              can_pin_messages: true,
+            });
+          } catch (promoteError) {
+            console.error(
+              `Failed to promote admin ${user.id} in group ${chatId}:`,
+              promoteError.message
+            );
+          }
         } catch (approveError) {
           console.error(
             `Failed to approve admin ${user.id} for group ${chatId}:`,

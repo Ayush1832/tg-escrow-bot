@@ -630,19 +630,21 @@ class BlockchainService {
         error?.info?.error?.message?.includes("nonce") ||
         error?.info?.error?.message?.includes("already known") ||
         (error?.error?.code === -32000 &&
-          error?.error?.message?.includes("already known"));
+          error?.error?.message?.includes("already known")) ||
+        JSON.stringify(error).includes("already known") ||
+        JSON.stringify(error).includes("nonce");
 
       if (isNonceError) {
         console.warn(
-          `⚠️ Nonce error detected in releaseFunds. Retrying with fresh nonce...`
+          `⚠️ Nonce error detected in releaseFunds. Retrying with pending nonce...`
         );
         try {
-          const freshNonce = await provider.getTransactionCount(
+          const pendingNonce = await provider.getTransactionCount(
             wallet.address,
-            "latest"
+            "pending"
           );
           const tx = await vaultContract.release(buyerAddress, amountWei, {
-            nonce: freshNonce + 1, // Try incrementing if strictly needed, but fresh fetch usually enough
+            nonce: pendingNonce,
           });
           const receipt = await tx.wait();
           return {
@@ -799,19 +801,22 @@ class BlockchainService {
         (error?.shortMessage &&
           error?.shortMessage.includes("could not coalesce error")) ||
         error?.error?.message === "already known" ||
-        error?.info?.error?.message === "already known";
+        error?.error?.message === "already known" ||
+        error?.info?.error?.message === "already known" ||
+        JSON.stringify(error).includes("already known") ||
+        JSON.stringify(error).includes("nonce");
 
       if (isNonceError) {
         console.warn(
-          `⚠️ Nonce error detected in refundFunds. Retrying with fresh nonce...`
+          `⚠️ Nonce error detected in refundFunds. Retrying with pending nonce...`
         );
         try {
-          const freshNonce = await provider.getTransactionCount(
+          const pendingNonce = await provider.getTransactionCount(
             wallet.address,
-            "latest"
+            "pending"
           );
           const tx = await vaultContract.refund(sellerAddress, amountWei, {
-            nonce: freshNonce + 1,
+            nonce: pendingNonce,
           });
           const receipt = await tx.wait();
           return {

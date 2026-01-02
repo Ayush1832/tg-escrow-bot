@@ -4103,7 +4103,7 @@ Approved By: ${
 
       return;
     } else if (callbackData === "leaderboard_buyers") {
-      const topBuyers = await UserStatsService.getTopBuyers(5);
+      const topBuyers = await UserStatsService.getTopBuyers(10);
       const message = UserStatsService.formatTopBuyers(topBuyers);
 
       await ctx.editMessageText(message, {
@@ -4122,7 +4122,7 @@ Approved By: ${
       await safeAnswerCbQuery(ctx);
       return;
     } else if (callbackData === "leaderboard_sellers") {
-      const topSellers = await UserStatsService.getTopSellers(5);
+      const topSellers = await UserStatsService.getTopSellers(10);
       const message = UserStatsService.formatTopSellers(topSellers);
 
       await ctx.editMessageText(message, {
@@ -4149,8 +4149,14 @@ Approved By: ${
         reply_markup: {
           inline_keyboard: [
             [
-              { text: "Top Buyers", callback_data: "leaderboard_buyers" },
-              { text: "Top Sellers", callback_data: "leaderboard_sellers" },
+              {
+                text: "Buyer's Leaderboard",
+                callback_data: "leaderboard_buyers",
+              },
+              {
+                text: "Seller's Leaderboard",
+                callback_data: "leaderboard_sellers",
+              },
             ],
           ],
         },

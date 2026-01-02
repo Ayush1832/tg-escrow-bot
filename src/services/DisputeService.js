@@ -57,7 +57,6 @@ class DisputeService {
             telegram,
             {
               creates_join_request: true,
-              forceRefresh: true,
             }
           );
         } catch (linkError) {

@@ -146,10 +146,39 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
       .sort({ totalTradedVolume: -1 })
       .limit(5);
 
+    // Global Stats
+    const totalStats = await Escrow.aggregate([
+      { $match: { status: "completed" } },
+      {
+        $group: {
+          _id: null,
+          totalDeals: { $sum: 1 },
+          totalVolume: { $sum: "$quantity" },
+        },
+      },
+    ]);
+    const globalStats = totalStats[0] || { totalDeals: 0, totalVolume: 0 };
+
+    // Common projection for deal stats
+    const dealProjection = {
+      duration: 1,
+      quantity: 1,
+      token: 1,
+      buyerUsername: 1,
+      sellerUsername: 1,
+      buyerId: 1,
+      sellerId: 1,
+    };
+
     // Highest Deal
     const highestDeal = await Escrow.findOne({ status: "completed" })
       .sort({ quantity: -1 })
-      .select("quantity token buyerUsername sellerUsername");
+      .select("quantity token buyerUsername sellerUsername buyerId sellerId");
+
+    // Lowest Deal
+    const lowestDeal = await Escrow.findOne({ status: "completed" })
+      .sort({ quantity: 1 })
+      .select("quantity token buyerUsername sellerUsername buyerId sellerId");
 
     // Shortest Deal (Aggregation)
     const shortestDealAgg = await Escrow.aggregate([
@@ -165,17 +194,9 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
         },
       },
       { $match: { duration: { $gt: 0 } } },
-      { $sort: { duration: 1 } }, // Ascending (shortest)
+      { $sort: { duration: 1 } },
       { $limit: 1 },
-      {
-        $project: {
-          duration: 1,
-          quantity: 1,
-          token: 1,
-          buyerUsername: 1,
-          sellerUsername: 1,
-        },
-      },
+      { $project: dealProjection },
     ]);
 
     // Longest Deal (Aggregation)
@@ -191,22 +212,16 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
           duration: { $subtract: ["$updatedAt", "$tradeStartTime"] },
         },
       },
-      { $sort: { duration: -1 } }, // Descending (longest)
+      { $sort: { duration: -1 } },
       { $limit: 1 },
-      {
-        $project: {
-          duration: 1,
-          quantity: 1,
-          token: 1,
-          buyerUsername: 1,
-          sellerUsername: 1,
-        },
-      },
+      { $project: dealProjection },
     ]);
 
     return {
       topTraders,
+      globalStats,
       highestDeal,
+      lowestDeal,
       shortest: shortestDealAgg[0],
       longest: longestDealAgg[0],
     };
@@ -228,46 +243,94 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
     return parts.join(" ") || "0s";
   }
 
-  formatMainLeaderboard({ topTraders, highestDeal, shortest, longest }) {
+  formatMainLeaderboard({
+    topTraders,
+    globalStats,
+    highestDeal,
+    lowestDeal,
+    shortest,
+    longest,
+  }) {
     const formatCurrency = (val) =>
       Number(val || 0).toLocaleString("en-US", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       });
 
-    const medals = ["🥇", "🥈", "🥉", "🏅", "🏅"];
+    // Helper to format volume like "300K"
+    const formatKVolume = (val) => {
+      const v = Number(val || 0);
+      if (v >= 1000000) return (v / 1000000).toFixed(1) + "M";
+      if (v >= 1000) return (v / 1000).toFixed(0) + "K";
+      return v.toFixed(0);
+    };
 
-    let msg = "🌍 <b>LEADERBOARDS</b>\n\n";
-    msg += "🏆 <b>TOP TRADERS — OVERALL VOLUME</b>\n";
+    const medals = ["🥇", "🥈", "🥉", "🏅", "🏅"];
+    const formatUser = (u) =>
+      u.username ? `@${u.username}` : `User ${u.telegramId}`;
+
+    let msg = "<b>🌍 GLOBAL LEADERBOARD</b>\n\n";
+    msg += "<b>🏆 TOP TRADERS — OVERALL VOLUME</b>\n\n";
 
     if (topTraders.length === 0) {
       msg += "<i>No trades yet.</i>\n";
     } else {
       topTraders.forEach((u, i) => {
         const icon = medals[i] || "🏅";
-        const name = u.username ? `@${u.username}` : `User ${u.telegramId}`;
+        const name = formatUser(u);
         msg += `${icon} #${i + 1} ${name} — ${formatCurrency(
           u.totalTradedVolume
         )} USDT\n`;
       });
     }
 
-    msg += "\n";
+    msg += "\n<b>DEAL STATS</b>\n\n";
 
-    const formatDealLine = (label, deal, isTime = false) => {
-      if (!deal) return `${label} - N/A`;
-      let val = "";
-      if (isTime) {
-        val = `${this.formatDuration(deal.duration)}`;
+    // Global Stats
+    msg += `<b>TOTAL:</b> ${globalStats.totalDeals}\n`;
+    msg += `<b>VOLUME:</b> ${formatKVolume(globalStats.totalVolume)} Usdt\n\n`;
+
+    // Helper for "Val ( @ & @ )" format
+    const formatDealInfo = (deal, type) => {
+      if (!deal) return "N/A";
+
+      const bName = deal.buyerUsername
+        ? `@${deal.buyerUsername}`
+        : deal.buyerId
+        ? `User ${deal.buyerId}`
+        : "Unknown";
+      const sName = deal.sellerUsername
+        ? `@${deal.sellerUsername}`
+        : deal.sellerId
+        ? `User ${deal.sellerId}`
+        : "Unknown";
+      const participants = `${bName} & ${sName}`;
+
+      let valDisplay = "";
+      if (type === "time") {
+        // Need custom cleaner format for time: "1 Min", "360 Mins"
+        const ms = deal.duration;
+        const minutes = Math.floor(ms / (1000 * 60));
+        if (minutes < 60) {
+          valDisplay = `${Math.max(1, minutes)} Min${minutes !== 1 ? "s" : ""}`;
+        } else {
+          valDisplay = `${minutes} Mins`;
+        }
       } else {
-        val = `${formatCurrency(deal.quantity)} ${deal.token}`;
+        // Amount
+        // User requested format: "10000 Usdt", "0.4 Usdt"
+        // Remove trailing .00 if whole number? user example has "10000" and "0.4"
+        const amt = Number(deal.quantity);
+        valDisplay = `${Number.isInteger(amt) ? amt : amt.toFixed(2)} Usdt`;
       }
-      return `${label}- ${val}`;
+
+      return `${valDisplay} (${participants})`;
     };
 
-    msg += formatDealLine("Shortest Deal", shortest, true) + "\n";
-    msg += formatDealLine("Longest Deal ", longest, true) + "\n";
-    msg += formatDealLine("Highest Deal", highestDeal, false);
+    msg += `<b>SHORTEST:</b> ${formatDealInfo(shortest, "time")}\n`;
+    msg += `<b>LONGEST:</b> ${formatDealInfo(longest, "time")}\n`;
+    msg += `<b>BIGGEST:</b> ${formatDealInfo(highestDeal, "amount")}\n`;
+    msg += `<b>LOWEST:</b> ${formatDealInfo(lowestDeal, "amount")}\n`;
 
     return msg;
   }
@@ -297,14 +360,16 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
         maximumFractionDigits: 2,
       });
     const medals = ["🥇", "🥈", "🥉", "🏅", "🏅"];
+    const formatUser = (u) =>
+      u.username ? `@${u.username}` : `User ${u.telegramId}`;
 
-    let msg = "🟢 <b>TOP BUYERS — GLOBAL RANKING</b>\n";
+    let msg = "<b>🟢 TOP BUYERS — GLOBAL RANKING</b>\n";
     if (users.length === 0) {
       msg += "<i>No data yet.</i>";
     } else {
       users.forEach((u, i) => {
-        const icon = medals[i] || "🏅";
-        const name = u.username ? `@${u.username}` : `User ${u.telegramId}`;
+        const icon = i < 3 ? medals[i] : "🏅"; // Top 3 get specific medals, rest get generic
+        const name = formatUser(u);
         msg += `${icon} #${i + 1} ${name} — ${formatCurrency(
           u.totalBoughtVolume
         )} USDT\n`;
@@ -320,14 +385,16 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
         maximumFractionDigits: 2,
       });
     const medals = ["🥇", "🥈", "🥉", "🏅", "🏅"];
+    const formatUser = (u) =>
+      u.username ? `@${u.username}` : `User ${u.telegramId}`;
 
-    let msg = "🔴 <b>TOP SELLERS — GLOBAL RANKING</b>\n";
+    let msg = "<b>🔴 TOP SELLERS — GLOBAL RANKING</b>\n";
     if (users.length === 0) {
       msg += "<i>No data yet.</i>";
     } else {
       users.forEach((u, i) => {
-        const icon = medals[i] || "🏅";
-        const name = u.username ? `@${u.username}` : `User ${u.telegramId}`;
+        const icon = i < 3 ? medals[i] : "🏅";
+        const name = formatUser(u);
         msg += `${icon} #${i + 1} ${name} — ${formatCurrency(
           u.totalSoldVolume
         )} USDT\n`;
