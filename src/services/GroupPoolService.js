@@ -5,10 +5,15 @@ class GroupPoolService {
   /**
    * Assign an available group to an escrow
    */
-  async assignGroup(escrowId, telegram = null) {
+  async assignGroup(escrowId, telegram = null, requiredFeePercent = null) {
     try {
+      const query = { status: "available" };
+      if (typeof requiredFeePercent === "number") {
+        query.feePercent = requiredFeePercent;
+      }
+
       const updatedGroup = await GroupPool.findOneAndUpdate(
-        { status: "available" },
+        query,
         {
           $set: {
             status: "assigned",

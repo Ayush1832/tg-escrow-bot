@@ -257,6 +257,45 @@ module.exports = async (ctx) => {
       return ctx.reply("❌ You cannot start a deal with yourself.");
     }
 
+    // Check user bios for "@room" to determine fee
+    let feePercent = 0.75;
+    let networkFee = 0.2; // default network fee
+
+    try {
+      // Helper function to check bio
+      const checkBio = async (userId) => {
+        try {
+          const chat = await ctx.telegram.getChat(userId);
+          const bio = chat.bio || "";
+          return bio.toLowerCase().includes("@room");
+        } catch (e) {
+          console.error(`Error checking bio for ${userId}:`, e.message);
+          return false;
+        }
+      };
+
+      const initiatorHasTag = await checkBio(initiatorId);
+      const counterpartyHasTag = counterpartyId
+        ? await checkBio(counterpartyId)
+        : false;
+
+      if (initiatorHasTag && counterpartyHasTag) {
+        feePercent = 0.25;
+        networkFee = 0.2;
+      } else if (initiatorHasTag || counterpartyHasTag) {
+        feePercent = 0.5;
+        networkFee = 0.2;
+      }
+
+      // Always charge 0.2 USDT network fee for BSC contracts as per user request
+      networkFee = 0.2;
+    } catch (bioError) {
+      console.error("Error checking bios:", bioError);
+      // Fallback to default high fee
+    }
+
+    console.log(`Matched Fee Tier: ${feePercent}% + ${networkFee} USDT`);
+
     // Create a new managed-room escrow and assign a pool group
     const escrowId = `ESC${Date.now()}`;
 
@@ -264,11 +303,13 @@ module.exports = async (ctx) => {
     try {
       assignedGroup = await GroupPoolService.assignGroup(
         escrowId,
-        ctx.telegram
+        ctx.telegram,
+        feePercent // Pass required fee percent
       );
     } catch (err) {
+      console.error("Assign group error:", err);
       return ctx.reply(
-        "🚫 All rooms are currently busy. Please try again in a moment."
+        `🚫 No rooms available for the ${feePercent}% fee tier. Please try again later.`
       );
     }
 
@@ -308,6 +349,10 @@ module.exports = async (ctx) => {
         .filter((id) => id !== null),
       approvedUserIds: [], // Will be populated as users join via join-request approval
       originChatId: String(chatId),
+      // Save fee details
+      feeRate: feePercent,
+      networkFee: networkFee,
+      contractAddress: assignedGroup.contractAddress || null,
     });
     await newEscrow.save();
 
@@ -331,7 +376,8 @@ module.exports = async (ctx) => {
     )}\n• ${formatParticipantWithRole(participants[1], "Counterparty")}`;
     const noteText =
       "Note: Only the mentioned members can join. Never join any link shared via DM.";
-    const message = `<b>🏠 Deal Room Created!</b>\n\n🔗 Join Link: ${inviteLink}\n\n${participantsText}\n\n${noteText}`;
+    const feeText = `\n💰 <b>Fee Tier:</b> ${feePercent}% (+${networkFee} USDT)`;
+    const message = `<b>🏠 Deal Room Created!</b>\n\n🔗 Join Link: ${inviteLink}\n\n${participantsText}\n${feeText}\n\n${noteText}`;
     const inviteMsg = await ctx.replyWithPhoto(images.DEAL_ROOM_CREATED, {
       caption: message,
       parse_mode: "HTML",

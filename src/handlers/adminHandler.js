@@ -209,7 +209,7 @@ async function adminPoolList(ctx) {
       message += `🟢 *Available (${availableGroups.length}):*\n`;
       availableGroups.forEach((group) => {
         const title = group.groupTitle || "Unknown";
-        message += `• ${title}\n`;
+        message += `• ${title} [ID: ${group.groupId}]\n`;
       });
       message += "\n";
     }
@@ -218,7 +218,7 @@ async function adminPoolList(ctx) {
       message += `🟡 *Assigned (${assignedGroups.length}):*\n`;
       assignedGroups.forEach((group) => {
         const title = group.groupTitle || "Unknown";
-        message += `• ${title} - Escrow: ${group.assignedEscrowId}\n`;
+        message += `• ${title} [ID: ${group.groupId}] - Escrow: ${group.assignedEscrowId}\n`;
       });
       message += "\n";
     }
@@ -230,7 +230,7 @@ async function adminPoolList(ctx) {
         const completedAgo = group.completedAt
           ? Math.floor((Date.now() - group.completedAt) / (1000 * 60 * 60))
           : "Unknown";
-        message += `• ${title} - ${completedAgo}h ago\n`;
+        message += `• ${title} [ID: ${group.groupId}] - ${completedAgo}h ago\n`;
       });
     }
 

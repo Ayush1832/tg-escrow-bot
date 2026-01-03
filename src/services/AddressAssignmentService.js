@@ -3,7 +3,6 @@ const config = require("../../config");
 const Contract = require("../models/Contract");
 const Escrow = require("../models/Escrow");
 const GroupPool = require("../models/GroupPool");
-const GroupAddressService = require("./GroupAddressService");
 
 class AddressAssignmentService {
   /**
@@ -51,6 +50,42 @@ class AddressAssignmentService {
 
       if (groupId) {
         try {
+          // 1. Try to find the specific contract assigned to this group via GroupPool
+          // This is the authoritative source for the 1:1 mapping
+          const group = await GroupPool.findOne({ groupId });
+          if (group && group.contracts) {
+            // Check contracts map (supports both Map and Object access for safety)
+            let assignedContract = null;
+            if (
+              group.contracts.get &&
+              typeof group.contracts.get === "function"
+            ) {
+              assignedContract = group.contracts.get(normalizedToken);
+            } else if (group.contracts[normalizedToken]) {
+              assignedContract = group.contracts[normalizedToken];
+            }
+
+            // Also check if network matches (default BSC)
+            if (assignedContract && assignedContract.address) {
+              // Verify network if strict, but usually token+group implies the network
+              return {
+                address: assignedContract.address,
+                contractAddress: assignedContract.address,
+                sharedWithAmount: null,
+              };
+            }
+          }
+
+          // 2. Fallback: Check for legacy contractAddress field (mostly for USDT)
+          if (group && group.contractAddress && normalizedToken === "USDT") {
+            return {
+              address: group.contractAddress,
+              contractAddress: group.contractAddress,
+              sharedWithAmount: null,
+            };
+          }
+
+          // 3. Fallback: Look up Contract model (if populated with groupId - currently not used but good for future)
           let contract = await Contract.findOne({
             name: "EscrowVault",
             token: normalizedToken,
@@ -61,6 +96,7 @@ class AddressAssignmentService {
           });
 
           if (!contract) {
+            // 4. Final Fallback: Find ANY deployed contract for this token/tier
             contract = await Contract.findOne({
               name: "EscrowVault",
               token: normalizedToken,
@@ -77,41 +113,14 @@ class AddressAssignmentService {
             );
           }
 
-          const contractAddress = contract.address;
-
-          try {
-            const group = await GroupPool.findOne({ groupId });
-            if (group) {
-              const addressKey = `${normalizedToken}_${normalizedNetwork}`;
-              const existingAddress = GroupAddressService.getAddressValue(
-                group.assignedAddresses,
-                addressKey
-              );
-
-              if (existingAddress !== contractAddress) {
-                group.assignedAddresses = GroupAddressService.setAddressValue(
-                  group.assignedAddresses,
-                  addressKey,
-                  contractAddress
-                );
-                await group.save();
-              }
-            }
-          } catch (updateError) {
-            console.warn(
-              "Warning: Could not update GroupPool assignedAddresses:",
-              updateError.message
-            );
-          }
-
           return {
-            address: contractAddress,
-            contractAddress: contractAddress,
+            address: contract.address,
+            contractAddress: contract.address,
             sharedWithAmount: null,
           };
         } catch (groupError) {
           console.error(
-            "Error getting group-specific contract address, falling back to contract address:",
+            "Error getting group-specific contract address, falling back to general contract:",
             groupError
           );
         }

@@ -521,7 +521,8 @@ class BlockchainService {
     buyerAddress,
     amount,
     amountWeiOverride = null,
-    groupId = null
+    groupId = null,
+    contractAddressOverride = null
   ) {
     try {
       if (network && network.toUpperCase() === "TRON") {
@@ -538,11 +539,14 @@ class BlockchainService {
         };
       }
 
-      const contractAddress = await this.getEscrowContractAddress(
-        token,
-        network,
-        groupId
-      );
+      let contractAddress = contractAddressOverride;
+      if (!contractAddress) {
+        contractAddress = await this.getEscrowContractAddress(
+          token,
+          network,
+          groupId
+        );
+      }
       if (!contractAddress) {
         throw new Error(
           `No escrow contract found for ${token} on ${network}${
@@ -697,7 +701,8 @@ class BlockchainService {
     sellerAddress,
     amount,
     amountWeiOverride = null,
-    groupId = null
+    groupId = null,
+    contractAddressOverride = null
   ) {
     try {
       if (network && network.toUpperCase() === "TRON") {
@@ -714,11 +719,14 @@ class BlockchainService {
         };
       }
 
-      const contractAddress = await this.getEscrowContractAddress(
-        token,
-        network,
-        groupId
-      );
+      let contractAddress = contractAddressOverride;
+      if (!contractAddress) {
+        contractAddress = await this.getEscrowContractAddress(
+          token,
+          network,
+          groupId
+        );
+      }
       if (!contractAddress) {
         throw new Error(
           `No escrow contract found for ${token} on ${network}${

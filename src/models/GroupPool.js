@@ -39,9 +39,34 @@ const groupPoolSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
-  assignedAddresses: {
+  // Linked contract details
+  contractAddress: {
+    type: String,
+    required: false,
+  },
+  feePercent: {
+    type: Number,
+    required: false,
+  },
+  network: {
+    type: String,
+    required: false,
+    default: "BSC",
+  },
+  // assignedAddresses removed (legacy)
+  // Map of Token Symbol -> Contract Details
+  // e.g. "USDT": { address: "0x...", feePercent: 0.25, network: "BSC" }
+  contracts: {
     type: Map,
-    of: String,
+    of: new mongoose.Schema(
+      {
+        address: { type: String, required: true },
+        feePercent: { type: Number, required: true },
+        network: { type: String, required: true, default: "BSC" },
+      },
+      { _id: false }
+    ),
+    default: {},
   },
   createdAt: {
     type: Date,

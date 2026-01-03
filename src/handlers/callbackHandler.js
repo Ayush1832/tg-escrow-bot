@@ -490,16 +490,21 @@ module.exports = async (ctx) => {
           !escrow.tradeDetailsStep ||
           escrow.tradeDetailsStep !== "completed"
         ) {
-          escrow.tradeDetailsStep = "step1_amount";
-          const step1Msg = await ctx.telegram.sendPhoto(
+          // New Step: Select Token (before Amount)
+          escrow.tradeDetailsStep = "step0_token";
+          await ctx.telegram.sendMessage(
             escrow.groupId,
-            images.ENTER_QUANTITY,
+            "💰 <b>Step 1 - Select Token</b>\n\nPlease choose the token for this deal:",
             {
-              caption:
-                "💰 Step 1 - Enter USDT amount including fee → Example: 1000",
+              parse_mode: "HTML",
+              reply_markup: Markup.inlineKeyboard([
+                [
+                  Markup.button.callback("USDT (BEP20)", "set_token_USDT"),
+                  Markup.button.callback("USDC (BEP20)", "set_token_USDC"),
+                ],
+              ]).reply_markup,
             }
           );
-          escrow.step1MessageId = step1Msg.message_id;
           await escrow.save();
         } else {
           const buyerText =
@@ -508,6 +513,81 @@ module.exports = async (ctx) => {
         }
       }
 
+      return;
+    } else if (callbackData.startsWith("set_token_")) {
+      const token = callbackData.split("_")[2]; // set_token_USDT
+      await safeAnswerCbQuery(ctx, `Selected ${token}`);
+
+      const escrow = await findGroupEscrow(chatId, [
+        "draft",
+        "awaiting_details",
+      ]);
+
+      if (!escrow) {
+        return safeAnswerCbQuery(ctx, "❌ No active escrow found.");
+      }
+
+      // Verify step
+      if (
+        escrow.tradeDetailsStep !== "step0_token" &&
+        escrow.tradeDetailsStep !== "step1_amount"
+      ) {
+        // Allow if step1_amount (backwards compatibility or retry)
+        // return safeAnswerCbQuery(ctx, "❌ Invalid step.");
+      }
+
+      // Fetch Group to find appropriate contract
+      const group = await GroupPool.findOne({ groupId: escrow.groupId });
+      if (!group) {
+        return ctx.reply("❌ Error: Group configuration not found.");
+      }
+
+      let contractInfo = null;
+      if (group.contracts && group.contracts.get(token)) {
+        contractInfo = group.contracts.get(token);
+      } else if (token === "USDT" && group.contractAddress) {
+        // Fallback for legacy groups only supporting USDT
+        contractInfo = {
+          address: group.contractAddress,
+          feePercent: group.feePercent || 0.75, // Default/fallback
+          network: group.network || "BSC",
+        };
+      }
+
+      if (!contractInfo || !contractInfo.address) {
+        return ctx.reply(
+          `❌ This group does not support ${token} trades. Please contact admin.`
+        );
+      }
+
+      // Update Escrow
+      escrow.token = token;
+      escrow.contractAddress = contractInfo.address;
+      // Note: feePercent might be set by bio-check earlier.
+      // If we want to strictly enforce the contract's fee, we can overwrite it.
+      // But usually bio-check determines the tier, and we matched the group to that tier.
+      // However, if the group is shared (e.g. USDC contracts are shared),
+      // check if the contract matches the bio-check fee?
+      // Actually, we linked groups such that `group.contracts.USDC` matches the group's "tier".
+      // So assuming link_groups.js ran correctly, this is safe.
+
+      // Update network fee based on token? User said "0.2 USDT" network fee.
+      // If token is USDC, logic stays 0.2 (value). We assume 0.2 units of the token.
+
+      escrow.tradeDetailsStep = "step1_amount";
+
+      // Send Step 2 (Amount)
+      const step1Msg = await ctx.telegram.sendPhoto(
+        escrow.groupId,
+        images.ENTER_QUANTITY,
+        {
+          caption: `💰 <b>Step 2 - Enter ${token} Amount</b>\n\nEnter amount including fee → Example: 1000`,
+          parse_mode: "HTML",
+        }
+      );
+      escrow.step1MessageId = step1Msg.message_id;
+
+      await escrow.save();
       return;
     } else if (callbackData === "cancel_role_selection") {
       await safeAnswerCbQuery(ctx, "Cancelled");
@@ -1642,11 +1722,38 @@ Once you’ve sent the amount, tap the button below.`;
       }
 
       // Use pending release amount (should be set for admin partial releases)
-      const releaseAmount =
+      let releaseAmount =
         updatedEscrow.pendingReleaseAmount !== null &&
         updatedEscrow.pendingReleaseAmount !== undefined
           ? updatedEscrow.pendingReleaseAmount
           : formattedTotalDeposited;
+
+      // Calculate amount to release after network fees (if full release)
+      // Only deduct network fee if releasing the full amount (standard flow)
+      // If pendingReleaseAmount is set (partial), we assume admin entered the exact amount to release
+      if (
+        updatedEscrow.pendingReleaseAmount === null ||
+        updatedEscrow.pendingReleaseAmount === undefined
+      ) {
+        const networkFee = updatedEscrow.networkFee || 0;
+        if (releaseAmount > networkFee) {
+          releaseAmount = releaseAmount - networkFee;
+        } else {
+          console.warn(
+            `Warning: Release amount ${releaseAmount} is less than network fee ${networkFee}. Ignoring network fee.`
+          );
+        }
+      }
+
+      const releaseResult = await BlockchainService.releaseFunds(
+        updatedEscrow.token,
+        updatedEscrow.chain,
+        updatedEscrow.buyerAddress,
+        releaseAmount,
+        null, // wei override
+        updatedEscrow.groupId, // groupId (for logging/finding contract)
+        updatedEscrow.contractAddress // Pass specific contract address
+      );
 
       // Validate amount
       if (releaseAmount > formattedTotalDeposited) {
@@ -2237,6 +2344,23 @@ ${approvalNote}`;
           }
         }
 
+        // Calculate amount to release after network fees (if full release)
+        // Only deduct network fee if releasing the full amount (standard flow)
+        // If pendingReleaseAmount is set (partial), we assume exact amount needed
+        if (
+          updatedEscrow.pendingReleaseAmount === null ||
+          updatedEscrow.pendingReleaseAmount === undefined
+        ) {
+          const networkFee = updatedEscrow.networkFee || 0;
+          if (releaseAmount > networkFee) {
+            releaseAmount = releaseAmount - networkFee;
+          } else {
+            console.warn(
+              `Warning: Release amount ${releaseAmount} is less than network fee ${networkFee}. Ignoring network fee.`
+            );
+          }
+        }
+
         try {
           const releaseResult = await BlockchainService.releaseFunds(
             updatedEscrow.token,
@@ -2244,7 +2368,8 @@ ${approvalNote}`;
             updatedEscrow.buyerAddress,
             releaseAmount,
             amountWeiOverride,
-            updatedEscrow.groupId
+            updatedEscrow.groupId,
+            updatedEscrow.contractAddress // Pass specific contract address
           );
 
           if (!releaseResult || !releaseResult.success) {
@@ -2720,6 +2845,25 @@ Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${
           );
         } catch (e) {}
 
+        // Calculate amount to refund after network fees (if full refund)
+        // Only deduct network fee if refunding the full amount (standard flow)
+        // If pendingRefundAmount is set (partial), we assume exact amount needed
+        const refundAmountNum = parseFloat(refundAmountStr);
+        if (
+          updatedEscrow.pendingRefundAmount === null ||
+          updatedEscrow.pendingRefundAmount === undefined
+        ) {
+          const networkFee = updatedEscrow.networkFee || 0;
+          if (refundAmountNum > networkFee) {
+            const newRefundAmount = refundAmountNum - networkFee;
+            refundAmountStr = newRefundAmount.toFixed(decimals);
+          } else {
+            console.warn(
+              `Warning: Refund amount ${refundAmountNum} is less than network fee ${networkFee}. Ignoring network fee.`
+            );
+          }
+        }
+
         try {
           const refundResult = await BlockchainService.refundFunds(
             updatedEscrow.token,
@@ -2727,7 +2871,8 @@ Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${
             updatedEscrow.sellerAddress,
             refundAmountStr, // Pass string fixed to decimals
             amountWeiOverride,
-            updatedEscrow.groupId
+            updatedEscrow.groupId,
+            updatedEscrow.contractAddress // Pass specific contract address
           );
 
           updatedEscrow.refundTransactionHash = refundResult.transactionHash;
