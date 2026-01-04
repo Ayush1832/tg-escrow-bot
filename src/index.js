@@ -708,6 +708,7 @@ class EscrowBot {
 
         const chainUpper = (escrow.chain || "").toUpperCase();
         let txFrom = null;
+        let amount = 0; // Declare amount in outer scope
 
         if (chainUpper === "TRON" || chainUpper === "TRX") {
           try {
@@ -748,7 +749,6 @@ class EscrowBot {
               escrow.token,
               escrow.chain
             );
-            let amount = 0;
             let amountWeiBigInt = 0n;
             let fromAddr = null;
             let toAddr = null;
@@ -876,7 +876,6 @@ class EscrowBot {
               escrow.token,
               escrow.chain
             );
-            let amount = 0;
             let amountWeiBigInt = 0n;
             let fromAddr = null;
             let toAddr = null;
