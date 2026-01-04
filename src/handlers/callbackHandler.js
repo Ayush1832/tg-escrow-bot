@@ -992,9 +992,10 @@ ${approvalStatus}`;
         const chain = updatedEscrow.chain || "BSC";
 
         // Calculate fees
+        const networkFee = updatedEscrow.networkFee || 0;
         const escrowFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
         const escrowFee = (amount * escrowFeePercent) / 100;
-        const releaseAmount = amount - escrowFee;
+        const releaseAmount = amount - networkFee - escrowFee;
 
         const confirmedText = `<b>P2P MM BOT 🤖</b>
 

@@ -108,6 +108,12 @@ async function buildDealSummary(escrow) {
   const buyerUsername = escrow.buyerUsername || "Buyer";
   const sellerUsername = escrow.sellerUsername || "Seller";
 
+  // Calculate release amount
+  const networkFee = escrow.networkFee || 0;
+  const escrowFeePercent = escrow.feeRate || 0;
+  const escrowFee = (amount * escrowFeePercent) / 100;
+  const releaseAmount = amount - networkFee - escrowFee;
+
   let approvalStatus = "";
   if (escrow.buyerApproved && escrow.sellerApproved) {
     approvalStatus = "✅ Both parties have approved.";
@@ -132,8 +138,9 @@ async function buildDealSummary(escrow) {
 • <b>Rate:</b> ₹${rate.toFixed(1)}
 • <b>Payment:</b> ${paymentMethod}
 • <b>Chain:</b> ${chain}
-• <b>Network Fee:</b> ${escrow.networkFee || 0} ${escrow.token || "USDT"}
-• <b>Service Fee:</b> ${escrow.feeRate || 0}%
+• <b>Network Fee:</b> ${networkFee} ${escrow.token || "USDT"}
+• <b>Service Fee:</b> ${escrowFeePercent}%
+• <b>Release Amount:</b> ${releaseAmount.toFixed(4)} ${escrow.token || "USDT"}
 • <b>Buyer Address:</b> <code>${buyerAddress}</code>
 • <b>Seller Address:</b> <code>${sellerAddress}</code>
 
