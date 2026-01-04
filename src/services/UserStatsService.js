@@ -487,6 +487,37 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
   async recordTrade(escrow) {
     return this.updateUserStats(escrow);
   }
+
+  /**
+   * Record simple participation (called when role is selected)
+   * @param {Object} params - { telegramId, username }
+   */
+  async recordParticipation({ telegramId, username }) {
+    if (!telegramId) return;
+
+    await User.findOneAndUpdate(
+      { telegramId: Number(telegramId) },
+      {
+        $setOnInsert: {
+          telegramId: Number(telegramId),
+          username: username || `user_${telegramId}`,
+          totalBoughtVolume: 0,
+          totalSoldVolume: 0,
+          totalTradedVolume: 0,
+          totalBoughtTrades: 0,
+          totalSoldTrades: 0,
+          totalCompletedTrades: 0,
+        },
+        $inc: {
+          totalParticipatedTrades: 1,
+        },
+        $set: {
+          lastActive: new Date(),
+        },
+      },
+      { upsert: true }
+    );
+  }
 }
 
 module.exports = new UserStatsService();

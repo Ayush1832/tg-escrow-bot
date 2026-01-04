@@ -1245,9 +1245,9 @@ async function adminGroupReset(ctx) {
 
       // For completed trades, log warning but continue
       if (!allUsersRemoved && isCompleted) {
-        console.log(
-          "⚠️ Some users could not be removed during reset of completed trade, continuing anyway..."
-        );
+        // console.log(
+        //   "⚠️ Some users could not be removed during reset of completed trade, continuing anyway..."
+        // );
       }
 
       // Refresh invite link (revoke old and create new) so removed users can rejoin
@@ -1411,9 +1411,6 @@ async function adminResetForce(ctx) {
       );
 
       if (!allUsersRemoved) {
-        console.log(
-          "⚠️ Some users could not be removed during force reset, continuing anyway..."
-        );
       }
 
       // Clear escrow invite link (but keep group invite link - it's permanent)
@@ -1572,9 +1569,9 @@ async function adminResetAllGroups(ctx) {
               await telegram.getChat(String(groupId));
               groupExists = true;
             } catch (chatError) {
-              console.log(
-                `⚠️ Group ${groupId} does not exist in Telegram or bot has no access`
-              );
+              // console.log(
+              //   `⚠️ Group ${groupId} does not exist in Telegram or bot has no access`
+              // );
               // Group doesn't exist - just reset database entry and continue
               groupExists = false;
             }
@@ -1590,10 +1587,10 @@ async function adminResetAllGroups(ctx) {
                   );
                 } catch (removeError) {
                   // Continue even if user removal fails
-                  console.log(
-                    `⚠️ Could not remove users from group ${groupId}:`,
-                    removeError.message
-                  );
+                  // console.log(
+                  //   `⚠️ Could not remove users from group ${groupId}:`,
+                  //   removeError.message
+                  // );
                 }
               } else {
                 // Try to remove users even without escrow (get admins and remove them)
@@ -1653,10 +1650,10 @@ async function adminResetAllGroups(ctx) {
                   }
                 } catch (removeError) {
                   // Continue even if user removal fails
-                  console.log(
-                    `⚠️ Could not remove users from group ${groupId}:`,
-                    removeError.message
-                  );
+                  // console.log(
+                  //   `⚠️ Could not remove users from group ${groupId}:`,
+                  //   removeError.message
+                  // );
                 }
               }
             }
@@ -1666,10 +1663,6 @@ async function adminResetAllGroups(ctx) {
               try {
                 await GroupPoolService.refreshInviteLink(groupId, telegram);
               } catch (linkError) {
-                console.log(
-                  `⚠️ Could not refresh invite link for group ${groupId}:`,
-                  linkError.message
-                );
                 // Continue anyway - group can still be reset
               }
             } else {
@@ -1705,17 +1698,12 @@ async function adminResetAllGroups(ctx) {
                 // Continue - try to reset next group
               }
             } else {
-              console.log(
-                `⚠️ Group ${groupId} not found when trying to save - may have been deleted`
-              );
             }
 
-            // Optionally delete escrow (but don't fail if it doesn't exist)
             if (escrow) {
               try {
                 await Escrow.deleteOne({ escrowId: escrow.escrowId });
               } catch (deleteError) {
-                // Continue anyway
               }
             }
 
@@ -1727,13 +1715,11 @@ async function adminResetAllGroups(ctx) {
             console.error(`Error resetting group ${groupId}:`, error);
           }
 
-          // Small delay between groups to avoid rate limiting
           if (i < allGroups.length - 1) {
             await new Promise((resolve) => setTimeout(resolve, 1000));
           }
         }
 
-        // Update processing message with results
         const summary = `✅ Reset Complete!
 
 📊 Results:
@@ -1745,7 +1731,6 @@ All groups have been reset to 'available' status.`;
 
         await telegram.editMessageText(chatId, messageId, null, summary);
 
-        // Delete summary message after 2 minutes
         setTimeout(async () => {
           try {
             await telegram.deleteMessage(chatId, messageId);
@@ -1771,7 +1756,6 @@ All groups have been reset to 'available' status.`;
       }
     })();
 
-    // Return immediately to avoid timeout
     return;
   } catch (error) {
     console.error("Error in admin reset all groups:", error);
@@ -1809,10 +1793,8 @@ async function adminWithdrawExcess(ctx) {
     let groupQuery = { status: "assigned" };
 
     if (config.ESCROW_FEE_PERCENT === 0) {
-      // Legacy Mode: Room 4-23
       groupQuery.groupTitle = { $regex: /^Room ([4-9]|1[0-9]|2[0-3])$/ };
     } else {
-      // Tiered Mode: Room 24+
       groupQuery.groupTitle = {
         $regex: /^Room (2[4-9]|[3-9][0-9]|[1-9][0-9]{2,})$/,
       };
@@ -1963,9 +1945,9 @@ async function executeWithdrawExcess(ctx) {
       : `0x${HOT_WALLET_PRIVATE_KEY}`;
     const wallet = new ethers.Wallet(privateKey, provider);
 
-    console.log(`👤 Hot wallet: ${wallet.address}`);
-    console.log(`👤 Fee wallet (BSC): ${FEE_WALLET_BSC}`);
-    console.log(`🔄 Target reserve per contract: ${reserveAmount} USDT\n`);
+    // console.log(`👤 Hot wallet: ${wallet.address}`);
+    // console.log(`👤 Fee wallet (BSC): ${FEE_WALLET_BSC}`);
+    // console.log(`🔄 Target reserve per contract: ${reserveAmount} USDT\n`);
 
     await mongoose.connect(MONGODB_URI);
 
@@ -2018,7 +2000,7 @@ async function executeWithdrawExcess(ctx) {
       );
       const owner = await vaultContract.owner();
       if (owner.toLowerCase() !== wallet.address.toLowerCase()) {
-        console.log(`⚠️  Skipping ${contractAddress}: wallet is not the owner`);
+        // console.log(`⚠️  Skipping ${contractAddress}: wallet is not the owner`);
         skipped += 1;
         continue;
       }
@@ -2027,9 +2009,6 @@ async function executeWithdrawExcess(ctx) {
       const balance = Number(ethers.formatUnits(balanceRaw, decimals));
 
       if (balance <= reserveAmount + epsilon) {
-        console.log(
-          `ℹ️  Balance within reserve threshold, skipping ${contractAddress}`
-        );
         skipped += 1;
         continue;
       }
@@ -2041,44 +2020,24 @@ async function executeWithdrawExcess(ctx) {
         continue;
       }
 
-      console.log(`💰 Balance: ${balance.toFixed(6)} USDT`);
-      console.log(
-        `🚀 Withdrawing full balance to hot wallet, then sending excess to admin wallet...`
-      );
-
       try {
         const withdrawTx = await vaultContract.withdrawToken(
           tokenAddress,
           wallet.address
         );
-        console.log(`⏳ Waiting for withdrawal tx ${withdrawTx.hash}...`);
         await withdrawTx.wait();
-        console.log("✅ Full withdrawal confirmed");
 
-        console.log(
-          `💸 Transferring ${ethers.formatUnits(
-            excessRaw,
-            decimals
-          )} USDT to fee wallet...`
-        );
         const transferTx = await tokenWithSigner.transfer(
           FEE_WALLET_BSC,
           excessRaw
         );
-        console.log(`⏳ Waiting for transfer tx ${transferTx.hash}...`);
         await transferTx.wait();
-        console.log("✅ Transfer to admin wallet confirmed");
 
-        console.log(
-          `🔄 Re-depositing ${reserveAmount} USDT back to contract...`
-        );
         const depositTx = await tokenWithSigner.transfer(
           contractAddress,
           reserveWei
         );
-        console.log(`⏳ Waiting for deposit tx ${depositTx.hash}...`);
         await depositTx.wait();
-        console.log("✅ Reserve deposit confirmed");
 
         totalWithdrawn += excessRaw;
         processed += 1;

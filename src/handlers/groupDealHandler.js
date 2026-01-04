@@ -319,8 +319,6 @@ module.exports = async (ctx) => {
     // This will be updated to 3.0 if user selects TRON in the deal flow.
     networkFee = 0.2;
 
-    console.log(`Matched Fee Tier: ${feePercent}% + ${networkFee} USDT`);
-
     // Create a new managed-room escrow and assign a pool group
     const escrowId = `ESC${Date.now()}`;
 
