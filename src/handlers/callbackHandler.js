@@ -499,25 +499,24 @@ module.exports = async (ctx) => {
 
           if (groupInfo && groupInfo.contracts) {
             // Check specific keys
-            if (groupInfo.contracts.has("USDT"))
+            if (
+              groupInfo.contracts.has("USDT") ||
+              groupInfo.contracts.has("USDT_TRON")
+            )
               buttons.push(
-                Markup.button.callback("USDT (BEP20)", "set_token_USDT")
+                Markup.button.callback("USDT", "set_token_generic_USDT")
               );
             if (groupInfo.contracts.has("USDC"))
               buttons.push(
-                Markup.button.callback("USDC (BEP20)", "set_token_USDC")
-              );
-            if (groupInfo.contracts.has("USDT_TRON"))
-              buttons.push(
-                Markup.button.callback("USDT (TRC20)", "set_token_USDT_TRON")
+                Markup.button.callback("USDC", "set_token_generic_USDC")
               );
           } else {
             // Fallback for legacy
             buttons.push(
-              Markup.button.callback("USDT (BEP20)", "set_token_USDT")
+              Markup.button.callback("USDT", "set_token_generic_USDT")
             );
             buttons.push(
-              Markup.button.callback("USDC (BEP20)", "set_token_USDC")
+              Markup.button.callback("USDC", "set_token_generic_USDC")
             );
           }
 
@@ -551,89 +550,141 @@ module.exports = async (ctx) => {
       }
 
       return;
-    } else if (callbackData.startsWith("set_token_")) {
-      const tokenKey = callbackData.replace("set_token_", ""); // USDT, USDC, or USDT_TRON
-
+    } else if (callbackData.startsWith("set_token_generic_")) {
+      const selectedToken = callbackData.replace("set_token_generic_", "");
       const escrow = await findGroupEscrow(chatId, [
         "draft",
         "awaiting_details",
       ]);
 
-      if (!escrow) {
-        return safeAnswerCbQuery(ctx, "❌ No active escrow found.");
-      }
+      if (!escrow) return safeAnswerCbQuery(ctx, "❌ No active escrow found.");
 
-      // Verify step
-      if (
-        escrow.tradeDetailsStep !== "step0_token" &&
-        escrow.tradeDetailsStep !== "step1_amount"
-      ) {
-        // return safeAnswerCbQuery(ctx, "❌ Invalid step.");
-      }
+      await safeAnswerCbQuery(ctx, `Selected ${selectedToken}`);
 
-      await safeAnswerCbQuery(ctx, `Selected ${tokenKey.replace("_", " ")}`);
+      // Store temp token choice in escrow (or just pass it to next step logic)
+      escrow.token = selectedToken;
 
-      // Fetch Group to find appropriate contract
+      // Show Chain Selection
+      const buttons = [];
       const group = await GroupPool.findOne({ groupId: escrow.groupId });
-      if (!group) {
-        return ctx.reply("❌ Error: Group configuration not found.");
+
+      if (group && group.contracts) {
+        // BSC Button
+        if (group.contracts.has(selectedToken)) {
+          buttons.push(
+            Markup.button.callback(
+              "BSC / BEP20",
+              `set_chain_${selectedToken}_BSC`
+            )
+          );
+        }
+        // TRON Button (Only for USDT usually)
+        if (selectedToken === "USDT" && group.contracts.has("USDT_TRON")) {
+          buttons.push(
+            Markup.button.callback(
+              "TRON / TRC20",
+              `set_chain_${selectedToken}_TRON`
+            )
+          );
+        }
       }
 
+      // Fallback if no specific config found (Legacy)
+      if (buttons.length === 0) {
+        buttons.push(
+          Markup.button.callback(
+            "BSC / BEP20",
+            `set_chain_${selectedToken}_BSC`
+          )
+        );
+      }
+
+      await ctx.telegram.sendMessage(
+        escrow.groupId,
+        `🌐 <b>Select Network for ${selectedToken}</b>`,
+        {
+          parse_mode: "HTML",
+          reply_markup: Markup.inlineKeyboard([buttons]).reply_markup,
+        }
+      );
+      await escrow.save();
+      return;
+    } else if (callbackData.startsWith("set_chain_")) {
+      // Format: set_chain_USDT_BSC or set_chain_USDT_TRON
+      const parts = callbackData.split("_"); // ["set", "chain", "USDT", "BSC"]
+      const tokenKey = parts[2];
+      const chainKey = parts[3];
+
+      const escrow = await findGroupEscrow(chatId, [
+        "draft",
+        "awaiting_details",
+      ]);
+      if (!escrow) return safeAnswerCbQuery(ctx, "❌ No active escrow found.");
+
+      await safeAnswerCbQuery(ctx, `Selected ${chainKey}`);
+
+      // Map to internal keys
+      // If TRON, internal key in contracts map is "USDT_TRON"
+      // If BSC, internal key is just "USDT" (or "USDC")
+      let internalContractKey = tokenKey;
+      if (chainKey === "TRON") {
+        internalContractKey = `${tokenKey}_TRON`;
+      }
+
+      const group = await GroupPool.findOne({ groupId: escrow.groupId });
       let contractInfo = null;
-      if (group.contracts && group.contracts.get(tokenKey)) {
-        contractInfo = group.contracts.get(tokenKey);
-      } else if (tokenKey === "USDT" && group.contractAddress) {
-        // Fallback for legacy groups only supporting USDT
+
+      if (
+        group &&
+        group.contracts &&
+        group.contracts.get(internalContractKey)
+      ) {
+        contractInfo = group.contracts.get(internalContractKey);
+      } else if (chainKey === "BSC" && group.contractAddress) {
         contractInfo = {
           address: group.contractAddress,
           feePercent: group.feePercent || 0.75,
-          network: group.network || "BSC",
+          network: "BSC",
         };
       }
 
       if (!contractInfo || !contractInfo.address) {
-        return ctx.reply(
-          `❌ This group does not support ${tokenKey} trades. Please contact admin.`
-        );
+        return ctx.reply(`❌ ${tokenKey} on ${chainKey} is not supported.`);
       }
 
-      // Update Escrow
-      // tokenKey might be "USDT_TRON". Real token symbol is usually just "USDT".
-      // We derive token symbol and network from the key or contractInfo
-
-      let realTokenSymbol = tokenKey;
-      let realChain = contractInfo.network || "BSC";
-
-      if (tokenKey === "USDT_TRON") {
-        realTokenSymbol = "USDT";
-        realChain = "TRON";
-      }
-
-      escrow.token = realTokenSymbol;
-      escrow.chain = realChain;
+      escrow.token = tokenKey;
+      escrow.chain = chainKey === "TRON" ? "TRON" : "BSC";
       escrow.contractAddress = contractInfo.address;
 
-      // Update Network Fee
-      if (realChain === "TRON" || realChain === "TRX") {
-        escrow.networkFee = 3.0;
+      // Network Fee Logic
+      if (escrow.chain === "TRON") {
+        if (escrow.feeRate !== undefined && escrow.feeRate < 0.75) {
+          escrow.networkFee = 2.0;
+        } else {
+          escrow.networkFee = 3.0;
+        }
       } else {
-        escrow.networkFee = 0.2; // BSC/Default
+        escrow.networkFee = 0.2;
       }
 
       escrow.tradeDetailsStep = "step1_amount";
 
-      // Send Step 2 (Amount)
       const step1Msg = await ctx.telegram.sendPhoto(
         escrow.groupId,
         images.ENTER_QUANTITY,
         {
-          caption: `💰 <b>Step 2 - Enter ${realTokenSymbol} Amount</b>\n\nChain: ${realChain}\nNetwork Fee: ${escrow.networkFee} ${realTokenSymbol}\n\nEnter amount including fee → Example: 1000`,
+          caption: `💰 <b>Step 2 - Enter ${tokenKey} Amount</b>\n\nChain: ${escrow.chain}\nNetwork Fee: ${escrow.networkFee} ${tokenKey}\n\nEnter amount including fee → Example: 1000`,
           parse_mode: "HTML",
         }
       );
       escrow.step1MessageId = step1Msg.message_id;
 
       await escrow.save();
+      return;
+    } else if (callbackData.startsWith("set_token_")) {
+      // Legacy handler kept for backward compatibility or direct calls
+      // Re-route or just handle normally if needed.
+      // For now, we rely on the new flow above.
       return;
     } else if (callbackData === "cancel_role_selection") {
       await safeAnswerCbQuery(ctx, "Cancelled");

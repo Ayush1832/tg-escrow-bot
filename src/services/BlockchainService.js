@@ -205,6 +205,16 @@ class BlockchainService {
 
   async withdrawFees(token = "USDT", network = "BSC") {
     try {
+      if (network && network.toUpperCase() === "TRON") {
+        const result = await TronService.withdrawFees({ token });
+        // Normalize result format if needed
+        return {
+          success: result.success,
+          transactionHash: result.transactionHash,
+          blockNumber: 0, // TRON tx result might not have block immediately
+        };
+      }
+
       const vault = await this.getVaultForNetwork(network, token);
       const wallet = this.wallets[network.toUpperCase()];
       const provider = this.providers[network.toUpperCase()];
@@ -321,6 +331,18 @@ class BlockchainService {
 
   async getFeeSettings(token = "USDT", network = "BSC") {
     try {
+      if (network && network.toUpperCase() === "TRON") {
+        const result = await TronService.getFeeSettings({ token });
+        return {
+          feeWallet: result.feeWallet,
+          feePercent: result.feePercent,
+          accumulated: ethers.formatUnits(
+            result.accumulated,
+            this.getTokenDecimals(token, network)
+          ),
+        };
+      }
+
       const vault = await this.getVaultForNetwork(network, token);
 
       const [feeWallet, feePercent, accumulated] = await Promise.all([

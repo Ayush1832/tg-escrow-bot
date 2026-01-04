@@ -34,6 +34,7 @@ const escrowSchema = new mongoose.Schema({
       "completed",
       "refunded",
       "disputed",
+      "cancelled",
     ],
     default: "draft",
   },

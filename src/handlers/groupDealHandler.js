@@ -200,9 +200,18 @@ module.exports = async (ctx) => {
       if (!counterpartyUser && chatInfo) {
         // getChat can return different types, we need a user
         if (chatInfo.type !== "private") {
-          return ctx.reply(
-            "❌ Could not retrieve user info. Please tag the user directly (tap their name) or reply to their message when using /deal."
-          );
+          try {
+            await ctx.deleteMessage().catch(() => {});
+            const errorMsg = await ctx.reply(
+              "❌ Could not retrieve user info. Please tag the user directly (tap their name) or reply to their message when using /deal."
+            );
+            setTimeout(() => {
+              ctx.telegram
+                .deleteMessage(ctx.chat.id, errorMsg.message_id)
+                .catch(() => {});
+            }, 5000);
+          } catch (e) {}
+          return;
         }
 
         if (chatInfo.is_bot) {
@@ -236,9 +245,20 @@ module.exports = async (ctx) => {
     }
 
     if (!counterpartyUser) {
-      return ctx.reply(
-        "❌ Please mention the counterparty (tap their name to tag) or reply to their message when using /deal so we can verify their user ID."
-      );
+      try {
+        await ctx.deleteMessage().catch(() => {});
+        const errorMsg = await ctx.reply(
+          "❌ Please mention the counterparty (tap their name to tag) or reply to their message when using /deal so we can verify their user ID."
+        );
+        setTimeout(() => {
+          ctx.telegram
+            .deleteMessage(ctx.chat.id, errorMsg.message_id)
+            .catch(() => {});
+        }, 5000);
+      } catch (e) {
+        // Ignore errors
+      }
+      return;
     }
 
     if (counterpartyUser.is_bot) {
@@ -384,7 +404,7 @@ module.exports = async (ctx) => {
     )}\n• ${formatParticipantWithRole(participants[1], "Counterparty")}`;
     const noteText =
       "Note: Only the mentioned members can join. Never join any link shared via DM.";
-    const feeText = `\n💰 <b>Fee Tier:</b> ${feePercent}% (+${networkFee} USDT)`;
+    const feeText = `\n💰 <b>Fee Tier:</b> ${feePercent}%`;
     const message = `<b>🏠 Deal Room Created!</b>\n\n🔗 Join Link: ${inviteLink}\n\n${participantsText}\n${feeText}\n\n${noteText}`;
     const inviteMsg = await ctx.replyWithPhoto(images.DEAL_ROOM_CREATED, {
       caption: message,

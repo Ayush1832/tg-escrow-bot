@@ -33,6 +33,27 @@ const ESCROW_VAULT_ABI = [
     stateMutability: "nonpayable",
     type: "function",
   },
+  {
+    inputs: [],
+    name: "withdrawFees",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "accumulatedFees",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "feeWallet",
+    outputs: [{ internalType: "address", name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
 ];
 
 class TronService {
@@ -157,6 +178,67 @@ class TronService {
       };
     } catch (error) {
       console.error("TRON withdrawToken error:", error);
+      throw error;
+    }
+  }
+
+  async getFeeSettings({ token = "USDT" }) {
+    await this.init();
+    try {
+      const { contract } = await this.getVaultContract(token);
+
+      // TRON calls
+      const feeWallet = await contract.feeWallet().call();
+      const accumulated = await contract.accumulatedFees().call();
+      // feePercent might be in the contract if you added it to ABI, but sticking to basics:
+      // If feePercent is not in ABI, we return config value or fetch if added.
+      // The user's Solidity likely has feePercent(). Check ABI first.
+      // ABI from previous step HAS accumulatedFees and feeWallet.
+      // It DOES NOT have feePercent in the snippet I pasted (Step 3770/3736).
+      // But EscrowVault.sol usually has it.
+      // For now, let's assume we can rely on config or add feePercent to ABI if needed.
+      // The BlockchainService uses vault.feePercent().
+      // Let's add feePercent to ABI in TronService just in case, or just return from config.
+      // Let's fetch it from config for now to be safe, or check ABI.
+      // Actually, let's check ABI in Step 3770. It ends at line 50.
+      // Step 3610 shows lines 1-36.
+      // I added withdrawToken etc.
+      // I should update ABI to include feePercent too if I want to read it.
+      // But looking at BlockchainService, it uses vault.feePercent().
+      // Let's assume I need to add it to ABI.
+
+      // But first, let's write the function assuming 0 if not dynamic, or fetching from contract if I update ABI.
+      // Wait, getVaultContract uses config.ESCROW_FEE_PERCENT to find the contract.
+      // So returning that is safe.
+
+      // Return raw values, normalizer will handle formatting
+      return {
+        feeWallet: this.tronWeb.address.fromHex(feeWallet),
+        feePercent: Number(config.ESCROW_FEE_PERCENT || 0),
+        accumulated: accumulated.toString(),
+      };
+    } catch (error) {
+      console.error("TRON getFeeSettings error:", error);
+      throw error;
+    }
+  }
+
+  async withdrawFees({ token = "USDT" }) {
+    await this.init();
+    try {
+      const { contract, address } = await this.getVaultContract(token);
+      const tx = await contract.withdrawFees().send({
+        feeLimit: 100_000_000,
+        callValue: 0,
+      });
+
+      return {
+        success: true,
+        transactionHash: tx,
+        contractAddress: address,
+      };
+    } catch (error) {
+      console.error("TRON withdrawFees error:", error);
       throw error;
     }
   }

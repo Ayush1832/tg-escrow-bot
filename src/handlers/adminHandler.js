@@ -131,16 +131,16 @@ async function adminStats(ctx) {
     const totalEscrows = completedEscrows + refundedEscrows;
 
     const statsMessage = `
-📊 *ADMIN STATISTICS*
+📊 <b>ADMIN STATISTICS</b>
 
-📈 *Escrows:*
+📈 <b>Escrows:</b>
 • Total: ${totalEscrows}
 • Active: ${activeEscrows}
 • Completed: ${completedEscrows}
 • Refunded: ${refundedEscrows}
     `;
 
-    await ctx.reply(statsMessage, { parse_mode: "Markdown" });
+    await ctx.reply(statsMessage, { parse_mode: "HTML" });
   } catch (error) {
     console.error("Error in admin stats:", error);
     ctx.reply("❌ Error loading statistics.");
@@ -152,21 +152,21 @@ async function adminGroupPool(ctx) {
     const stats = await GroupPoolService.getPoolStats();
 
     const message = `
-🏊‍♂️ *GROUP POOL STATUS*
+🏊‍♂️ <b>GROUP POOL STATUS</b>
 
-📊 *Statistics:*
+📊 <b>Statistics:</b>
 • Total Groups: ${stats.total}
 • Available: ${stats.available} 🟢
 • Assigned: ${stats.assigned} 🟡
 • Completed: ${stats.completed} 🔵
 • Archived: ${stats.archived} ⚫
 
-⚡ *Commands:*
-• \`/admin_pool_add <groupId>\` - Add group to pool
-• \`/admin_pool_list\` - List all groups
+⚡ <b>Commands:</b>
+• <code>/admin_pool_add &lt;groupId&gt;</code> - Add group to pool
+• <code>/admin_pool_list</code> - List all groups
     `;
 
-    await ctx.reply(message);
+    await ctx.reply(message, { parse_mode: "HTML" });
   } catch (error) {
     console.error("Error in admin group pool:", error);
     ctx.reply("❌ Error loading group pool status.");
@@ -203,10 +203,10 @@ async function adminPoolList(ctx) {
       "completed"
     );
 
-    let message = "🏊‍♂️ *GROUP POOL LIST*\n\n";
+    let message = "🏊‍♂️ <b>GROUP POOL LIST</b>\n\n";
 
     if (availableGroups.length > 0) {
-      message += `🟢 *Available (${availableGroups.length}):*\n`;
+      message += `🟢 <b>Available (${availableGroups.length}):</b>\n`;
       availableGroups.forEach((group) => {
         const title = group.groupTitle || "Unknown";
         message += `• ${title} [ID: ${group.groupId}]\n`;
@@ -215,7 +215,7 @@ async function adminPoolList(ctx) {
     }
 
     if (assignedGroups.length > 0) {
-      message += `🟡 *Assigned (${assignedGroups.length}):*\n`;
+      message += `🟡 <b>Assigned (${assignedGroups.length}):</b>\n`;
       assignedGroups.forEach((group) => {
         const title = group.groupTitle || "Unknown";
         message += `• ${title} [ID: ${group.groupId}] - Escrow: ${group.assignedEscrowId}\n`;
@@ -224,7 +224,7 @@ async function adminPoolList(ctx) {
     }
 
     if (completedGroups.length > 0) {
-      message += `🔵 *Completed (${completedGroups.length}):*\n`;
+      message += `🔵 <b>Completed (${completedGroups.length}):</b>\n`;
       completedGroups.forEach((group) => {
         const title = group.groupTitle || "Unknown";
         const completedAgo = group.completedAt
@@ -242,7 +242,7 @@ async function adminPoolList(ctx) {
       message += "No groups in pool.";
     }
 
-    await ctx.reply(message);
+    await ctx.reply(message, { parse_mode: "HTML" });
   } catch (error) {
     console.error("Error listing groups:", error);
     ctx.reply("❌ Error listing groups.");
@@ -328,12 +328,12 @@ async function adminAddressPool(ctx) {
       );
     }
 
-    let message = `🏦 **DEPOSIT ADDRESS**\n\n`;
-    message += `📍 Single Address (All Tokens):\n\`${stats.singleAddress}\`\n\n`;
+    let message = `🏦 <b>DEPOSIT ADDRESS</b>\n\n`;
+    message += `📍 Single Address (All Tokens):\n<code>${stats.singleAddress}</code>\n\n`;
     message += `ℹ️ This address accepts deposits for all tokens and networks.\n`;
     message += `Transaction hashes are validated to ensure unique deposits.`;
 
-    await ctx.reply(message, { parse_mode: "Markdown" });
+    await ctx.reply(message, { parse_mode: "HTML" });
   } catch (error) {
     console.error("Error getting address pool stats:", error);
     ctx.reply("❌ Error loading address pool statistics.");
@@ -467,7 +467,7 @@ async function adminWithdrawNetworkFees(ctx) {
     let sweptCount = 0;
     let skippedCount = 0;
     let errorCount = 0;
-    let message = `💸 **NETWORK FEE WITHDRAWAL**\n\nTarget Wallet: \`${hotWalletAddress}\`\n\n`;
+    let message = `💸 **NETWORK FEE WITHDRAWAL**\n\nSweeping excess funds to configured Fee Wallets (BSC/TRON).\n\n`;
 
     for (const contract of contracts) {
       // Skip TRON check removed - fully supported
@@ -1494,7 +1494,18 @@ async function adminResetAllGroups(ctx) {
     (async () => {
       try {
         // Get all groups from pool
-        const allGroups = await GroupPool.find({});
+        let query = {};
+        if (config.ESCROW_FEE_PERCENT === 0) {
+          // Legacy Mode: Room 4-23
+          query.groupTitle = { $regex: /^Room ([4-9]|1[0-9]|2[0-3])$/ };
+        } else {
+          // Tiered Mode: Room 24+
+          query.groupTitle = {
+            $regex: /^Room (2[4-9]|[3-9][0-9]|[1-9][0-9]{2,})$/,
+          };
+        }
+
+        const allGroups = await GroupPool.find(query);
 
         if (!allGroups || allGroups.length === 0) {
           await telegram.editMessageText(
@@ -1795,9 +1806,19 @@ async function adminWithdrawExcess(ctx) {
       },
     });
 
-    const assignedGroups = await GroupPool.countDocuments({
-      status: "assigned",
-    });
+    let groupQuery = { status: "assigned" };
+
+    if (config.ESCROW_FEE_PERCENT === 0) {
+      // Legacy Mode: Room 4-23
+      groupQuery.groupTitle = { $regex: /^Room ([4-9]|1[0-9]|2[0-3])$/ };
+    } else {
+      // Tiered Mode: Room 24+
+      groupQuery.groupTitle = {
+        $regex: /^Room (2[4-9]|[3-9][0-9]|[1-9][0-9]{2,})$/,
+      };
+    }
+
+    const assignedGroups = await GroupPool.countDocuments(groupQuery);
 
     const hasActiveTrades = activeEscrows > 0 || assignedGroups > 0;
 
@@ -2249,16 +2270,127 @@ module.exports = {
   adminGroupReset,
   adminResetForce,
   adminResetAllGroups,
-  adminWithdrawBscUsdt: adminWithdrawBscUsdt, // Legacy
-  adminWithdrawExcess: adminWithdrawBscUsdt, // Alias for index.js compatibility
+  adminResetForce,
+  adminResetAllGroups,
+  // adminWithdrawBscUsdt: adminWithdrawBscUsdt, // Legacy removed
+  // adminWithdrawExcess: adminWithdrawBscUsdt, // Alias removed
 
-  // New Commands
+  // New Consolidated Commands
+  adminWithdrawAllBsc,
+  adminWithdrawAllTron,
+
+  // Kept for specific manual usage if needed, but not registered in main help by default
   adminWithdrawFees,
-  adminWithdrawFeesBscUsdt,
-  adminWithdrawFeesBscUsdc,
   adminWithdrawNetworkFees,
+
   adminHelp,
 
   // Setup helper
   setupAdminActions,
 };
+
+async function adminWithdrawAllBsc(ctx) {
+  if (!isAdmin(ctx)) return;
+  await handleWithdrawAll(ctx, "BSC");
+}
+
+async function adminWithdrawAllTron(ctx) {
+  if (!isAdmin(ctx)) return;
+  await handleWithdrawAll(ctx, "TRON");
+}
+
+/**
+ * Validates and consolidates withdrawals for a network
+ */
+async function handleWithdrawAll(ctx, network) {
+  try {
+    const statusMsg = await ctx.reply(
+      `🔍 Scanning ${network} contracts for fees...`
+    );
+
+    const contracts = await Contract.find({
+      network: network.toUpperCase(),
+      status: "deployed",
+    });
+
+    if (contracts.length === 0) {
+      return ctx.reply(`❌ No deployed contracts found for ${network}.`);
+    }
+
+    const bs = new BlockchainService();
+    await bs.initialize();
+
+    let report = `💸 <b>${network} FEE WITHDRAWAL REPORT</b>\n\n`;
+    let totalWithdrawnFees = 0;
+    let totalSweptSurplus = 0;
+
+    for (const contract of contracts) {
+      // 1. Withdraw Protocol Fees (Accumulated)
+      try {
+        const fees = await bs.getFeeSettings(contract.token, network);
+        if (parseFloat(fees.accumulated) > 0) {
+          await bs.withdrawFees(contract.token, network);
+          totalWithdrawnFees++;
+          report += `✅ <b>${contract.token} Fees:</b> withdrawn\n`;
+        }
+      } catch (e) {
+        console.error(
+          `Error checking fees for ${contract.address}:`,
+          e.message
+        );
+      }
+
+      // 2. Sweep Surplus (if idle)
+      const activeCount = await Escrow.countDocuments({
+        contractAddress: contract.address,
+        status: {
+          $in: [
+            "awaiting_deposit",
+            "deposited",
+            "in_fiat_transfer",
+            "ready_to_release",
+          ],
+        },
+      });
+
+      if (activeCount === 0) {
+        const targetWallet =
+          network.toUpperCase() === "TRON" || network.toUpperCase() === "TRX"
+            ? config.FEE_WALLET_TRC
+            : config.FEE_WALLET_BSC;
+
+        if (targetWallet) {
+          try {
+            await bs.withdrawToken(
+              contract.token,
+              network,
+              contract.address,
+              targetWallet
+            );
+            totalSweptSurplus++;
+            report += `🧹 <b>${contract.token} Surplus:</b> swept to admin\n`;
+          } catch (e) {
+            // Ignore zero balance errors usually
+          }
+        }
+      }
+    }
+
+    if (totalWithdrawnFees === 0 && totalSweptSurplus === 0) {
+      report += "ℹ️ No funds available to withdraw.";
+    } else {
+      report += `\n<b>Summary:</b>\nProtocol Fees Withdrawn: ${totalWithdrawnFees}\nSurplus Sweeps: ${totalSweptSurplus}`;
+    }
+
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      statusMsg.message_id,
+      null,
+      report,
+      { parse_mode: "HTML" }
+    );
+  } catch (error) {
+    console.error("Error in withdraw all:", error);
+    ctx.reply(`❌ Error: ${error.message}`);
+  }
+}

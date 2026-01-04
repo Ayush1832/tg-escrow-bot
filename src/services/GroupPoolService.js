@@ -14,39 +14,49 @@ class GroupPoolService {
         // Legacy Mode: Room 4-23
         query.groupTitle = /^Room ([4-9]|1[0-9]|2[0-3])$/;
       } else {
-        // Tiered Mode: Room 24-45
-        query.groupTitle = /^Room (2[4-9]|3[0-9]|4[0-5])$/;
+        // Tiered Mode: Room 24+ (24-99, 100+)
+        query.groupTitle = /^Room (2[4-9]|[3-9][0-9]|[1-9][0-9]{2,})$/;
       }
 
+      // NOTE: We do NOT filter by feePercent here. Tiered groups are generic and adopt the fee of the deal.
+      // if (typeof requiredFeePercent === "number") {
+      //   query.feePercent = requiredFeePercent;
+      // }
+
+      const updateData = {
+        status: "assigned",
+        assignedEscrowId: escrowId,
+        assignedAt: new Date(),
+      };
+
       if (typeof requiredFeePercent === "number") {
-        query.feePercent = requiredFeePercent;
+        updateData.feePercent = requiredFeePercent;
       }
 
       const updatedGroup = await GroupPool.findOneAndUpdate(
         query,
         {
-          $set: {
-            status: "assigned",
-            assignedEscrowId: escrowId,
-            assignedAt: new Date(),
-          },
+          $set: updateData,
         },
         { new: true, sort: { createdAt: 1 } }
       );
 
       if (!updatedGroup) {
         // Check if there are any groups at all in the pool
-        const anyGroup = await GroupPool.findOne({});
+        const checkQuery = {};
+        if (config.ESCROW_FEE_PERCENT === 0) {
+          checkQuery.groupTitle = { $regex: /^Room ([4-9]|1[0-9]|2[0-3])$/ };
+        } else {
+          checkQuery.groupTitle = {
+            $regex: /^Room (2[4-9]|[3-9][0-9]|[1-9][0-9]{2,})$/,
+          };
+        }
+        const anyGroup = await GroupPool.findOne(checkQuery);
         if (!anyGroup) {
           throw new Error("No groups in pool. Please add a group.");
         }
 
-        // If we filtered by feePercent, be specific
-        if (typeof requiredFeePercent === "number") {
-          throw new Error(
-            `All ${requiredFeePercent}% fee groups are occupied currently please wait and try after sometime`
-          );
-        }
+        // Removed specific fee error since we don't filter by fee anymore
 
         throw new Error(
           "No available groups in pool. All groups are currently occupied."
@@ -228,6 +238,7 @@ class GroupPoolService {
       group.completedAt = new Date();
       group.assignedEscrowId = null;
       group.assignedAt = null;
+      group.feePercent = null;
       await group.save();
 
       return group;
@@ -400,7 +411,19 @@ class GroupPoolService {
    */
   async getPoolStats() {
     try {
+      let matchStage = {};
+      if (config.ESCROW_FEE_PERCENT === 0) {
+        // Legacy Mode: Room 4-23
+        matchStage.groupTitle = { $regex: /^Room ([4-9]|1[0-9]|2[0-3])$/ };
+      } else {
+        // Tiered Mode: Room 24+
+        matchStage.groupTitle = {
+          $regex: /^Room (2[4-9]|[3-9][0-9]|[1-9][0-9]{2,})$/,
+        };
+      }
+
       const stats = await GroupPool.aggregate([
+        { $match: matchStage },
         {
           $group: {
             _id: "$status",
@@ -434,7 +457,18 @@ class GroupPoolService {
    */
   async getGroupsByStatus(status) {
     try {
-      const groups = await GroupPool.find({ status }).sort({ createdAt: -1 });
+      let query = { status };
+      if (config.ESCROW_FEE_PERCENT === 0) {
+        // Legacy Mode: Room 4-23
+        query.groupTitle = { $regex: /^Room ([4-9]|1[0-9]|2[0-3])$/ };
+      } else {
+        // Tiered Mode: Room 24+
+        query.groupTitle = {
+          $regex: /^Room (2[4-9]|[3-9][0-9]|[1-9][0-9]{2,})$/,
+        };
+      }
+
+      const groups = await GroupPool.find(query).sort({ createdAt: -1 });
       return groups;
     } catch (error) {
       console.error("Error getting groups by status:", error);
@@ -455,6 +489,7 @@ class GroupPoolService {
           assignedAt: null,
           completedAt: null,
           inviteLink: null,
+          feePercent: null,
         }
       );
 
