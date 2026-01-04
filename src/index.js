@@ -14,7 +14,9 @@ const BlockchainService = require("./services/BlockchainService");
 const groupDealHandler = require("./handlers/groupDealHandler");
 const joinRequestHandler = require("./handlers/joinRequestHandler");
 const callbackHandler = require("./handlers/callbackHandler");
+const callbackHandler = require("./handlers/callbackHandler");
 const adminHandler = require("./handlers/adminHandler");
+const calculatorHandler = require("./handlers/calculatorHandler");
 const GroupPoolService = require("./services/GroupPoolService");
 const verifyHandler = require("./handlers/verifyHandler");
 const images = require("./config/images");
@@ -131,6 +133,8 @@ async function buildDealSummary(escrow) {
 • <b>Rate:</b> ₹${rate.toFixed(1)}
 • <b>Payment:</b> ${paymentMethod}
 • <b>Chain:</b> ${chain}
+• <b>Network Fee:</b> ${escrow.networkFee || 0} ${escrow.token || "USDT"}
+• <b>Service Fee:</b> ${escrow.feeRate || 0}%
 • <b>Buyer Address:</b> <code>${buyerAddress}</code>
 • <b>Seller Address:</b> <code>${sellerAddress}</code>
 
@@ -376,6 +380,15 @@ class EscrowBot {
 
   setupHandlers() {
     adminHandler(this.bot);
+
+    this.bot.command(
+      "withdraw_network_fees",
+      "withdraw_network_fees",
+      adminHandler.adminWithdrawNetworkFees
+    );
+
+    // Calculator Feature
+    this.bot.use(calculatorHandler);
 
     this.bot.command("cancel", async (ctx) => {
       try {
@@ -1495,7 +1508,11 @@ Total Deposited: ${formattedTotalDeposited.toFixed(5)} ${escrow.token}
 
           if (isPartialReleaseBySeller) {
             approvalNote =
-              "⚠️ Both Buyer and Seller must approve this partial release.";
+              "⚠️ Both Seller and Buyer must confirm this partial release.";
+            // Reset confirmations for new request
+            escrow.sellerConfirmedRelease = false;
+            escrow.buyerConfirmedRelease = false;
+
             const sellerLine = escrow.sellerConfirmedRelease
               ? `✅ ${sellerTag} - Confirmed`
               : `⌛️ ${sellerTag} - Waiting...`;
@@ -1629,77 +1646,67 @@ ${approvalNote}`;
         const refundAmount =
           requestedAmount !== null ? requestedAmount : formattedTotalDeposited;
 
-        if (refundAmount > formattedTotalDeposited) {
-          return ctx.reply(
-            `❌ Refund amount (${refundAmount.toFixed(
-              5
-            )}) exceeds available balance (${formattedTotalDeposited.toFixed(
-              5
-            )} ${escrow.token}).`
-          );
-        }
-
         if (refundAmount <= 0) {
           return ctx.reply("❌ Refund amount must be greater than 0.");
         }
 
-        escrow.pendingRefundAmount = refundAmount;
-        escrow.pendingReleaseAmount = null; // Clear any pending release
+        escrow.pendingRefundAmount =
+          requestedAmount !== null ? refundAmount : null;
+        escrow.pendingReleaseAmount = null;
 
-        if (isBuyer && !isAdmin) {
-          // Buyer initiates refund (partial or full) -> Requires Dual Approval
-          escrow.buyerConfirmedRefund = false;
-          escrow.sellerConfirmedRefund = false;
-        } else {
-          // Admin initiates -> handled by admin check in callback
-          // Reset flags just in case? Admin override doesn't use these flags usually, logic in callback handles admin privilege.
-          // But let's reset to be clean.
-          escrow.buyerConfirmedRefund = false;
-          escrow.sellerConfirmedRefund = false;
-        }
+        // Reset confirmation flags
+        escrow.adminConfirmedRelease = false;
+        escrow.buyerConfirmedRelease = false;
+        escrow.sellerConfirmedRelease = false;
+        await escrow.save();
 
-        const sellerLabel = escrow.sellerUsername
-          ? `@${escrow.sellerUsername}`
-          : escrow.sellerId
-          ? `[${escrow.sellerId}]`
-          : "the seller";
-
-        const buyerLabel = escrow.buyerUsername
+        const buyerTag = escrow.buyerUsername
           ? `@${escrow.buyerUsername}`
-          : escrow.buyerId
-          ? `[${escrow.buyerId}]`
-          : "the buyer";
+          : `[${escrow.buyerId}]`;
 
         const refundType = requestedAmount !== null ? "Partial" : "Full";
 
-        let note = "⚠️ Are you sure you want to refund the funds?";
-        let statusSection = "";
+        const isPartialRefund = requestedAmount !== null;
+        let approvalNote =
+          "⚠️ Buyer, please confirm you want to return these funds to the Seller.";
+        let statusSection = `⌛️ ${buyerTag} - Waiting for confirmation...`;
 
-        if (isBuyer && !isAdmin) {
-          note = "⚠️ Both Buyer and Seller must approve this refund.";
-          const buyerLine = escrow.buyerConfirmedRefund
-            ? `✅ ${buyerLabel} - Confirmed`
-            : `⌛️ ${buyerLabel} - Waiting...`;
+        if (isPartialRefund) {
+          approvalNote =
+            "⚠️ Both Buyer and Seller must confirm this partial refund.";
+          // Reset confirmations for new request
+          escrow.buyerConfirmedRefund = false;
+          escrow.sellerConfirmedRefund = false;
+
+          const sellerTag = escrow.sellerUsername
+            ? `@${escrow.sellerUsername}`
+            : `[Seller]`;
+
           const sellerLine = escrow.sellerConfirmedRefund
-            ? `✅ ${sellerLabel} - Confirmed`
-            : `⌛️ ${sellerLabel} - Waiting...`;
-          statusSection = `\n${buyerLine}\n${sellerLine}\n`;
+            ? `✅ ${sellerTag} - Confirmed`
+            : `⌛️ ${sellerTag} - Waiting...`;
+          const buyerLine = escrow.buyerConfirmedRefund
+            ? `✅ ${buyerTag} - Confirmed`
+            : `⌛️ ${buyerTag} - Waiting...`;
+          statusSection = `${sellerLine}\n${buyerLine}`;
         }
 
         const refundCaption = `<b>Refund Confirmation (${refundType})</b>
 
-Amount: ${refundAmount.toFixed(5)} ${escrow.token}
 ${
   requestedAmount !== null
-    ? `Total Deposited: ${formattedTotalDeposited.toFixed(5)} ${escrow.token}\n`
+    ? `Amount: ${refundAmount.toFixed(5)} ${
+        escrow.token
+      }\nTotal Deposited: ${formattedTotalDeposited.toFixed(5)} ${
+        escrow.token
+      }\n\n`
     : ""
-}To: ${sellerLabel}
-Address: <code>${escrow.sellerAddress}</code>
-${statusSection}
-${note}`;
+}${statusSection}
+
+${approvalNote}`;
 
         const refundMsg = await ctx.replyWithPhoto(
-          images.RELEASE_CONFIRMATION,
+          images.REFUND_CONFIRMATION || images.RELEASE_CONFIRMATION,
           {
             caption: refundCaption,
             parse_mode: "HTML",
@@ -1718,7 +1725,7 @@ ${note}`;
           }
         );
 
-        escrow.refundConfirmationMessageId = refundMsg.message_id;
+        escrow.releaseConfirmationMessageId = refundMsg.message_id;
         await escrow.save();
       } catch (error) {
         console.error("Error in refund command:", error);

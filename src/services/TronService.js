@@ -23,6 +23,16 @@ const ESCROW_VAULT_ABI = [
     stateMutability: "nonpayable",
     type: "function",
   },
+  {
+    inputs: [
+      { internalType: "address", name: "erc20Token", type: "address" },
+      { internalType: "address", name: "to", type: "address" },
+    ],
+    name: "withdrawToken",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
 ];
 
 class TronService {
@@ -119,6 +129,34 @@ class TronService {
       };
     } catch (error) {
       console.error("TRON refundFunds error:", error);
+      throw error;
+    }
+  }
+
+  async withdrawToken({ contractAddress, token = "USDT", to }) {
+    await this.init();
+    try {
+      // If token is USDT, resolve address from config
+      const tokenAddress =
+        token.toUpperCase() === "USDT" ? config.USDT_TRON : token;
+
+      const contract = await this.tronWeb.contract(
+        ESCROW_VAULT_ABI,
+        contractAddress
+      );
+
+      const tx = await contract.withdrawToken(tokenAddress, to).send({
+        feeLimit: 100_000_000,
+        callValue: 0,
+      });
+
+      return {
+        success: true,
+        transactionHash: tx,
+        contractAddress: contractAddress,
+      };
+    } catch (error) {
+      console.error("TRON withdrawToken error:", error);
       throw error;
     }
   }

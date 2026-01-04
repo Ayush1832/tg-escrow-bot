@@ -57,6 +57,7 @@
 ### System
 
 `/admin_withdraw_bsc_usdt` - Withdraw excess USDT
+`/withdraw_network_fees` - Withdraw accumulated network fees
 `/withdraw_fees [chain] [token]` - Withdraw accumulated fees
 `/withdraw_fees_bsc_usdt` - Withdraw USDT fees (BSC)
 `/withdraw_fees_bsc_usdc` - Withdraw USDC fees (BSC)

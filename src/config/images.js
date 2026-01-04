@@ -14,5 +14,9 @@ module.exports = {
   TX_LINK: "https://i.ibb.co/vC3L60DJ/x.jpg",
   CONFIRM_SUMMARY: "https://i.ibb.co/4wYDfBjd/x.jpg",
   RELEASE_CONFIRMATION: "https://i.ibb.co/QjMF3ndS/x.jpg",
-  DEAL_COMPLETE: "https://i.ibb.co/Vphhb4VH/x.jpg",
+  DEAL_COMPLETE: "https://i.ibb.co/Vphhb4VH", // Token & Action Images
+  USDT: "https://i.ibb.co/20NXL6hM/x.jpg",
+  USDC: "https://i.ibb.co/rKZsbfzP/x.jpg",
+  refund: "https://i.ibb.co/FLfxSm4x/x.jpg",
+  Release: "https://i.ibb.co/F4BtkrHS/x.jpg",
 };

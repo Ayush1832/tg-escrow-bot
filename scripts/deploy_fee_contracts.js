@@ -3,32 +3,30 @@ const Contract = require("../src/models/Contract");
 const mongoose = require("mongoose");
 const config = require("../config");
 
-const { ethers } = require("hardhat");
-const Contract = require("../src/models/Contract");
-const mongoose = require("mongoose");
-const config = require("../config");
-
 // Deployment Configuration
 const DEPLOYMENTS = [
   {
     symbol: "USDT",
     address: config.USDT_BSC,
     configs: [
-      // Scaled for 40 groups total
-      ...Array(24).fill({ fee: 0.25 }), // 24 contracts for 0.25% groups
-      ...Array(8).fill({ fee: 0.5 }), // 8 contracts for 0.50% groups
-      ...Array(8).fill({ fee: 0.75 }), // 8 contracts for 0.75% groups
+      // 15 contracts for 0.25% groups
+      ...Array(15).fill({ fee: 0.25 }),
+      // 3 contracts for 0.50% groups
+      ...Array(3).fill({ fee: 0.5 }),
+      // 2 contracts for 0.75% groups
+      ...Array(2).fill({ fee: 0.75 }),
     ],
   },
   {
     symbol: "USDC",
-    // Use config or known BSC USDC address
     address: config.USDC_BSC || "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
     configs: [
-      // Scaled for 40 groups (4 groups per USDC contract)
-      ...Array(6).fill({ fee: 0.25 }), // 6 contracts split across 24 groups
-      ...Array(2).fill({ fee: 0.5 }), // 2 contracts split across 8 groups
-      ...Array(2).fill({ fee: 0.75 }), // 2 contracts split across 8 groups
+      // 4 contracts for 0.25% groups (1 contract per ~4 groups)
+      ...Array(4).fill({ fee: 0.25 }),
+      // 1 contract for 0.50% groups
+      ...Array(1).fill({ fee: 0.5 }),
+      // 1 contract for 0.75% groups
+      ...Array(1).fill({ fee: 0.75 }),
     ],
   },
 ];
@@ -75,9 +73,8 @@ async function main() {
       try {
         const vault = await EscrowVault.deploy(
           tokenAddress,
-          feeBps,
-          config.FEE_WALLET_1,
-          config.FEE_WALLET_2
+          config.FEE_WALLET_BSC,
+          feeBps
         );
 
         await vault.waitForDeployment();

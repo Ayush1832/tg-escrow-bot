@@ -61,8 +61,25 @@ class AddressAssignmentService {
               typeof group.contracts.get === "function"
             ) {
               assignedContract = group.contracts.get(normalizedToken);
-            } else if (group.contracts[normalizedToken]) {
+              if (
+                !assignedContract ||
+                assignedContract.network !== normalizedNetwork
+              ) {
+                // Try specific key e.g. USDT_TRON
+                const specificKey = `${normalizedToken}_${normalizedNetwork}`;
+                const specificContract = group.contracts.get(specificKey);
+                if (specificContract) assignedContract = specificContract;
+              }
+            } else {
               assignedContract = group.contracts[normalizedToken];
+              if (
+                !assignedContract ||
+                assignedContract.network !== normalizedNetwork
+              ) {
+                const specificKey = `${normalizedToken}_${normalizedNetwork}`;
+                if (group.contracts[specificKey])
+                  assignedContract = group.contracts[specificKey];
+              }
             }
 
             // Also check if network matches (default BSC)

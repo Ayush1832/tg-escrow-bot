@@ -7,8 +7,7 @@ const TronService = require("./TronService");
 const ESCROW_VAULT_ABI = [
   "function token() view returns (address)",
   "function feePercent() view returns (uint256)",
-  "function feeWallet1() view returns (address)",
-  "function feeWallet2() view returns (address)",
+  "function feeWallet() view returns (address)",
   "function release(address to, uint256 amount) external",
   "function refund(address to, uint256 amount) external",
   "function withdrawToken(address erc20Token, address to) external",
@@ -264,7 +263,6 @@ class BlockchainService {
         console.warn(
           `⚠️ Transaction Failed: Contract likely has insufficient balance (transfer exceeds balance).`
         );
-        // Do not log full stack trace
         throw error;
       }
 
@@ -276,20 +274,63 @@ class BlockchainService {
     }
   }
 
+  async withdrawToken(token, network, contractAddress, toAddress) {
+    try {
+      if (network && network.toUpperCase() === "TRON") {
+        const result = await TronService.withdrawToken({
+          contractAddress,
+          token,
+          to: toAddress,
+        });
+        return result;
+      }
+
+      const wallet = this.wallets[network.toUpperCase()];
+      if (!wallet) throw new Error(`Wallet not configured for ${network}`);
+
+      const provider = this.providers[network.toUpperCase()];
+      const vault = new ethers.Contract(
+        contractAddress,
+        ESCROW_VAULT_ABI,
+        wallet
+      );
+
+      // We need the ERC20 token address that the vault manages
+      // Usually stored in 'token()' public var
+      const erc20Address = await vault.token();
+
+      let nonce;
+      try {
+        nonce = await provider.getTransactionCount(wallet.address, "latest");
+      } catch (nonceError) {
+        nonce = await provider.getTransactionCount(wallet.address);
+      }
+
+      const tx = await vault.withdrawToken(erc20Address, toAddress, { nonce });
+      const receipt = await tx.wait();
+
+      return {
+        success: true,
+        transactionHash: receipt.hash || receipt.transactionHash,
+      };
+    } catch (error) {
+      console.error(`Error sweeping token from ${contractAddress}:`, error);
+      throw error;
+    }
+  }
+
   async getFeeSettings(token = "USDT", network = "BSC") {
     try {
       const vault = await this.getVaultForNetwork(network, token);
 
-      const [wallet1, wallet2, feePercent, accumulated] = await Promise.all([
-        vault.feeWallet1(),
-        vault.feeWallet2(),
+      const [feeWallet, feePercent, accumulated] = await Promise.all([
+        vault.feeWallet(),
         vault.feePercent(),
         vault.accumulatedFees(),
       ]);
 
       return {
-        wallet1,
-        wallet2,
+        feeWallet,
         feePercent: Number(feePercent),
         accumulated: ethers.formatUnits(
           accumulated,

@@ -261,38 +261,43 @@ module.exports = async (ctx) => {
     let feePercent = 0.75;
     let networkFee = 0.2; // default network fee
 
-    try {
-      // Helper function to check bio
-      const checkBio = async (userId) => {
-        try {
-          const chat = await ctx.telegram.getChat(userId);
-          const bio = chat.bio || "";
-          return bio.toLowerCase().includes("@room");
-        } catch (e) {
-          console.error(`Error checking bio for ${userId}:`, e.message);
-          return false;
+    // If config dictates 0% fee, force it and skip bio checks
+    if (config.ESCROW_FEE_PERCENT === 0) {
+      feePercent = 0;
+    } else {
+      // Tiered Fee Logic (only if ESCROW_FEE_PERCENT > 0)
+      try {
+        // Helper function to check bio
+        const checkBio = async (userId) => {
+          try {
+            const chat = await ctx.telegram.getChat(userId);
+            const bio = chat.bio || "";
+            return bio.toLowerCase().includes("@room");
+          } catch (e) {
+            console.error(`Error checking bio for ${userId}:`, e.message);
+            return false;
+          }
+        };
+
+        const initiatorHasTag = await checkBio(initiatorId);
+        const counterpartyHasTag = counterpartyId
+          ? await checkBio(counterpartyId)
+          : false;
+
+        if (initiatorHasTag && counterpartyHasTag) {
+          feePercent = 0.25;
+        } else if (initiatorHasTag || counterpartyHasTag) {
+          feePercent = 0.5;
         }
-      };
-
-      const initiatorHasTag = await checkBio(initiatorId);
-      const counterpartyHasTag = counterpartyId
-        ? await checkBio(counterpartyId)
-        : false;
-
-      if (initiatorHasTag && counterpartyHasTag) {
-        feePercent = 0.25;
-        networkFee = 0.2;
-      } else if (initiatorHasTag || counterpartyHasTag) {
-        feePercent = 0.5;
-        networkFee = 0.2;
+      } catch (bioError) {
+        console.error("Error checking bios:", bioError);
+        // Fallback to default high fee
       }
-
-      // Always charge 0.2 USDT network fee for BSC contracts as per user request
-      networkFee = 0.2;
-    } catch (bioError) {
-      console.error("Error checking bios:", bioError);
-      // Fallback to default high fee
     }
+
+    // Default network fee is 0.2 (BSC/BEP20 default).
+    // This will be updated to 3.0 if user selects TRON in the deal flow.
+    networkFee = 0.2;
 
     console.log(`Matched Fee Tier: ${feePercent}% + ${networkFee} USDT`);
 
@@ -308,6 +313,9 @@ module.exports = async (ctx) => {
       );
     } catch (err) {
       console.error("Assign group error:", err);
+      if (err.message && err.message.includes("occupied currently")) {
+        return ctx.reply(`🚫 ${err.message}`);
+      }
       return ctx.reply(
         `🚫 No rooms available for the ${feePercent}% fee tier. Please try again later.`
       );

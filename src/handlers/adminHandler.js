@@ -447,6 +447,99 @@ async function adminCleanupAddresses(ctx) {
 }
 
 /**
+ * Admin command to withdraw accumulated network fees (surplus) from contracts.
+ * Safely sweeps idle contracts to the Hot Wallet.
+ */
+async function adminWithdrawNetworkFees(ctx) {
+  try {
+    if (!isAdmin(ctx)) {
+      return ctx.reply("❌ Access denied. Admin privileges required.");
+    }
+
+    await ctx.reply("🔍 Scanning contracts for surplus network fees...");
+
+    const contracts = await Contract.find({ status: "deployed" });
+    const BlockchainService = require("../services/BlockchainService");
+    const bs = new BlockchainService();
+    // Get Hot Wallet Address from the service instance (BSC wallet used as reference)
+    const hotWalletAddress = bs.getWallet("BSC").address;
+
+    let sweptCount = 0;
+    let skippedCount = 0;
+    let errorCount = 0;
+    let message = `💸 **NETWORK FEE WITHDRAWAL**\n\nTarget Wallet: \`${hotWalletAddress}\`\n\n`;
+
+    for (const contract of contracts) {
+      // Skip TRON check removed - fully supported
+      // if (contract.network === "TRON") { ... }
+
+      // Check for active escrows
+      const activeCount = await Escrow.countDocuments({
+        contractAddress: contract.address,
+        status: {
+          $in: [
+            "awaiting_deposit",
+            "deposited",
+            "in_fiat_transfer",
+            "ready_to_release",
+          ],
+        },
+      });
+
+      if (activeCount > 0) {
+        skippedCount++;
+        // message += `• [${contract.network}] ${contract.address.slice(0,6)}: ⚠️ Skipped (${activeCount} active deals)\n`;
+        continue;
+      }
+
+      // Determine target wallet based on network
+      const targetWallet =
+        contract.network === "TRON" || contract.network === "TRX"
+          ? config.FEE_WALLET_TRC
+          : config.FEE_WALLET_BSC;
+
+      if (!targetWallet) {
+        skippedCount++;
+        message += `• [${contract.network}] ${contract.address.slice(
+          0,
+          6
+        )}: ⚠️ Skipped (No Fee Wallet Configured)\n`;
+        continue;
+      }
+
+      // Attempt Sweep
+      try {
+        await bs.withdrawToken(
+          contract.token,
+          contract.network,
+          contract.address,
+          targetWallet
+        );
+        sweptCount++;
+        message += `• [${contract.network}] ${contract.address.slice(
+          0,
+          6
+        )}: ✅ Swept\n`;
+      } catch (err) {
+        errorCount++;
+        console.error(`Failed to sweep ${contract.address}:`, err.message);
+        message += `• [${contract.network}] ${contract.address.slice(
+          0,
+          6
+        )}: ❌ Error\n`;
+      }
+    }
+
+    message += `\n📊 Summary:\n✅ Swept: ${sweptCount}\n⚠️ Skipped (Active): ${skippedCount}\n❌ Errors: ${errorCount}`;
+
+    await ctx.reply(message, { parse_mode: "Markdown" });
+  } catch (error) {
+    console.error("Error withdrawing network fees:", error);
+    ctx.reply("❌ Error processing withdrawal: " + error.message);
+  }
+}
+
+/**
  * Delete ALL groups from pool (dangerous)
  */
 async function adminPoolDeleteAll(ctx) {
@@ -1744,10 +1837,12 @@ Please wait until all trades are completed, or proceed at your own risk.
 
 async function requestWithdrawConfirmation(ctx) {
   try {
-    const adminWallet = config.ADMIN_WALLET;
+    const adminWallet = config.FEE_WALLET_BSC;
 
     if (!adminWallet) {
-      return ctx.reply("❌ ADMIN_WALLET is not set in environment variables.");
+      return ctx.reply(
+        "❌ FEE_WALLET_BSC is not set in environment variables."
+      );
     }
 
     const confirmationMessage = `⚠️ **CONFIRM WITHDRAWAL**
@@ -1785,7 +1880,7 @@ async function executeWithdrawExcess(ctx) {
       MONGODB_URI,
       BSC_RPC_URL,
       HOT_WALLET_PRIVATE_KEY,
-      ADMIN_WALLET,
+      FEE_WALLET_BSC,
       CONTRACT_USDT_RESERVE,
     } = config;
 
@@ -1798,8 +1893,8 @@ async function executeWithdrawExcess(ctx) {
     if (!HOT_WALLET_PRIVATE_KEY) {
       throw new Error("HOT_WALLET_PRIVATE_KEY missing");
     }
-    if (!ADMIN_WALLET) {
-      throw new Error("ADMIN_WALLET missing");
+    if (!FEE_WALLET_BSC) {
+      throw new Error("FEE_WALLET_BSC missing");
     }
 
     const reserveAmount = CONTRACT_USDT_RESERVE;
@@ -1812,8 +1907,8 @@ async function executeWithdrawExcess(ctx) {
       throw new Error("USDT_BSC address missing/invalid in config");
     }
 
-    if (!ethers.isAddress(ADMIN_WALLET)) {
-      throw new Error("ADMIN_WALLET address is invalid");
+    if (!ethers.isAddress(FEE_WALLET_BSC)) {
+      throw new Error("FEE_WALLET_BSC address is invalid");
     }
 
     const chatId = ctx.chat?.id || ctx.callbackQuery?.message?.chat?.id;
@@ -1848,7 +1943,7 @@ async function executeWithdrawExcess(ctx) {
     const wallet = new ethers.Wallet(privateKey, provider);
 
     console.log(`👤 Hot wallet: ${wallet.address}`);
-    console.log(`👤 Admin wallet: ${ADMIN_WALLET}`);
+    console.log(`👤 Fee wallet (BSC): ${FEE_WALLET_BSC}`);
     console.log(`🔄 Target reserve per contract: ${reserveAmount} USDT\n`);
 
     await mongoose.connect(MONGODB_URI);
@@ -1943,10 +2038,10 @@ async function executeWithdrawExcess(ctx) {
           `💸 Transferring ${ethers.formatUnits(
             excessRaw,
             decimals
-          )} USDT to admin wallet...`
+          )} USDT to fee wallet...`
         );
         const transferTx = await tokenWithSigner.transfer(
-          ADMIN_WALLET,
+          FEE_WALLET_BSC,
           excessRaw
         );
         console.log(`⏳ Waiting for transfer tx ${transferTx.hash}...`);
@@ -1985,7 +2080,7 @@ async function executeWithdrawExcess(ctx) {
 • Contracts processed: ${processed}
 • Contracts skipped: ${skipped}
 • Total withdrawn: ${parseFloat(totalWithdrawnFormatted).toFixed(6)} USDT
-• Sent to: \`${ADMIN_WALLET}\`
+• Sent to: \`${FEE_WALLET_BSC}\`
 
 All excess funds have been withdrawn successfully.`;
 
@@ -2046,19 +2141,12 @@ const handleWithdrawFees = async (ctx, networkInput, tokenInput) => {
       return ctx.reply(`⚠️ No fees accumulated for ${token} on ${network}.`);
     }
 
-    const wallet1Share = (parseFloat(accumulated) * 0.7).toFixed(6);
-    const wallet2Share = (parseFloat(accumulated) * 0.3).toFixed(6);
-
     let msg = `💰 <b>Withdraw Fee Confirmation</b>\n\n`;
     msg += `<b>Chain:</b> ${network}\n`;
     msg += `<b>Token:</b> ${token}\n`;
     msg += `<b>Total Fees:</b> ${accumulated}\n\n`;
-    msg += `<b>Wallet 1:</b> <code>${settings.wallet1}</code>\n`;
-    msg += `├ Share: 70%\n`;
-    msg += `└ Amount: ${wallet1Share}\n\n`;
-    msg += `<b>Wallet 2:</b> <code>${settings.wallet2}</code>\n`;
-    msg += `├ Share: 30%\n`;
-    msg += `└ Amount: ${wallet2Share}\n\n`;
+    msg += `<b>Target Fees Wallet:</b> <code>${settings.feeWallet}</code>\n`;
+    msg += `└ Share: 100%\n\n`;
     msg += `❓ Do you confirm this withdrawal?`;
 
     await ctx.reply(msg, {
@@ -2168,6 +2256,7 @@ module.exports = {
   adminWithdrawFees,
   adminWithdrawFeesBscUsdt,
   adminWithdrawFeesBscUsdc,
+  adminWithdrawNetworkFees,
 
   // Setup helper
   setupAdminActions,

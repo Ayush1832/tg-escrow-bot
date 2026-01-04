@@ -491,18 +491,55 @@ module.exports = async (ctx) => {
           escrow.tradeDetailsStep !== "completed"
         ) {
           // New Step: Select Token (before Amount)
-          escrow.tradeDetailsStep = "step0_token";
+          // Fetch Group to check available contracts
+          const groupInfo = await GroupPool.findOne({
+            groupId: escrow.groupId,
+          });
+          const buttons = [];
+
+          if (groupInfo && groupInfo.contracts) {
+            // Check specific keys
+            if (groupInfo.contracts.has("USDT"))
+              buttons.push(
+                Markup.button.callback("USDT (BEP20)", "set_token_USDT")
+              );
+            if (groupInfo.contracts.has("USDC"))
+              buttons.push(
+                Markup.button.callback("USDC (BEP20)", "set_token_USDC")
+              );
+            if (groupInfo.contracts.has("USDT_TRON"))
+              buttons.push(
+                Markup.button.callback("USDT (TRC20)", "set_token_USDT_TRON")
+              );
+          } else {
+            // Fallback for legacy
+            buttons.push(
+              Markup.button.callback("USDT (BEP20)", "set_token_USDT")
+            );
+            buttons.push(
+              Markup.button.callback("USDC (BEP20)", "set_token_USDC")
+            );
+          }
+
+          // If no buttons (edge case), fallback
+          if (buttons.length === 0) {
+            buttons.push(
+              Markup.button.callback("USDT (BEP20)", "set_token_USDT")
+            );
+          }
+
+          // Arrange in rows of 2
+          const keyboard = [];
+          for (let i = 0; i < buttons.length; i += 2) {
+            keyboard.push(buttons.slice(i, i + 2));
+          }
+
           await ctx.telegram.sendMessage(
             escrow.groupId,
             "💰 <b>Step 1 - Select Token</b>\n\nPlease choose the token for this deal:",
             {
               parse_mode: "HTML",
-              reply_markup: Markup.inlineKeyboard([
-                [
-                  Markup.button.callback("USDT (BEP20)", "set_token_USDT"),
-                  Markup.button.callback("USDC (BEP20)", "set_token_USDC"),
-                ],
-              ]).reply_markup,
+              reply_markup: Markup.inlineKeyboard(keyboard).reply_markup,
             }
           );
           await escrow.save();
@@ -515,8 +552,7 @@ module.exports = async (ctx) => {
 
       return;
     } else if (callbackData.startsWith("set_token_")) {
-      const token = callbackData.split("_")[2]; // set_token_USDT
-      await safeAnswerCbQuery(ctx, `Selected ${token}`);
+      const tokenKey = callbackData.replace("set_token_", ""); // USDT, USDC, or USDT_TRON
 
       const escrow = await findGroupEscrow(chatId, [
         "draft",
@@ -532,9 +568,10 @@ module.exports = async (ctx) => {
         escrow.tradeDetailsStep !== "step0_token" &&
         escrow.tradeDetailsStep !== "step1_amount"
       ) {
-        // Allow if step1_amount (backwards compatibility or retry)
         // return safeAnswerCbQuery(ctx, "❌ Invalid step.");
       }
+
+      await safeAnswerCbQuery(ctx, `Selected ${tokenKey.replace("_", " ")}`);
 
       // Fetch Group to find appropriate contract
       const group = await GroupPool.findOne({ groupId: escrow.groupId });
@@ -543,36 +580,45 @@ module.exports = async (ctx) => {
       }
 
       let contractInfo = null;
-      if (group.contracts && group.contracts.get(token)) {
-        contractInfo = group.contracts.get(token);
-      } else if (token === "USDT" && group.contractAddress) {
+      if (group.contracts && group.contracts.get(tokenKey)) {
+        contractInfo = group.contracts.get(tokenKey);
+      } else if (tokenKey === "USDT" && group.contractAddress) {
         // Fallback for legacy groups only supporting USDT
         contractInfo = {
           address: group.contractAddress,
-          feePercent: group.feePercent || 0.75, // Default/fallback
+          feePercent: group.feePercent || 0.75,
           network: group.network || "BSC",
         };
       }
 
       if (!contractInfo || !contractInfo.address) {
         return ctx.reply(
-          `❌ This group does not support ${token} trades. Please contact admin.`
+          `❌ This group does not support ${tokenKey} trades. Please contact admin.`
         );
       }
 
       // Update Escrow
-      escrow.token = token;
-      escrow.contractAddress = contractInfo.address;
-      // Note: feePercent might be set by bio-check earlier.
-      // If we want to strictly enforce the contract's fee, we can overwrite it.
-      // But usually bio-check determines the tier, and we matched the group to that tier.
-      // However, if the group is shared (e.g. USDC contracts are shared),
-      // check if the contract matches the bio-check fee?
-      // Actually, we linked groups such that `group.contracts.USDC` matches the group's "tier".
-      // So assuming link_groups.js ran correctly, this is safe.
+      // tokenKey might be "USDT_TRON". Real token symbol is usually just "USDT".
+      // We derive token symbol and network from the key or contractInfo
 
-      // Update network fee based on token? User said "0.2 USDT" network fee.
-      // If token is USDC, logic stays 0.2 (value). We assume 0.2 units of the token.
+      let realTokenSymbol = tokenKey;
+      let realChain = contractInfo.network || "BSC";
+
+      if (tokenKey === "USDT_TRON") {
+        realTokenSymbol = "USDT";
+        realChain = "TRON";
+      }
+
+      escrow.token = realTokenSymbol;
+      escrow.chain = realChain;
+      escrow.contractAddress = contractInfo.address;
+
+      // Update Network Fee
+      if (realChain === "TRON" || realChain === "TRX") {
+        escrow.networkFee = 3.0;
+      } else {
+        escrow.networkFee = 0.2; // BSC/Default
+      }
 
       escrow.tradeDetailsStep = "step1_amount";
 
@@ -581,7 +627,7 @@ module.exports = async (ctx) => {
         escrow.groupId,
         images.ENTER_QUANTITY,
         {
-          caption: `💰 <b>Step 2 - Enter ${token} Amount</b>\n\nEnter amount including fee → Example: 1000`,
+          caption: `💰 <b>Step 2 - Enter ${realTokenSymbol} Amount</b>\n\nChain: ${realChain}\nNetwork Fee: ${escrow.networkFee} ${realTokenSymbol}\n\nEnter amount including fee → Example: 1000`,
           parse_mode: "HTML",
         }
       );
@@ -694,6 +740,8 @@ module.exports = async (ctx) => {
 • <b>Rate:</b> ₹${rate.toFixed(1)}
 • <b>Payment:</b> ${paymentMethod}
 • <b>Chain:</b> ${chain}
+• <b>Network Fee:</b> ${escrow.networkFee || 0} ${escrow.token || "USDT"}
+• <b>Service Fee:</b> ${escrow.feeRate || 0}%
 • <b>Buyer Address:</b> <code>${buyerAddress}</code>
 • <b>Seller Address:</b> <code>${sellerAddress}</code>
 

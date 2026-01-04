@@ -8,6 +8,16 @@ class GroupPoolService {
   async assignGroup(escrowId, telegram = null, requiredFeePercent = null) {
     try {
       const query = { status: "available" };
+
+      // Filter groups based on system mode (Legacy vs Tiered)
+      if (config.ESCROW_FEE_PERCENT === 0) {
+        // Legacy Mode: Room 4-23
+        query.groupTitle = /^Room ([4-9]|1[0-9]|2[0-3])$/;
+      } else {
+        // Tiered Mode: Room 24-45
+        query.groupTitle = /^Room (2[4-9]|3[0-9]|4[0-5])$/;
+      }
+
       if (typeof requiredFeePercent === "number") {
         query.feePercent = requiredFeePercent;
       }
@@ -25,10 +35,19 @@ class GroupPoolService {
       );
 
       if (!updatedGroup) {
+        // Check if there are any groups at all in the pool
         const anyGroup = await GroupPool.findOne({});
         if (!anyGroup) {
           throw new Error("No groups in pool. Please add a group.");
         }
+
+        // If we filtered by feePercent, be specific
+        if (typeof requiredFeePercent === "number") {
+          throw new Error(
+            `All ${requiredFeePercent}% fee groups are occupied currently please wait and try after sometime`
+          );
+        }
+
         throw new Error(
           "No available groups in pool. All groups are currently occupied."
         );

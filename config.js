@@ -1,4 +1,4 @@
-require('dotenv').config();
+require("dotenv").config();
 
 module.exports = {
   // Telegram Bot Configuration
@@ -18,7 +18,7 @@ module.exports = {
   MONGODB_URI: process.env.MONGODB_URI,
 
   // Network Configuration
-  BSC_RPC_URL: process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org/',
+  BSC_RPC_URL: process.env.BSC_RPC_URL || "https://bsc-dataseed.binance.org/",
   ETHERSCAN_API_KEY: process.env.ETHERSCAN_API_KEY,
   // Token Contract Addresses
   USDT_SEPOLIA: process.env.USDT_SEPOLIA,
@@ -42,12 +42,11 @@ module.exports = {
   SEPOLIA_RPC_URL: process.env.SEPOLIA_RPC_URL,
   ETH_RPC_URL: process.env.ETH_RPC_URL,
   LTC_RPC_URL: process.env.LTC_RPC_URL,
-  TRON_RPC_URL: process.env.TRON_RPC_URL || 'https://api.trongrid.io',
+  TRON_RPC_URL: process.env.TRON_RPC_URL || "https://api.trongrid.io",
 
   // Wallet Configuration
   HOT_WALLET_PRIVATE_KEY: process.env.HOT_WALLET_PRIVATE_KEY,
   TRC_PRIVATE_KEY: process.env.TRC_PRIVATE_KEY,
-  ADMIN_WALLET: process.env.ADMIN_WALLET,
 
   // Escrow Configuration
   ESCROW_FEE_PERCENT: Number(process.env.ESCROW_FEE_PERCENT || 0),
@@ -56,12 +55,12 @@ module.exports = {
   MIN_TRADE_AMOUNT: Number(process.env.MIN_TRADE_AMOUNT || 1),
   MAX_TRADE_AMOUNT: Number(process.env.MAX_TRADE_AMOUNT || 10000),
 
-  // Fee wallets (Distribution: 70% - 30%)
-  FEE_WALLET_1: process.env.FEE_WALLET_1, // 70% of total fees
-  FEE_WALLET_2: process.env.FEE_WALLET_2, // 30% of total fees
+  // Fee wallets (Per-Network)
+  FEE_WALLET_BSC: process.env.FEE_WALLET_BSC,
+  FEE_WALLET_TRC: process.env.FEE_WALLET_TRC,
 
   // Security
-  NODE_ENV: process.env.NODE_ENV || 'development',
+  NODE_ENV: process.env.NODE_ENV || "development",
 
   // Dispute Management
   DISPUTE_CHANNEL_ID: process.env.DISPUTE_CHANNEL_ID,
@@ -87,5 +86,5 @@ module.exports = {
     if (this.ADMIN_USERNAME4) adminUsernames.push(this.ADMIN_USERNAME4);
     if (this.ADMIN_USERNAME5) adminUsernames.push(this.ADMIN_USERNAME5);
     return adminUsernames;
-  }
+  },
 };

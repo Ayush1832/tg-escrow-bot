@@ -16,14 +16,12 @@ contract EscrowVault {
     address public owner;
     IERC20 public immutable token; // USDT (BEP-20)
 
-    // Fee wallets and split
-    // Fee wallets and split
-    address public feeWallet1;
-    address public feeWallet2;
+    // Fee wallet (100% of fees)
+    address public feeWallet;
     // feePercent in basis points (e.g., 100 = 1.00%)
     uint256 public feePercent;
 
-    // Accumulate fees in contract instead of sending immediately
+    // Accumulate fees in contract
     uint256 public accumulatedFees;
 
     event Released(
@@ -38,14 +36,8 @@ contract EscrowVault {
         uint256 netAmount,
         uint256 feeAmount
     );
-    event FeesWithdrawn(
-        uint256 amount,
-        address wallet1,
-        uint256 amount1,
-        address wallet2,
-        uint256 amount2
-    );
-    event FeeWalletsUpdated(address w1, address w2);
+    event FeesWithdrawn(uint256 amount, address wallet);
+    event FeeWalletUpdated(address wallet);
     event FeePercentUpdated(uint256 feePercent);
 
     modifier onlyOwner() {
@@ -53,11 +45,10 @@ contract EscrowVault {
         _;
     }
 
-    constructor(address _token, address _w1, address _w2, uint256 _feePercent) {
+    constructor(address _token, address _feeWallet, uint256 _feePercent) {
         owner = msg.sender;
         token = IERC20(_token);
-        feeWallet1 = _w1;
-        feeWallet2 = _w2;
+        feeWallet = _feeWallet;
         feePercent = _feePercent; // 100 = 1%
     }
 
@@ -65,10 +56,9 @@ contract EscrowVault {
         owner = _owner;
     }
 
-    function setFeeWallets(address _w1, address _w2) external onlyOwner {
-        feeWallet1 = _w1;
-        feeWallet2 = _w2;
-        emit FeeWalletsUpdated(_w1, _w2);
+    function setFeeWallet(address _feeWallet) external onlyOwner {
+        feeWallet = _feeWallet;
+        emit FeeWalletUpdated(_feeWallet);
     }
 
     function setFeePercent(uint256 _feePercent) external onlyOwner {
@@ -81,15 +71,11 @@ contract EscrowVault {
         uint256 fee = accumulatedFees;
         require(fee > 0, "no-fees");
 
-        accumulatedFees = 0; // Reset before transfer to prevent re-entrancy
+        accumulatedFees = 0; // Reset before transfer
 
-        uint256 f1 = (fee * 70) / 100; // 70%
-        uint256 f2 = fee - f1; // 30% remainder
+        require(token.transfer(feeWallet, fee), "fee-fail");
 
-        require(token.transfer(feeWallet1, f1), "fee1-fail");
-        require(token.transfer(feeWallet2, f2), "fee2-fail");
-
-        emit FeesWithdrawn(fee, feeWallet1, f1, feeWallet2, f2);
+        emit FeesWithdrawn(fee, feeWallet);
     }
 
     function release(address to, uint256 amount) external onlyOwner {
