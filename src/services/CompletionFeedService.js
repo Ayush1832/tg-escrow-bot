@@ -331,6 +331,8 @@ ${transactionLine}`;
       ? `🔗 Transaction: <code>${transactionHash.substring(0, 10)}...</code>`
       : "";
 
+    /* 
+    // Partial deposit logging disabled by user request
     const message = `💰<b>PARTIAL DEPOSIT RECEIVED</b>
 
 ⚡️ Buyer: ${buyerDisplay}
@@ -363,6 +365,7 @@ ${transactionLine}`;
         error.message
       );
     }
+    */
   }
 
   /**
@@ -526,11 +529,28 @@ ${transactionLine}`;
     let messageBody = "";
 
     // Determine specific message content based on type
+    // Common details
+    const rate = freshEscrow.rate || 0;
+    const paymentMethod = freshEscrow.paymentMethod || "N/A";
+    const dealAmount = freshEscrow.quantity || 0;
+
     if (type === "completed") {
       titleIcon = "✅";
       titleText = "TRADE COMPLETED SUCCESSFULLY";
+
+      const networkFee = freshEscrow.networkFee || 0;
+      const serviceFeePercent = freshEscrow.feeRate || 0;
+      const serviceFee = (dealAmount * serviceFeePercent) / 100;
+
       messageBody = `
 💰 <b>Released Amount:</b> ${amountDisplay} ${token}
+💵 <b>Deal Amount:</b> ${this.formatAmount(dealAmount)} ${token}
+📊 <b>Rate:</b> ₹${rate}
+💳 <b>Payment Method:</b> ${paymentMethod}
+🛡 <b>Network Fee:</b> ${networkFee} ${token}
+🤝 <b>Service Fee:</b> ${this.formatAmount(
+        serviceFee
+      )} ${token} (${serviceFeePercent}%)
 🌐 <b>Chain:</b> ${network}
 🔗 <b>Transaction:</b> <code>${transactionHash || "N/A"}</code>
 
@@ -540,6 +560,9 @@ The funds have been released to the buyer. Thank you for using our escrow servic
       titleText = type === "refunded" ? "TRADE REFUNDED" : "PARTIAL REFUND";
       messageBody = `
 💰 <b>Refunded Amount:</b> ${amountDisplay} ${token}
+💵 <b>Original Deal Amount:</b> ${this.formatAmount(dealAmount)} ${token}
+📊 <b>Rate:</b> ₹${rate}
+💳 <b>Payment Method:</b> ${paymentMethod}
 🌐 <b>Chain:</b> ${network}
 🔗 <b>Transaction:</b> <code>${transactionHash || "N/A"}</code>
 

@@ -1005,7 +1005,10 @@ ${approvalStatus}`;
 <b>Seller:</b> ${sellerTag}
 
 <b>Deal Amount:</b> ${amount.toFixed(1)} ${updatedEscrow.token || "USDT"}
-<b> Fees:</b> ${escrowFee.toFixed(2)} ${updatedEscrow.token || "USDT"}
+<b>Network Fee:</b> ${networkFee} ${updatedEscrow.token || "USDT"}
+<b>Service Fee:</b> ${escrowFee.toFixed(4)} ${
+          updatedEscrow.token || "USDT"
+        } (${escrowFeePercent}%)
 <b>Release Amount:</b> ${releaseAmount.toFixed(2)} ${
           updatedEscrow.token || "USDT"
         }
@@ -1961,7 +1964,11 @@ Once you’ve sent the amount, tap the button below.`;
         // Calculate expected payout
         const grossFee = totalDeposited * feeRateDecimal;
         const totalDeductions = networkFee + grossFee;
-        const targetPayout = totalDeposited - totalDeductions;
+        let targetPayout = totalDeposited - totalDeductions;
+
+        // Round to 2 decimal places to match display precision (e.g., 0.7925 becomes 0.79)
+        // This ensures the actual release matches what users see in DEAL CONFIRMED message
+        targetPayout = Math.floor(targetPayout * 100) / 100;
 
         if (targetPayout <= 0) {
           // Fallback to naive calc if fees eat everything to avoid negative

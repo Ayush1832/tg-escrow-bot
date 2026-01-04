@@ -1560,6 +1560,26 @@ ${approvalNote}`;
           return ctx.reply("❌ This command can only be used in a group chat.");
         }
 
+        const escrow = await findGroupEscrow(chatId, [
+          "deposited",
+          "in_fiat_transfer",
+          "ready_to_release",
+          "disputed",
+        ]);
+
+        if (!escrow) {
+          return ctx.reply(
+            "❌ No active trade available for refund in this group."
+          );
+        }
+
+        const normalizedUsername = ctx.from.username
+          ? ctx.from.username.toLowerCase()
+          : "";
+        const isAdmin =
+          config.getAllAdminUsernames().includes(ctx.from.username) ||
+          config.getAllAdminIds().includes(String(userId));
+
         const isBuyerIdMatch =
           escrow.buyerId && Number(escrow.buyerId) === Number(userId);
         const isBuyerUsernameMatch =
@@ -1569,17 +1589,6 @@ ${approvalNote}`;
 
         if (!isAdmin && !isBuyer) {
           return ctx.reply("❌ Only admins or the buyer can use this command.");
-        }
-
-        const escrow = await findGroupEscrow(chatId, [
-          "deposited",
-          "in_fiat_transfer",
-          "ready_to_release",
-          "disputed",
-        ]);
-
-        if (!escrow) {
-          return;
         }
 
         if (!escrow.sellerAddress) {
