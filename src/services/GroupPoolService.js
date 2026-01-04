@@ -202,11 +202,11 @@ class GroupPoolService {
             throw retryErr;
           }
         } else if (chatError.message.includes("chat not found")) {
-          group.status = "archived";
-          await group.save();
-          throw new Error(
-            `Group ${groupId} not found or bot is not a member. Group has been archived.`
-          );
+          // User requested NOT to archive groups automatically.
+          // We will just throw the error, leaving the group as is (or assigned).
+          // group.status = "archived";
+          // await group.save();
+          throw new Error(`Group ${groupId} not found or bot is not a member.`);
         }
         throw chatError;
       }
@@ -574,14 +574,14 @@ class GroupPoolService {
             error.message.includes("bot was kicked") ||
             error.message.includes("bot is not a member")
           ) {
+            // User requested NOT to archive groups automatically.
             // Mark group as archived
-            group.status = "archived";
-            group.assignedEscrowId = null;
-            group.assignedAt = null;
-            // Keep inviteLink even when archived - might be reused if group is restored
-            await group.save();
-
-            cleanedCount++;
+            // group.status = "archived";
+            // group.assignedEscrowId = null;
+            // group.assignedAt = null;
+            // // Keep inviteLink even when archived - might be reused if group is restored
+            // await group.save();
+            // cleanedCount++;
           }
         }
       }

@@ -584,11 +584,17 @@ class EscrowBot {
           ? `@${escrow.sellerUsername}`
           : "Seller";
         const chainName = escrow.chain || "BSC";
+
+        const addressExample = getAddressExample(chainName)
+          .replace("Step 5", "Step 8") // Reuse helper but correct the step number
+          .replace("{username}", sellerUsername)
+          .replace("{chain}", chainName);
+
         const step8Msg = await telegram.sendPhoto(
           groupId,
           images.ENTER_ADDRESS,
           {
-            caption: `💰 Step 8 - ${sellerUsername}, enter your ${chainName} wallet address\nstarts with 0x and is 42 chars (0x + 40 hex)`,
+            caption: addressExample,
           }
         );
         escrow.step8SellerAddressMessageId = step8Msg.message_id;
@@ -762,9 +768,14 @@ class EscrowBot {
 
             for (const log of txInfo.log || []) {
               try {
-                const logContractAddr = tronWeb.address.fromHex(log.address);
+                // Use Hex comparison for safety (avoids Base58 casing issues)
+                // log.address is Hex (41...)
+                const logContractHex = log.address;
+                const expectedTokenHex = tronWeb.address.toHex(tokenAddress);
+
                 if (
-                  logContractAddr.toLowerCase() !== tokenAddress.toLowerCase()
+                  logContractHex.toLowerCase() !==
+                  expectedTokenHex.toLowerCase()
                 ) {
                   continue;
                 }
@@ -776,17 +787,20 @@ class EscrowBot {
                     log.topics[0] === transferEventSig ||
                     log.topics[0].toLowerCase() === transferEventSig
                   ) {
-                    fromAddr = tronWeb.address.fromHex(
-                      "41" + log.topics[1].slice(-40)
-                    );
-                    toAddr = tronWeb.address.fromHex(
-                      "41" + log.topics[2].slice(-40)
-                    );
+                    // Convert log topics to Hex addresses (41 prefix + last 20 bytes)
+                    const fromHex = "41" + log.topics[1].slice(-40);
+                    const toHex = "41" + log.topics[2].slice(-40);
 
-                    const valueHex = log.data || "0";
-                    const value = BigInt("0x" + valueHex);
+                    const depositAddrHex = tronWeb.address.toHex(depositAddr);
 
-                    if (toAddr.toLowerCase() === depositAddr.toLowerCase()) {
+                    // Robust Hex Comparison
+                    if (toHex.toLowerCase() === depositAddrHex.toLowerCase()) {
+                      fromAddr = tronWeb.address.fromHex(fromHex); // Convert back to Base58 for storage
+                      toAddr = tronWeb.address.fromHex(toHex); // Convert back to Base58 for display
+
+                      const valueHex = log.data || "0";
+                      const value = BigInt("0x" + valueHex);
+
                       transferLog = { from: fromAddr, to: toAddr, value };
                       amountWeiBigInt = value;
                       amount = Number(amountWeiBigInt) / Math.pow(10, decimals);
@@ -1250,8 +1264,13 @@ Use /release After Fund Transfer to Seller
             : "Buyer";
           const chainName = escrow.chain || "BSC";
 
+          const addressExample = getAddressExample(chainName)
+            .replace("Step 5", "Step 7")
+            .replace("{username}", buyerUsername)
+            .replace("{chain}", chainName);
+
           const step7Msg = await ctx.replyWithPhoto(images.ENTER_ADDRESS, {
-            caption: `💰 Step 7 - ${buyerUsername}, enter your ${chainName} wallet address\nstarts with 0x and is 42 chars (0x + 40 hex)`,
+            caption: addressExample,
           });
           escrow.step7MessageId = step7Msg.message_id;
           await escrow.save();

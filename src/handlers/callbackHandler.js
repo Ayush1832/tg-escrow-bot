@@ -993,7 +993,10 @@ ${approvalStatus}`;
 
         // Calculate fees
         const networkFee = updatedEscrow.networkFee || 0;
-        const escrowFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
+        const escrowFeePercent =
+          updatedEscrow.feeRate !== undefined && updatedEscrow.feeRate !== null
+            ? Number(updatedEscrow.feeRate)
+            : Number(config.ESCROW_FEE_PERCENT || 0);
         const escrowFee = (amount * escrowFeePercent) / 100;
         const releaseAmount = amount - networkFee - escrowFee;
 
@@ -1056,7 +1059,10 @@ ${approvalStatus}`;
               updatedEscrow.token,
               network,
               updatedEscrow.quantity,
-              Number(config.ESCROW_FEE_PERCENT || 0),
+              updatedEscrow.feeRate !== undefined &&
+                updatedEscrow.feeRate !== null
+                ? Number(updatedEscrow.feeRate)
+                : Number(config.ESCROW_FEE_PERCENT || 0),
               updatedEscrow.groupId // Pass groupId explicitly
             );
 
@@ -1958,7 +1964,7 @@ Once you’ve sent the amount, tap the button below.`;
         const feeRate =
           typeof updatedEscrow.feeRate === "number"
             ? updatedEscrow.feeRate
-            : 0.75;
+            : Number(config.ESCROW_FEE_PERCENT || 0);
         const feeRateDecimal = feeRate / 100;
 
         // Calculate expected payout

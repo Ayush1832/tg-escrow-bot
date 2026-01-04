@@ -93,8 +93,13 @@ class AddressAssignmentService {
             }
           }
 
-          // 2. Fallback: Check for legacy contractAddress field (mostly for USDT)
-          if (group && group.contractAddress && normalizedToken === "USDT") {
+          // 2. Fallback: Check for legacy contractAddress field (mostly for USDT on BSC)
+          if (
+            group &&
+            group.contractAddress &&
+            normalizedToken === "USDT" &&
+            normalizedNetwork === "BSC"
+          ) {
             return {
               address: group.contractAddress,
               contractAddress: group.contractAddress,

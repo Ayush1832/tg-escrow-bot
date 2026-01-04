@@ -322,33 +322,64 @@ module.exports = async (ctx) => {
     // Create a new managed-room escrow and assign a pool group
     const escrowId = `ESC${Date.now()}`;
 
-    let assignedGroup;
-    try {
-      assignedGroup = await GroupPoolService.assignGroup(
-        escrowId,
-        ctx.telegram,
-        feePercent // Pass required fee percent
-      );
-    } catch (err) {
-      console.error("Assign group error:", err);
-      if (err.message && err.message.includes("occupied currently")) {
-        return ctx.reply(`🚫 ${err.message}`);
+    // Retry logic for assigning group and generating invite link
+    // This handles cases where a group in the pool is invalid (bot kicked, etc.)
+    // assignGroup picks a group, but generateInviteLink might fail if bot isn't admin/member
+    let assignedGroup = null;
+    let inviteLink = null;
+    let assignmentError = null;
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        assignedGroup = await GroupPoolService.assignGroup(
+          escrowId,
+          ctx.telegram,
+          feePercent // Pass required fee percent
+        );
+
+        // Always enforce join-request approval with a freshly generated link
+        // If this fails (e.g. group not found/archived), it throws an error
+        // causing us to catch it and retry with a new group
+        inviteLink = await GroupPoolService.refreshInviteLink(
+          assignedGroup.groupId,
+          ctx.telegram
+        );
+
+        if (!inviteLink) {
+          inviteLink = await GroupPoolService.generateInviteLink(
+            assignedGroup.groupId,
+            ctx.telegram,
+            { creates_join_request: true }
+          );
+        }
+
+        // If we got here, everything worked
+        break;
+      } catch (err) {
+        console.error(
+          `Attempt ${attempt} - Error assigning group or generating link:`,
+          err.message
+        );
+        assignmentError = err;
+
+        // If the error explicitly says group has been archived or not found,
+        // the GroupPoolService has already marked it as archived.
+        // We just need to loop again to pick a *different* group.
+
+        // If we ran out of retries, we'll handle it below.
       }
-      return ctx.reply(
-        `🚫 No rooms available for the ${feePercent}% fee tier. Please try again later.`
-      );
     }
 
-    // Always enforce join-request approval with a freshly generated link
-    let inviteLink = await GroupPoolService.refreshInviteLink(
-      assignedGroup.groupId,
-      ctx.telegram
-    );
-    if (!inviteLink) {
-      inviteLink = await GroupPoolService.generateInviteLink(
-        assignedGroup.groupId,
-        ctx.telegram,
-        { creates_join_request: true }
+    if (!assignedGroup || !inviteLink) {
+      if (
+        assignmentError &&
+        assignmentError.message &&
+        assignmentError.message.includes("occupied currently")
+      ) {
+        return ctx.reply(`🚫 ${assignmentError.message}`);
+      }
+      return ctx.reply(
+        `🚫 No functioning rooms available. Please contact support or try again later.`
       );
     }
 
