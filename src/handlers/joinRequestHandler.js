@@ -6,16 +6,12 @@ const {
 } = require("../utils/participant");
 const config = require("../../config");
 
-// Import timeout map from groupDealHandler to cancel timeouts when both join
-// We'll use a shared module pattern to access the timeout map
 let inviteTimeoutMap = null;
 
-// Function to set the timeout map (called from groupDealHandler)
 function setInviteTimeoutMap(map) {
   inviteTimeoutMap = map;
 }
 
-// Main handler function
 async function joinRequestHandler(ctx) {
   try {
     const request = ctx.update?.chat_join_request;
@@ -71,9 +67,7 @@ async function joinRequestHandler(ctx) {
       if (isAdminUser) {
         try {
           await ctx.telegram.approveChatJoinRequest(chatId, user.id);
-          console.log(
-            `Admin ${user.id} approved to join group ${chatId} (no escrow found).`
-          );
+
           // Auto-promote admin
           try {
             await ctx.telegram.promoteChatMember(chatId, user.id, {
@@ -112,42 +106,32 @@ async function joinRequestHandler(ctx) {
       participants.push({ username: null, id: null });
     }
 
-    // First, try to match by ID (most reliable)
     let participantIndex = participants.findIndex(
       (p) => p.id !== null && p.id === normalizedUserId
     );
 
-    // If no ID match, try to match by username
     if (participantIndex === -1 && lowercaseUsername) {
       participantIndex = participants.findIndex(
         (p) => p.username && p.username.toLowerCase() === lowercaseUsername
       );
     }
 
-    // If still no match, check if user is the creator (creatorId should always be set)
     if (
       participantIndex === -1 &&
       escrow.creatorId &&
       Number(escrow.creatorId) === normalizedUserId
     ) {
-      // Find the creator's slot - check if creatorId matches any participant's ID first
       const creatorSlotIndex = participants.findIndex(
         (p) => p.id !== null && Number(p.id) === Number(escrow.creatorId)
       );
-      // If creator's ID is in participants, use that slot; otherwise default to first slot
       participantIndex = creatorSlotIndex !== -1 ? creatorSlotIndex : 0;
     }
 
-    // If still no match, check if there's an empty slot (null ID and null username)
-    // This handles cases where ID/username wasn't captured initially
     if (participantIndex === -1) {
       const emptySlotIndex = participants.findIndex(
         (p) => p.id === null && (p.username === null || p.username === "")
       );
 
-      // Only allow filling empty slot if:
-      // 1. There's exactly one empty slot
-      // 2. The other slot is already filled (has an ID)
       const filledSlots = participants.filter((p) => p.id !== null);
       if (emptySlotIndex !== -1 && filledSlots.length === 1) {
         participantIndex = emptySlotIndex;
@@ -158,10 +142,7 @@ async function joinRequestHandler(ctx) {
       if (isAdminUser) {
         try {
           await ctx.telegram.approveChatJoinRequest(chatId, user.id);
-          console.log(
-            `Admin ${user.id} approved to join group ${chatId} for escrow ${escrow.escrowId}.`
-          );
-          // Auto-promote admin
+
           try {
             await ctx.telegram.promoteChatMember(chatId, user.id, {
               is_anonymous: false,

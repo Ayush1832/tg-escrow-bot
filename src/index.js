@@ -597,8 +597,8 @@ class EscrowBot {
     this.bot.use(async (ctx, next) => {
       try {
         const chat = ctx.chat;
-        const from = ctx.from;
-        if (!chat || !from) {
+        const ctxFrom = ctx.from;
+        if (!chat || !ctxFrom) {
           return next();
         }
         const chatId = chat.id;
@@ -644,7 +644,7 @@ class EscrowBot {
         }
 
         const text = ctx.message.text.trim();
-        const userId = from.id;
+        const userId = ctxFrom.id;
 
         if (escrow.sellerId !== userId) {
           return next();
@@ -707,6 +707,7 @@ class EscrowBot {
         }
 
         const chainUpper = (escrow.chain || "").toUpperCase();
+        let txFrom = null;
 
         if (chainUpper === "TRON" || chainUpper === "TRX") {
           try {
@@ -799,8 +800,7 @@ class EscrowBot {
               return;
             }
 
-            from = fromAddr;
-            to = toAddr;
+            txFrom = fromAddr;
           } catch (error) {
             console.error("Error processing TRON transaction:", error);
             await ctx.reply(
@@ -911,8 +911,7 @@ class EscrowBot {
               return;
             }
 
-            from = fromAddr;
-            to = toAddr;
+            txFrom = fromAddr;
           } catch (err) {
             console.error("Error fetching transaction:", err);
             await ctx.reply(
@@ -951,7 +950,7 @@ class EscrowBot {
 
         if (!freshEscrow.transactionHash) {
           freshEscrow.transactionHash = txHash;
-          freshEscrow.depositTransactionFromAddress = from;
+          freshEscrow.depositTransactionFromAddress = txFrom;
         } else {
           if (!freshEscrow.partialTransactionHashes) {
             freshEscrow.partialTransactionHashes = [];
@@ -960,17 +959,10 @@ class EscrowBot {
         }
 
         freshEscrow.depositAmount = newAccumulated;
-        // Only revert to awaiting_deposit if we fall below expected amount and we are not already advanced?
-        // Actually, for partial deposits, we want to stay in awaiting_deposit.
-        // But if we are doing a top-up, we don't want to flip to awaiting_deposit temporarily.
         if (
           newAccumulated < expectedAmount - tolerance &&
           freshEscrow.status !== "awaiting_deposit"
         ) {
-          // Only force status back if underfunded? Or maybe just keep as is?
-          // If it was 'deposited' and we add more, it stays 'deposited'.
-          // If it was 'awaiting_deposit' and we add some (still partial), it stays 'awaiting_deposit'.
-          // So we generally don't need to force change here unless we want to handle underpayment.
         }
         await freshEscrow.save();
 
@@ -989,7 +981,6 @@ class EscrowBot {
         }
 
         if (newAccumulated >= expectedAmount - tolerance) {
-          // Delete previous transaction hash details message if we have its ID
           if (freshEscrow.transactionHashMessageId) {
             try {
               await ctx.telegram.deleteMessage(
@@ -998,7 +989,6 @@ class EscrowBot {
               );
             } catch (e) {
               const desc = e?.response?.description || e?.message || "";
-              // Ignore cases where message is already gone or id is invalid
               const descLower = desc.toLowerCase();
               if (
                 !descLower.includes("message identifier is not specified") &&
@@ -1009,7 +999,6 @@ class EscrowBot {
             }
           }
 
-          // Delete the user's message containing the link/hash
           if (ctx.message && ctx.message.message_id) {
             try {
               await ctx.telegram.deleteMessage(chatId, ctx.message.message_id);
@@ -1038,7 +1027,6 @@ class EscrowBot {
             expectedAmount > 0 && newAccumulated - expectedAmount > tolerance;
 
           freshEscrow.confirmedAmount = newAccumulated;
-          // Only update status to deposited if it was awaiting_deposit (don't regress from in_fiat_transfer, etc.)
           if (
             ["draft", "awaiting_details", "awaiting_deposit"].includes(
               freshEscrow.status
@@ -1048,8 +1036,6 @@ class EscrowBot {
           }
           await freshEscrow.save();
 
-          // Check if this is a top-up (additional funds after initial completion)
-          // It's a top-up if the previous accumulated amount (before this tx) was already >= expected
           const isTopUp = currentAccumulated >= expectedAmount - tolerance;
 
           if (isTopUp) {
@@ -1191,7 +1177,7 @@ Use /release After Fund Transfer to Seller
         const userId = from.id;
 
         if (escrow.buyerId !== userId && escrow.sellerId !== userId) {
-          return; // Silently ignore
+          return;
         }
 
         const telegram = ctx.telegram;
@@ -1378,7 +1364,6 @@ Use /release After Fund Transfer to Seller
         let requestedAmount = null;
 
         if (hasAmount) {
-          const amountStr = parts[1].replace(/^-/, ""); // Remove leading minus if present
           requestedAmount = parseFloat(amountStr);
           if (isNaN(requestedAmount) || requestedAmount <= 0) {
             return ctx.reply(

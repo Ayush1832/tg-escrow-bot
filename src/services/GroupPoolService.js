@@ -413,12 +413,25 @@ class GroupPoolService {
     try {
       let matchStage = {};
       if (config.ESCROW_FEE_PERCENT === 0) {
-        // Legacy Mode: Room 4-23
-        matchStage.groupTitle = { $regex: /^Room ([4-9]|1[0-9]|2[0-3])$/ };
+        // Legacy Mode: Room 4-23 with 0% fee
+        matchStage = {
+          $and: [
+            { groupTitle: { $regex: /^Room ([4-9]|1[0-9]|2[0-3])$/ } },
+            {
+              $or: [
+                { feePercent: { $exists: false } },
+                { feePercent: null },
+                { feePercent: 0 },
+              ],
+            },
+          ],
+        };
       } else {
-        // Tiered Mode: Room 24+
-        matchStage.groupTitle = {
-          $regex: /^Room (2[4-9]|[3-9][0-9]|[1-9][0-9]{2,})$/,
+        // Tiered Mode: Room 24+ (only show groups from tiered tier)
+        matchStage = {
+          groupTitle: {
+            $regex: /^Room (2[4-9]|[3-9][0-9]|[1-9][0-9]{2,})$/,
+          },
         };
       }
 
@@ -459,12 +472,27 @@ class GroupPoolService {
     try {
       let query = { status };
       if (config.ESCROW_FEE_PERCENT === 0) {
-        // Legacy Mode: Room 4-23
-        query.groupTitle = { $regex: /^Room ([4-9]|1[0-9]|2[0-3])$/ };
+        // Legacy Mode: Room 4-23 with 0% fee
+        query = {
+          status,
+          $and: [
+            { groupTitle: { $regex: /^Room ([4-9]|1[0-9]|2[0-3])$/ } },
+            {
+              $or: [
+                { feePercent: { $exists: false } },
+                { feePercent: null },
+                { feePercent: 0 },
+              ],
+            },
+          ],
+        };
       } else {
-        // Tiered Mode: Room 24+
-        query.groupTitle = {
-          $regex: /^Room (2[4-9]|[3-9][0-9]|[1-9][0-9]{2,})$/,
+        // Tiered Mode: Room 24+ (only show groups from tiered tier)
+        query = {
+          status,
+          groupTitle: {
+            $regex: /^Room (2[4-9]|[3-9][0-9]|[1-9][0-9]{2,})$/,
+          },
         };
       }
 

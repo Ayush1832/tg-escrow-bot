@@ -1827,20 +1827,45 @@ Once you’ve sent the amount, tap the button below.`;
           ? updatedEscrow.pendingReleaseAmount
           : formattedTotalDeposited;
 
-      // Calculate amount to release after network fees (if full release)
-      // Only deduct network fee if releasing the full amount (standard flow)
-      // If pendingReleaseAmount is set (partial), we assume admin entered the exact amount to release
+      // Calculate amount to release based on "Fee on Gross" logic
+      // User expects: Payout = Total - NetworkFee - (Total * FeeRate)
+      // Contract does: Payout = ReleaseAmount * (1 - FeeRate)
+      // So: ReleaseAmount = (Total - NetworkFee - (Total * FeeRate)) / (1 - FeeRate)
+
       if (
         updatedEscrow.pendingReleaseAmount === null ||
         updatedEscrow.pendingReleaseAmount === undefined
       ) {
         const networkFee = updatedEscrow.networkFee || 0;
-        if (releaseAmount > networkFee) {
-          releaseAmount = releaseAmount - networkFee;
+        const feeRate =
+          typeof updatedEscrow.feeRate === "number"
+            ? updatedEscrow.feeRate
+            : 0.75;
+        const feeRateDecimal = feeRate / 100;
+
+        // Calculate expected payout
+        const grossFee = totalDeposited * feeRateDecimal;
+        const totalDeductions = networkFee + grossFee;
+        const targetPayout = totalDeposited - totalDeductions;
+
+        if (targetPayout <= 0) {
+          // Fallback to naive calc if fees eat everything to avoid negative
+          releaseAmount = totalDeposited - networkFee;
         } else {
-          console.warn(
-            `Warning: Release amount ${releaseAmount} is less than network fee ${networkFee}. Ignoring network fee.`
-          );
+          // Reverse calculate the amount to send to contract to achieve target payout
+          // If fee is 0, divisor is 1, so it works.
+          if (feeRateDecimal >= 1) {
+            // Safety: if 100% fee, can't divide by zero/negative
+            releaseAmount = totalDeposited - networkFee;
+          } else {
+            releaseAmount = targetPayout / (1 - feeRateDecimal);
+          }
+        }
+
+        // Final sanity check: cannot release more than we have
+        // (Though theoretically we leave dust in vault, so releaseAmount should be < totalDeposited)
+        if (releaseAmount > totalDeposited) {
+          releaseAmount = totalDeposited;
         }
       }
 

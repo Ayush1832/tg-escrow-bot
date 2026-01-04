@@ -155,7 +155,13 @@ ${escapedReason}
 • Network: ${escapeHtml(escrow.chain || "BSC")}
 • Status: ${escapeHtml(escrow.status || "Unknown")}
 
-⏰ <b>Reported At:</b> ${escapeHtml(new Date().toLocaleString())}`;
+⏰ <b>Reported At:</b> ${escapeHtml(
+        new Date().toLocaleString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          dateStyle: "short",
+          timeStyle: "medium",
+        })
+      )}`;
 
       await telegram.sendMessage(config.DISPUTE_CHANNEL_ID, disputeMessage, {
         parse_mode: "HTML",
