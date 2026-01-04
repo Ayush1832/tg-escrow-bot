@@ -478,7 +478,7 @@ class EscrowBot {
         const escrow = await findGroupEscrow(
           chatId,
           ["draft", "awaiting_details"],
-          { tradeDetailsStep: "step6_seller_address" }
+          { tradeDetailsStep: "step8_seller_address" }
         );
 
         if (!escrow) {
@@ -546,7 +546,7 @@ class EscrowBot {
         const escrow = await findGroupEscrow(
           chatId,
           ["draft", "awaiting_details"],
-          { tradeDetailsStep: "step5_buyer_address" }
+          { tradeDetailsStep: "step7_addresses" }
         );
 
         if (!escrow) {
@@ -569,7 +569,7 @@ class EscrowBot {
         }
 
         escrow.buyerAddress = text;
-        escrow.tradeDetailsStep = "step6_seller_address";
+        escrow.tradeDetailsStep = "step8_seller_address";
         escrow.status = "draft";
         await escrow.save();
 
@@ -577,14 +577,14 @@ class EscrowBot {
           ? `@${escrow.sellerUsername}`
           : "Seller";
         const chainName = escrow.chain || "BSC";
-        const step6Msg = await telegram.sendPhoto(
+        const step8Msg = await telegram.sendPhoto(
           groupId,
           images.ENTER_ADDRESS,
           {
-            caption: `💰 Step 6 - ${sellerUsername}, enter your ${chainName} wallet address\nto receive refund if deal is cancelled.`,
+            caption: `💰 Step 8 - ${sellerUsername}, enter your ${chainName} wallet address\nstarts with 0x and is 42 chars (0x + 40 hex)`,
           }
         );
-        escrow.step6SellerAddressMessageId = step6Msg.message_id;
+        escrow.step8SellerAddressMessageId = step8Msg.message_id;
         await escrow.save();
 
         return;
@@ -1163,7 +1163,7 @@ Use /release After Fund Transfer to Seller
           ["draft", "awaiting_details"],
           {
             tradeDetailsStep: {
-              $in: ["step1_amount", "step2_rate", "step3_payment"],
+              $in: ["step4_amount", "step5_rate", "step6_payment"],
             },
           }
         );
@@ -1182,7 +1182,7 @@ Use /release After Fund Transfer to Seller
         const telegram = ctx.telegram;
         const groupId = escrow.groupId;
 
-        if (escrow.tradeDetailsStep === "step1_amount") {
+        if (escrow.tradeDetailsStep === "step4_amount") {
           const amount = parseFlexibleNumber(text);
           if (isNaN(amount) || amount <= 0) {
             await ctx.reply(
@@ -1192,16 +1192,17 @@ Use /release After Fund Transfer to Seller
           }
 
           escrow.quantity = amount;
-          escrow.tradeDetailsStep = "step2_rate";
+          escrow.tradeDetailsStep = "step5_rate";
           await escrow.save();
 
-          const step2Msg = await ctx.replyWithPhoto(images.ENTER_RATE, {
-            caption: "📊 Step 2 - Rate per USDT → Example: 89.5",
+          const tokenName = escrow.token || "USDT";
+          const step5Msg = await ctx.replyWithPhoto(images.ENTER_RATE, {
+            caption: `📊 Step 5 - Rate per ${tokenName} → Example: 89.5`,
           });
-          escrow.step2MessageId = step2Msg.message_id;
+          escrow.step5MessageId = step5Msg.message_id;
           await escrow.save();
           return;
-        } else if (escrow.tradeDetailsStep === "step2_rate") {
+        } else if (escrow.tradeDetailsStep === "step5_rate") {
           const rate = parseFlexibleNumber(text);
           if (isNaN(rate) || rate <= 0) {
             await ctx.reply(
@@ -1211,16 +1212,16 @@ Use /release After Fund Transfer to Seller
           }
 
           escrow.rate = rate;
-          escrow.tradeDetailsStep = "step3_payment";
+          escrow.tradeDetailsStep = "step6_payment";
           await escrow.save();
 
-          const step3Msg = await ctx.replyWithPhoto(images.PAYMENT_METHOD, {
-            caption: "💳 Step 3 - Payment method → Examples: CDM, CASH, CCW",
+          const step6Msg = await ctx.replyWithPhoto(images.PAYMENT_METHOD, {
+            caption: "💳 Step 6 - Payment method → Examples: CDM, CASH, CCW",
           });
-          escrow.step3MessageId = step3Msg.message_id;
+          escrow.step6MessageId = step6Msg.message_id;
           await escrow.save();
           return;
-        } else if (escrow.tradeDetailsStep === "step3_payment") {
+        } else if (escrow.tradeDetailsStep === "step6_payment") {
           const paymentMethod = text.toUpperCase().trim();
           if (!paymentMethod || paymentMethod.length < 2) {
             await ctx.reply(
@@ -1230,25 +1231,23 @@ Use /release After Fund Transfer to Seller
           }
 
           escrow.paymentMethod = paymentMethod;
-          escrow.tradeDetailsStep = "step4_chain_coin";
+          escrow.tradeDetailsStep = "step7_addresses";
           escrow.status = "draft";
           if (!escrow.tradeStartTime) {
             escrow.tradeStartTime = escrow.createdAt || new Date();
           }
           await escrow.save();
 
-          const step4ChainMsg = await ctx.replyWithPhoto(images.SELECT_CHAIN, {
-            caption: "🔗 Step 4 – Choose Blockchain",
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  { text: "BSC", callback_data: "step4_select_chain_BSC" },
-                  { text: "TRON", callback_data: "step4_select_chain_TRON" },
-                ],
-              ],
-            },
+          // Step 7: Show buyer address prompt
+          const buyerUsername = escrow.buyerUsername
+            ? `@${escrow.buyerUsername}`
+            : "Buyer";
+          const chainName = escrow.chain || "BSC";
+
+          const step7Msg = await ctx.replyWithPhoto(images.ENTER_ADDRESS, {
+            caption: `💰 Step 7 - ${buyerUsername}, enter your ${chainName} wallet address\nstarts with 0x and is 42 chars (0x + 40 hex)`,
           });
-          escrow.step4ChainMessageId = step4ChainMsg.message_id;
+          escrow.step7MessageId = step7Msg.message_id;
           await escrow.save();
 
           return;

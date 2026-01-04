@@ -487,12 +487,181 @@ module.exports = async (ctx) => {
 
       await updateRoleSelectionMessage(ctx, escrow);
 
+      // After both roles are selected, trigger Step 2 (Blockchain Selection)
       if (escrow.buyerId && escrow.sellerId && escrow.roleSelectionMessageId) {
-        // After roles are selected, prompt for buyer address
-        const buyerText =
-          "✅ Roles confirmed!\n\n📋 Next: Set buyer's receiving address\n\n💡 Example:\n• /buyer 0xabcdef1234567890abcdef1234567890abcdef12";
-        await ctx.telegram.sendMessage(escrow.groupId, buyerText);
+        escrow.tradeDetailsStep = "step2_blockchain";
+        await escrow.save();
+
+        const step2Msg = await ctx.telegram.sendPhoto(
+          escrow.groupId,
+          images.SELECT_CHAIN,
+          {
+            caption: "🔗 Step 2 - Choose Blockchain",
+            parse_mode: "HTML",
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: "BSC", callback_data: "step2_select_chain_BSC" },
+                  { text: "TRON", callback_data: "step2_select_chain_TRON" },
+                ],
+              ],
+            },
+          }
+        );
+        escrow.step2MessageId = step2Msg.message_id;
+        await escrow.save();
       }
+      return;
+    } else if (callbackData.startsWith("step2_select_chain_")) {
+      // Step 2: Blockchain selection (new flow)
+      const chain = callbackData
+        .replace("step2_select_chain_", "")
+        .toUpperCase();
+      await safeAnswerCbQuery(ctx, `Selected ${chain}`);
+
+      const escrow = await findGroupEscrow(
+        chatId,
+        ["draft", "awaiting_details"],
+        {
+          tradeDetailsStep: "step2_blockchain",
+        }
+      );
+
+      if (!escrow) {
+        await safeAnswerCbQuery(ctx, "❌ No active escrow found.");
+        return;
+      }
+
+      if (escrow.buyerId !== userId && escrow.sellerId !== userId) {
+        return safeAnswerCbQuery(ctx, "❌ Only buyer or seller can select.");
+      }
+
+      escrow.chain = chain;
+      await escrow.save();
+
+      // Update blockchain selection message with checkmark
+      if (escrow.step2MessageId) {
+        const chains = ["BSC", "TRON"];
+        const buttons = chains.map((c) => ({
+          text: c === chain ? `✔ ${c}` : c,
+          callback_data: `step2_select_chain_${c}`,
+        }));
+
+        try {
+          await ctx.telegram.editMessageReplyMarkup(
+            escrow.groupId,
+            escrow.step2MessageId,
+            null,
+            { inline_keyboard: [buttons] }
+          );
+        } catch (err) {
+          // Ignore if message not modified
+        }
+      }
+
+      // Step 3: Show coin selection
+      const coins = chain === "TRON" ? ["USDT"] : ["USDT", "USDC"];
+      const step3Msg = await ctx.telegram.sendPhoto(
+        escrow.groupId,
+        images.SELECT_CRYPTO,
+        {
+          caption: "⚪ Step 3 - Select Coin",
+          reply_markup: {
+            inline_keyboard: [
+              coins.map((c) => ({
+                text: c,
+                callback_data: `step3_select_coin_${c}`,
+              })),
+            ],
+          },
+        }
+      );
+      escrow.step3MessageId = step3Msg.message_id;
+      escrow.tradeDetailsStep = "step3_coin";
+      await escrow.save();
+
+      return;
+    } else if (callbackData.startsWith("step3_select_coin_")) {
+      // Step 3: Coin selection (new flow)
+      const coin = callbackData.replace("step3_select_coin_", "").toUpperCase();
+      await safeAnswerCbQuery(ctx, `Selected ${coin}`);
+
+      const escrow = await findGroupEscrow(
+        chatId,
+        ["draft", "awaiting_details"],
+        {
+          tradeDetailsStep: "step3_coin",
+        }
+      );
+
+      if (!escrow) {
+        await safeAnswerCbQuery(ctx, "❌ No active escrow found.");
+        return;
+      }
+
+      if (escrow.buyerId !== userId && escrow.sellerId !== userId) {
+        return safeAnswerCbQuery(ctx, "❌ Only buyer or seller can select.");
+      }
+
+      // Validate coin against chain
+      const currentChain = (escrow.chain || "BSC").toUpperCase();
+      const validCoins = currentChain === "TRON" ? ["USDT"] : ["USDT", "USDC"];
+
+      if (!validCoins.includes(coin)) {
+        await safeAnswerCbQuery(
+          ctx,
+          `❌ ${coin} is not supported on ${currentChain}`
+        );
+        return;
+      }
+
+      escrow.token = coin;
+
+      // Set network fee based on chain
+      if (escrow.chain === "TRON") {
+        if (escrow.feeRate !== undefined && escrow.feeRate < 0.75) {
+          escrow.networkFee = 2.0;
+        } else {
+          escrow.networkFee = 3.0;
+        }
+      } else {
+        escrow.networkFee = 0.2;
+      }
+
+      await escrow.save();
+
+      // Update coin selection message with checkmark
+      if (escrow.step3MessageId) {
+        const coins = currentChain === "TRON" ? ["USDT"] : ["USDT", "USDC"];
+        const buttons = coins.map((c) => ({
+          text: c === coin ? `✔ ${c}` : c,
+          callback_data: `step3_select_coin_${c}`,
+        }));
+
+        try {
+          await ctx.telegram.editMessageReplyMarkup(
+            escrow.groupId,
+            escrow.step3MessageId,
+            null,
+            { inline_keyboard: [buttons] }
+          );
+        } catch (err) {
+          // Ignore if message not modified
+        }
+      }
+
+      // Step 4: Show amount input
+      const step4Msg = await ctx.telegram.sendPhoto(
+        escrow.groupId,
+        images.ENTER_QUANTITY,
+        {
+          caption: `💰 <b>Step 4 - Enter ${coin} Amount</b>\n\nChain: ${escrow.chain}\nNetwork Fee: ${escrow.networkFee} ${coin}\n\nEnter amount including fee → Example: 1000`,
+          parse_mode: "HTML",
+        }
+      );
+      escrow.step4MessageId = step4Msg.message_id;
+      escrow.tradeDetailsStep = "step4_amount";
+      await escrow.save();
 
       return;
     } else if (callbackData.startsWith("set_token_generic_")) {
