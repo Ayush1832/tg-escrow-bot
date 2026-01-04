@@ -355,7 +355,9 @@ async function updateRoleSelectionMessage(ctx, escrow) {
       );
     }
 
-    const roleDisclaimer = `<b>⚠️ Choose roles accordingly</b>
+    const roleDisclaimer = `<b>📋 Step 1 - Select Roles</b>
+
+<b>⚠️ Choose roles accordingly</b>
 
 <b>As release & refund happen according to roles</b>
 
@@ -486,67 +488,10 @@ module.exports = async (ctx) => {
       await updateRoleSelectionMessage(ctx, escrow);
 
       if (escrow.buyerId && escrow.sellerId && escrow.roleSelectionMessageId) {
-        if (
-          !escrow.tradeDetailsStep ||
-          escrow.tradeDetailsStep !== "completed"
-        ) {
-          // New Step: Select Token (before Amount)
-          // Fetch Group to check available contracts
-          const groupInfo = await GroupPool.findOne({
-            groupId: escrow.groupId,
-          });
-          const buttons = [];
-
-          if (groupInfo && groupInfo.contracts) {
-            // Check specific keys
-            if (
-              groupInfo.contracts.has("USDT") ||
-              groupInfo.contracts.has("USDT_TRON")
-            )
-              buttons.push(
-                Markup.button.callback("USDT", "set_token_generic_USDT")
-              );
-            if (groupInfo.contracts.has("USDC"))
-              buttons.push(
-                Markup.button.callback("USDC", "set_token_generic_USDC")
-              );
-          } else {
-            // Fallback for legacy
-            buttons.push(
-              Markup.button.callback("USDT", "set_token_generic_USDT")
-            );
-            buttons.push(
-              Markup.button.callback("USDC", "set_token_generic_USDC")
-            );
-          }
-
-          // If no buttons (edge case), fallback
-          if (buttons.length === 0) {
-            buttons.push(
-              Markup.button.callback("USDT (BEP20)", "set_token_USDT")
-            );
-          }
-
-          // Arrange in rows of 2
-          const keyboard = [];
-          for (let i = 0; i < buttons.length; i += 2) {
-            keyboard.push(buttons.slice(i, i + 2));
-          }
-
-          await ctx.telegram.sendMessage(
-            escrow.groupId,
-            "💰 <b>Step 1 - Select Token</b>\n\nPlease choose the token for this deal:",
-            {
-              parse_mode: "HTML",
-              reply_markup: Markup.inlineKeyboard(keyboard).reply_markup,
-            }
-          );
-          await escrow.save();
-        } else {
-          const buyerText =
-            "Now set /buyer address.\n\n📋 Example:\n• /buyer 0xabcdef1234567890abcdef1234567890abcdef12";
-          await ctx.telegram.sendMessage(escrow.groupId, buyerText);
-        }
+        // After roles are selected, prompt for buyer address
+        const buyerText =
+          "✅ Roles confirmed!\n\n📋 Next: Set buyer's receiving address\n\n💡 Example:\n• /buyer 0xabcdef1234567890abcdef1234567890abcdef12";
+        await ctx.telegram.sendMessage(escrow.groupId, buyerText);
       }
 
       return;

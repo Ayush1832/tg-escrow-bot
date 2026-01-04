@@ -875,7 +875,9 @@ async function joinRequestHandler(ctx) {
       });
 
       // Role selection disclaimer
-      const roleDisclaimer = `<b>⚠️ Choose roles accordingly</b>
+      const roleDisclaimer = `<b>📋 Step 1 - Select Roles</b>
+
+<b>⚠️ Choose roles accordingly</b>
 
 <b>As release & refund happen according to roles</b>
 
