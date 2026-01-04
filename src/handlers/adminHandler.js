@@ -2257,6 +2257,7 @@ module.exports = {
   adminWithdrawFeesBscUsdt,
   adminWithdrawFeesBscUsdc,
   adminWithdrawNetworkFees,
+  adminHelp,
 
   // Setup helper
   setupAdminActions,

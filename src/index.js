@@ -14,7 +14,6 @@ const BlockchainService = require("./services/BlockchainService");
 const groupDealHandler = require("./handlers/groupDealHandler");
 const joinRequestHandler = require("./handlers/joinRequestHandler");
 const callbackHandler = require("./handlers/callbackHandler");
-const callbackHandler = require("./handlers/callbackHandler");
 const adminHandler = require("./handlers/adminHandler");
 const calculatorHandler = require("./handlers/calculatorHandler");
 const GroupPoolService = require("./services/GroupPoolService");
@@ -379,14 +378,6 @@ class EscrowBot {
   }
 
   setupHandlers() {
-    adminHandler(this.bot);
-
-    this.bot.command(
-      "withdraw_network_fees",
-      "withdraw_network_fees",
-      adminHandler.adminWithdrawNetworkFees
-    );
-
     // Calculator Feature
     this.bot.use(calculatorHandler);
 
@@ -1975,8 +1966,10 @@ This is the current available balance for this trade.`;
       adminWithdrawFees,
       adminWithdrawFeesBscUsdt,
       adminWithdrawFeesBscUsdc,
+      adminWithdrawNetworkFees,
       setupAdminActions,
     } = adminHandler;
+
     this.bot.command("admin_stats", adminStats);
     this.bot.command("admin_pool", adminGroupPool);
     this.bot.command("admin_pool_add", adminPoolAdd);
@@ -1997,6 +1990,7 @@ This is the current available balance for this trade.`;
     this.bot.command("withdraw_fees", adminWithdrawFees);
     this.bot.command("withdraw_fees_bsc_usdt", adminWithdrawFeesBscUsdt);
     this.bot.command("withdraw_fees_bsc_usdc", adminWithdrawFeesBscUsdc);
+    this.bot.command("withdraw_network_fees", adminWithdrawNetworkFees);
 
     // Setup admin actions (callbacks)
     setupAdminActions(this.bot);
