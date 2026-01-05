@@ -1921,7 +1921,9 @@ Funds returned to Seller.`;
             }
           }, 60 * 1000);
         } catch (err) {
-          console.error("Refund Execution Error:", err);
+          if (!err.message.includes("Insufficient Vault Balance")) {
+            console.error("Refund Execution Error:", err);
+          }
           await ctx.reply(`❌ Refund Failed: ${err.message}`);
         }
       } catch (error) {

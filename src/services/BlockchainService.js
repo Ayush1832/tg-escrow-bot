@@ -1130,7 +1130,9 @@ class BlockchainService {
         throw error;
       }
 
-      console.error("Error refunding funds:", error);
+      if (!error.message.includes("Insufficient Vault Balance")) {
+        console.error("Error refunding funds:", error);
+      }
       throw error;
     }
   }
