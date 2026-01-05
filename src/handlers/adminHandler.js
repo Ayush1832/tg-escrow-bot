@@ -2226,20 +2226,11 @@ module.exports = {
   adminResetAllGroups,
   adminResetForce,
   adminResetAllGroups,
-  // adminWithdrawBscUsdt: adminWithdrawBscUsdt, // Legacy removed
-  // adminWithdrawExcess: adminWithdrawBscUsdt, // Alias removed
-
-  // New Consolidated Commands
   adminWithdrawAllBsc,
   adminWithdrawAllTron,
-
-  // Kept for specific manual usage if needed, but not registered in main help by default
   adminWithdrawFees,
   adminWithdrawNetworkFees,
-
   adminHelp,
-
-  // Setup helper
   setupAdminActions,
 };
 
@@ -2281,7 +2272,11 @@ async function handleWithdrawAll(ctx, network) {
     for (const contract of contracts) {
       // 1. Withdraw Protocol Fees (Accumulated)
       try {
-        const fees = await bs.getFeeSettings(contract.token, network);
+        const fees = await bs.getFeeSettings(
+          contract.token,
+          network,
+          contract.address
+        );
         if (parseFloat(fees.accumulated) > 0) {
           await bs.withdrawFees(contract.token, network);
           totalWithdrawnFees++;
@@ -2315,19 +2310,34 @@ async function handleWithdrawAll(ctx, network) {
 
         if (targetWallet) {
           try {
-            await bs.withdrawToken(
+            // Check balance first to avoid "no-balance" revert
+            const contractBalance = await bs.getTokenBalance(
               contract.token,
               network,
-              contract.address,
-              targetWallet
+              contract.address
             );
-            totalSweptSurplus++;
-            report += `🧹 <b>${contract.token} Surplus:</b> swept to admin\n`;
+
+            if (contractBalance > 0) {
+              await bs.withdrawToken(
+                contract.token,
+                network,
+                contract.address,
+                targetWallet
+              );
+              totalSweptSurplus++;
+              report += `🧹 <b>${contract.token} Surplus:</b> swept to admin\n`;
+            }
           } catch (e) {
-            // Ignore zero balance errors usually
+            console.error(
+              `Error sweeping token from ${contract.address}:`,
+              e.message
+            );
           }
         }
       }
+
+      // 3. Rate Limit Protection (TronGrid 3 RPS limit)
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
     if (totalWithdrawnFees === 0 && totalSweptSurplus === 0) {

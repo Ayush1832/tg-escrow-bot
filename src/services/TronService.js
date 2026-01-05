@@ -117,9 +117,24 @@ class TronService {
     return { contract, address: contractEntry.address };
   }
 
-  async releaseFunds({ token = "USDT", to, amount, groupId = null }) {
+  async releaseFunds({
+    token = "USDT",
+    to,
+    amount,
+    groupId = null,
+    contractAddress = null,
+  }) {
     try {
-      const { contract, address } = await this.getVaultContract(token, groupId);
+      let contract, address;
+      if (contractAddress) {
+        contract = await this.tronWeb.contract().at(contractAddress);
+        address = contractAddress;
+      } else {
+        const vault = await this.getVaultContract(token, groupId);
+        contract = vault.contract;
+        address = vault.address;
+      }
+
       const amountSun = this.toSun(amount);
 
       const tx = await contract.release(to, amountSun).send({
@@ -138,9 +153,24 @@ class TronService {
     }
   }
 
-  async refundFunds({ token = "USDT", to, amount, groupId = null }) {
+  async refundFunds({
+    token = "USDT",
+    to,
+    amount,
+    groupId = null,
+    contractAddress = null,
+  }) {
     try {
-      const { contract, address } = await this.getVaultContract(token, groupId);
+      let contract, address;
+      if (contractAddress) {
+        contract = await this.tronWeb.contract().at(contractAddress);
+        address = contractAddress;
+      } else {
+        const vault = await this.getVaultContract(token, groupId);
+        contract = vault.contract;
+        address = vault.address;
+      }
+
       const amountSun = this.toSun(amount);
 
       const tx = await contract.refund(to, amountSun).send({
@@ -187,10 +217,16 @@ class TronService {
     }
   }
 
-  async getFeeSettings({ token = "USDT" }) {
+  async getFeeSettings({ token = "USDT", contractAddress = null }) {
     await this.init();
     try {
-      const { contract } = await this.getVaultContract(token);
+      let contract;
+      if (contractAddress) {
+        contract = await this.tronWeb.contract().at(contractAddress);
+      } else {
+        const vault = await this.getVaultContract(token);
+        contract = vault.contract;
+      }
 
       // TRON calls
       const feeWallet = await contract.feeWallet().call();

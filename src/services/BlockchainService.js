@@ -468,10 +468,17 @@ class BlockchainService {
     }
   }
 
-  async getFeeSettings(token = "USDT", network = "BSC") {
+  async getFeeSettings(
+    token = "USDT",
+    network = "BSC",
+    contractAddress = null
+  ) {
     try {
       if (network && network.toUpperCase() === "TRON") {
-        const result = await TronService.getFeeSettings({ token });
+        const result = await TronService.getFeeSettings({
+          token,
+          contractAddress,
+        });
         return {
           feeWallet: result.feeWallet,
           feePercent: result.feePercent,
@@ -482,7 +489,13 @@ class BlockchainService {
         };
       }
 
-      const vault = await this.getVaultForNetwork(network, token);
+      let vault;
+      if (contractAddress) {
+        const wallet = this.wallets[network.toUpperCase()];
+        vault = new ethers.Contract(contractAddress, ESCROW_VAULT_ABI, wallet);
+      } else {
+        vault = await this.getVaultForNetwork(network, token);
+      }
 
       const [feeWallet, feePercent, accumulated] = await Promise.all([
         vault.feeWallet(),
@@ -728,12 +741,29 @@ class BlockchainService {
   ) {
     let wallet, provider, vaultContract, amountWei;
     try {
+      // Validate inputs
+      const decimals = this.getTokenDecimals(token, network);
+      if (amountWeiOverride) {
+        amountWei = BigInt(amountWeiOverride);
+      } else {
+        // Prevent negative amounts from network fee calculation issues
+        if (amount < 0) {
+          throw new Error(
+            `Invalid Release Amount: ${amount}. Network fee might exceed gross amount.`
+          );
+        }
+        amountWei = ethers.parseUnits(amount.toString(), decimals);
+      }
+      if (amountWei <= 0n) {
+        throw new Error(`Invalid Wei Amount: ${amountWei}. Must be positive.`);
+      }
       if (network && network.toUpperCase() === "TRON") {
         const tronResult = await TronService.releaseFunds({
           token,
           to: buyerAddress,
           amount,
           groupId,
+          contractAddress: contractAddressOverride,
         });
         return {
           success: true,
@@ -769,10 +799,6 @@ class BlockchainService {
         ESCROW_VAULT_ABI,
         wallet
       );
-      const decimals = this.getTokenDecimals(token, network);
-      amountWei = amountWeiOverride
-        ? BigInt(amountWeiOverride)
-        : ethers.parseUnits(amount.toString(), decimals);
 
       let nonce;
       try {
@@ -893,7 +919,10 @@ class BlockchainService {
         throw error;
       }
 
-      console.error("Error releasing funds:", error);
+      console.error(
+        `Error releasing funds on ${network} (token: ${token}, contract: ${contractAddress}, amount: ${amount}):`,
+        error
+      );
       throw error;
     }
   }
@@ -915,6 +944,7 @@ class BlockchainService {
           to: sellerAddress,
           amount,
           groupId,
+          contractAddress: contractAddressOverride,
         });
         return {
           success: true,

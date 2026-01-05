@@ -2812,7 +2812,7 @@ Thank you for using our safe escrow system.`;
           } else {
             const partialReleaseText = `✅ Partial Release Complete!
 
-Amount Released: ${netReleaseAmount.toFixed(5)} ${updatedEscrow.token}
+Amount Released: ${actualAmountToUser.toFixed(5)} ${updatedEscrow.token}
 🔗 Transaction: ${linkLine}`;
 
             try {
@@ -2828,9 +2828,9 @@ Amount Released: ${netReleaseAmount.toFixed(5)} ${updatedEscrow.token}
 
           try {
             const releaseStatusText = isPartialRelease
-              ? `✅ Partial release completed: ${netReleaseAmount.toFixed(5)} ${
-                  updatedEscrow.token
-                }`
+              ? `✅ Partial release completed: ${actualAmountToUser.toFixed(
+                  5
+                )} ${updatedEscrow.token}`
               : "✅ Release completed.";
             await ctx.editMessageCaption(
               updatedEscrow.groupId,
