@@ -1838,7 +1838,8 @@ ${approvalNote}`;
             escrow.sellerAddress,
             netRefundAmount,
             null,
-            escrow.groupId
+            escrow.groupId,
+            escrow.contractAddress // Pass explicit contract address to avoid lookup error
           );
 
           if (!refundResult || !refundResult.transactionHash) {
