@@ -17,26 +17,9 @@ const {
 } = require("../utils/participant");
 const findGroupEscrow = require("../utils/findGroupEscrow");
 const { getAddressExample } = require("../utils/addressValidation");
+const { safeAnswerCbQuery } = require("../utils/telegramUtils");
 
 const groupRecyclingTimers = new Map();
-
-/**
- * Safely answer a callback query, handling expired queries gracefully
- */
-async function safeAnswerCbQuery(ctx, text = "") {
-  try {
-    await ctx.answerCbQuery(text);
-  } catch (error) {
-    if (
-      error.description?.includes("query is too old") ||
-      error.description?.includes("query ID is invalid") ||
-      error.response?.error_code === 400
-    ) {
-      return;
-    }
-    console.error("Error answering callback query:", error);
-  }
-}
 
 /**
  * Update the "Trade started" message in the main group with completion details
