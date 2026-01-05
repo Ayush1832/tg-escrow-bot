@@ -285,16 +285,34 @@ module.exports = async (ctx) => {
     // Dynamic Fee Logic: Check user bios for "@room"
     // Removed legacy check for config.ESCROW_FEE_PERCENT === 0 to enable dynamic fees.
     try {
-      // Helper function to check bio
+      // Helper function to check bio with retry logic
       const checkBio = async (userId) => {
-        try {
-          const chat = await ctx.telegram.getChat(userId);
-          const bio = chat.bio || "";
-          return bio.toLowerCase().includes("@room");
-        } catch (e) {
-          console.error(`Error checking bio for ${userId}:`, e.message);
-          return false;
+        const maxRetries = 3;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+          try {
+            const chat = await ctx.telegram.getChat(userId);
+            const bio = chat.bio || "";
+            return bio.toLowerCase().includes("@room");
+          } catch (e) {
+            console.error(
+              `Error checking bio for ${userId} (Attempt ${attempt}/${maxRetries}):`,
+              e.message
+            );
+            // Don't retry if user not found (probably invalid ID or deleted account)
+            if (
+              e.response &&
+              e.response.error_code === 400 &&
+              e.response.description.includes("chat not found")
+            ) {
+              return false;
+            }
+            // Wait 1s before retry
+            if (attempt < maxRetries) {
+              await new Promise((resolve) => setTimeout(resolve, 1000));
+            }
+          }
         }
+        return false;
       };
 
       const initiatorHasTag = await checkBio(initiatorId);

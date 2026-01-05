@@ -1766,7 +1766,7 @@ ${approvalNote}`;
         const GroupPool = require("./models/GroupPool");
         const GroupPoolService = require("./services/GroupPoolService");
         const { ethers } = require("ethers");
-        const config = require("./config");
+        const config = require("../config");
         const { safeAnswerCbQuery } = require("./utils/telegramUtils");
 
         const escrow = await Escrow.findOne({ escrowId });

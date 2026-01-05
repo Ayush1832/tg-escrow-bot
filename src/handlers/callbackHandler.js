@@ -537,6 +537,20 @@ module.exports = async (ctx) => {
       }
 
       escrow.chain = chain;
+
+      // Update network fee based on chain selection
+      // Strict Network Fee Logic (User Defined)
+      if (escrow.chain === "TRON") {
+        if (escrow.feeRate !== undefined && escrow.feeRate < 0.75) {
+          escrow.networkFee = 2.0;
+        } else {
+          escrow.networkFee = 3.0;
+        }
+      } else {
+        // BSC and others default to 0.2
+        escrow.networkFee = 0.2;
+      }
+
       await escrow.save();
 
       // Update blockchain selection message with checkmark
@@ -617,14 +631,16 @@ module.exports = async (ctx) => {
 
       escrow.token = coin;
 
-      // Set network fee based on chain
+      // Strict Network Fee Logic (User Defined)
       if (escrow.chain === "TRON") {
+        // If feeRate is discounted (< 0.75), it means @room tag was found
         if (escrow.feeRate !== undefined && escrow.feeRate < 0.75) {
           escrow.networkFee = 2.0;
         } else {
           escrow.networkFee = 3.0;
         }
       } else {
+        // BSC and others default to 0.2
         escrow.networkFee = 0.2;
       }
 
@@ -770,7 +786,7 @@ module.exports = async (ctx) => {
       escrow.chain = chainKey === "TRON" ? "TRON" : "BSC";
       escrow.contractAddress = contractInfo.address;
 
-      // Network Fee Logic
+      // Strict Network Fee Logic (User Defined)
       if (escrow.chain === "TRON") {
         if (escrow.feeRate !== undefined && escrow.feeRate < 0.75) {
           escrow.networkFee = 2.0;
@@ -2639,7 +2655,7 @@ ${approvalNote}`;
           updatedEscrow.pendingReleaseAmount = null;
           await updatedEscrow.save();
 
-          if (!isPartialRelease) {
+          if (!isPartialRelease || updatedEscrow.status === "completed") {
             try {
               await UserStatsService.recordTrade({
                 buyerId: updatedEscrow.buyerId,
