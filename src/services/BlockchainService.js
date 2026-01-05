@@ -203,10 +203,17 @@ class BlockchainService {
     return await tx.wait();
   }
 
-  async withdrawFees(token = "USDT", network = "BSC") {
+  async withdrawFees(
+    token = "USDT",
+    network = "BSC",
+    contractAddressOverride = null
+  ) {
     try {
       if (network && network.toUpperCase() === "TRON") {
-        const result = await TronService.withdrawFees({ token });
+        const result = await TronService.withdrawFees({
+          token,
+          contractAddress: contractAddressOverride,
+        });
         // Normalize result format if needed
         return {
           success: result.success,
@@ -215,9 +222,23 @@ class BlockchainService {
         };
       }
 
-      const vault = await this.getVaultForNetwork(network, token);
+      let contractAddress = contractAddressOverride;
+      let vaultContract;
+
       const wallet = this.wallets[network.toUpperCase()];
       const provider = this.providers[network.toUpperCase()];
+
+      if (!contractAddress) {
+        const vault = await this.getVaultForNetwork(network, token);
+        contractAddress = await vault.getAddress(); // Ensure we get the actual address from the contract object
+        vaultContract = vault; // Use the already fetched vault object
+      } else {
+        vaultContract = new ethers.Contract(
+          contractAddress,
+          ESCROW_VAULT_ABI,
+          wallet
+        );
+      }
 
       let nonce;
       try {
@@ -231,11 +252,10 @@ class BlockchainService {
       }
 
       // Check balance before attempting withdrawal
-      const accumulatedFees = await vault.accumulatedFees();
+      const accumulatedFees = await vaultContract.accumulatedFees();
 
       // Get contract address and check actual token balance
-      const contractAddress = await vault.getAddress();
-      const tokenAddress = await vault.token();
+      const tokenAddress = await vaultContract.token();
       const tokenContract = new ethers.Contract(
         tokenAddress,
         ["function balanceOf(address) view returns (uint256)"],

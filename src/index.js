@@ -1427,33 +1427,39 @@ Use /release After Fund Transfer to Seller
         }
 
         // NET CALCULATION: Deduct fees from the gross release amount
+        // NET CALCULATION: For display only.
+        // We store the GROSS amount in pendingReleaseAmount so callbackHandler can deduct fees properly.
         const currentFeeRate =
-          escrow.feeRate !== undefined ? Number(escrow.feeRate) : 0.75; // Fallback if missing, though should be set
+          escrow.feeRate !== undefined ? Number(escrow.feeRate) : 0.75;
         const currentNetworkFee =
           escrow.networkFee !== undefined ? Number(escrow.networkFee) : 0.2;
 
         const grossReleaseAmount =
           requestedAmount !== null ? requestedAmount : formattedTotalDeposited;
 
-        // Fee is percentage of the GROSS amount being released
-        const serviceFee = (grossReleaseAmount * currentFeeRate) / 100;
+        // Fee is percentage of the GROSS amount being released (for estimation display)
+        // Actual fee logic in callbackHandler is: (Gross - NetworkFee) * FeeRate
+        const estimatedAmountToContract =
+          grossReleaseAmount - currentNetworkFee;
+        const estimatedServiceFee =
+          (estimatedAmountToContract * currentFeeRate) / 100;
 
-        // Net amount = Gross - ServiceFee - NetworkFee
-        // Ensure we don't go below zero
+        // Net amount = Gross - NetworkFee - ServiceFee
         const netReleaseAmount = Math.max(
           0,
-          grossReleaseAmount - serviceFee - currentNetworkFee
+          estimatedAmountToContract - estimatedServiceFee
         );
 
         if (netReleaseAmount <= 0) {
           return ctx.reply(
-            `❌ Release amount too small to cover fees (Service: ${serviceFee.toFixed(
+            `❌ Release amount too small to cover fees (Service: ${estimatedServiceFee.toFixed(
               4
             )}, Network: ${currentNetworkFee}).`
           );
         }
 
-        escrow.pendingReleaseAmount = netReleaseAmount;
+        // CRITICAL FIX: Store GROSS amount here. callbackHandler will deduct fees.
+        escrow.pendingReleaseAmount = grossReleaseAmount;
         escrow.pendingRefundAmount = null;
 
         const isPartialReleaseByAdmin = hasAmount && isAdmin;
@@ -1470,8 +1476,8 @@ Use /release After Fund Transfer to Seller
 
           const releaseCaption = `<b>Admin Release Confirmation (${releaseType})</b>
 
-Amount: ${releaseAmount.toFixed(5)} ${escrow.token}
-Total Deposited: ${formattedTotalDeposited.toFixed(5)} ${escrow.token}
+Amount: ${grossReleaseAmount.toFixed(4)} ${escrow.token}
+Total Deposited: ${formattedTotalDeposited.toFixed(4)} ${escrow.token}
 
 ⚠️ Admin approval required for partial release.`;
 

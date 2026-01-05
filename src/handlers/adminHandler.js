@@ -2236,12 +2236,18 @@ module.exports = {
 
 async function adminWithdrawAllBsc(ctx) {
   if (!isAdmin(ctx)) return;
-  await handleWithdrawAll(ctx, "BSC");
+  // Run in background to avoid timeout
+  handleWithdrawAll(ctx, "BSC").catch((err) =>
+    console.error("Background BSC withdraw error:", err)
+  );
 }
 
 async function adminWithdrawAllTron(ctx) {
   if (!isAdmin(ctx)) return;
-  await handleWithdrawAll(ctx, "TRON");
+  // Run in background to avoid timeout
+  handleWithdrawAll(ctx, "TRON").catch((err) =>
+    console.error("Background TRON withdraw error:", err)
+  );
 }
 
 /**
@@ -2277,16 +2283,26 @@ async function handleWithdrawAll(ctx, network) {
           network,
           contract.address
         );
-        if (parseFloat(fees.accumulated) > 0) {
-          await bs.withdrawFees(contract.token, network);
+        const feeResult = await bs.withdrawFees(
+          contract.token,
+          network,
+          contract.address
+        );
+
+        if (feeResult.success) {
           totalWithdrawnFees++;
-          report += `✅ <b>${contract.token} Fees:</b> withdrawn\n`;
+          report += `💰 <b>${contract.token}:</b> Fees withdrawn (TX: <code>${feeResult.transactionHash}</code>)\n`;
+        } else {
+          // If 0 fees, it's not a failure, just nothing to withdraw
         }
       } catch (e) {
-        console.error(
-          `Error checking fees for ${contract.address}:`,
-          e.message
-        );
+        // Suppress "no-fees" or "no-balance" errors if they are just about 0 balance
+        if (
+          !e.message.includes("no-fees") &&
+          !e.message.includes("no-balance")
+        ) {
+          report += `⚠️ <b>${contract.token}:</b> Fee withdraw failed: ${e.message}\n`;
+        }
       }
 
       // 2. Sweep Surplus (if idle)

@@ -253,10 +253,17 @@ class TronService {
     }
   }
 
-  async withdrawFees({ token = "USDT" }) {
+  async withdrawFees({ token = "USDT", contractAddress = null }) {
     await this.init();
     try {
-      const { contract, address } = await this.getVaultContract(token);
+      let contract;
+      if (contractAddress) {
+        contract = await this.tronWeb.contract().at(contractAddress);
+      } else {
+        const vault = await this.getVaultContract(token);
+        contract = vault.contract;
+      }
+
       const tx = await contract.withdrawFees().send({
         feeLimit: 100_000_000,
         callValue: 0,
@@ -265,7 +272,7 @@ class TronService {
       return {
         success: true,
         transactionHash: tx,
-        contractAddress: address,
+        contractAddress: contractAddress,
       };
     } catch (error) {
       console.error("TRON withdrawFees error:", error);
