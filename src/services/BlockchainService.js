@@ -771,7 +771,7 @@ class BlockchainService {
     groupId = null,
     contractAddressOverride = null
   ) {
-    let wallet, provider, vaultContract, amountWei;
+    let wallet, provider, vaultContract, amountWei, contractAddress;
     try {
       // Validate inputs
       const decimals = this.getTokenDecimals(token, network);
@@ -804,7 +804,7 @@ class BlockchainService {
         };
       }
 
-      let contractAddress = contractAddressOverride;
+      contractAddress = contractAddressOverride;
       if (!contractAddress) {
         contractAddress = await this.getEscrowContractAddress(
           token,
