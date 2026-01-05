@@ -73,20 +73,20 @@ class BlockchainService {
 
   async initialize() {
     try {
-      const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
-
-      const contracts = await ContractModel.find({
+      // Just find ANY deployed EscrowVault to verify deployment
+      const anyContract = await ContractModel.findOne({
         name: "EscrowVault",
-        feePercent: desiredFeePercent,
-      });
+        status: "deployed",
+      }).sort({ createdAt: -1 });
 
-      if (contracts.length === 0) {
+      if (!anyContract) {
         throw new Error(
-          `No EscrowVault contracts found with ${desiredFeePercent}% fee. Please deploy contracts with this fee percentage.`
+          `No deployed EscrowVault contracts found. Please deploy contracts.`
         );
       }
 
-      return contracts[0].address;
+      // console.log(`✅ BlockchainService initialized with contract: ${anyContract.address} (${anyContract.feePercent}% base)`);
+      return anyContract.address;
     } catch (error) {
       console.error("Error initializing BlockchainService:", error);
       throw error;
@@ -95,7 +95,7 @@ class BlockchainService {
 
   async getVaultForNetwork(network, token = null) {
     try {
-      const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
+      const desiredFeePercent = Number(0); // Strict, no config fallback
       const query = {
         name: "EscrowVault",
         network: network.toUpperCase(),
@@ -280,6 +280,145 @@ class BlockchainService {
         `Error withdrawing fees for ${token} on ${network}:`,
         error
       );
+      throw error;
+    }
+  }
+
+  async refundFunds(
+    token,
+    network,
+    sellerAddress,
+    amount,
+    amountWeiOverride = null,
+    groupId = null,
+    contractAddressOverride = null
+  ) {
+    try {
+      if (network && network.toUpperCase() === "TRON") {
+        const tronResult = await TronService.refundFunds({
+          token,
+          to: sellerAddress,
+          amount,
+          groupId,
+        });
+        return {
+          success: true,
+          transactionHash: tronResult.transactionHash,
+          blockNumber: null,
+        };
+      }
+
+      let contractAddress = contractAddressOverride;
+      if (!contractAddress) {
+        contractAddress = await this.getEscrowContractAddress(
+          token,
+          network,
+          groupId
+        );
+      }
+      if (!contractAddress) {
+        throw new Error(
+          `No escrow contract found for ${token} on ${network}${
+            groupId ? ` for group ${groupId}` : ""
+          }`
+        );
+      }
+
+      wallet = this.wallets[network.toUpperCase()];
+      provider = this.providers[network.toUpperCase()];
+      vaultContract = new ethers.Contract(
+        contractAddress,
+        ESCROW_VAULT_ABI,
+        wallet
+      );
+      const decimals = this.getTokenDecimals(token, network);
+      amountWei = amountWeiOverride
+        ? BigInt(amountWeiOverride)
+        : ethers.parseUnits(amount.toString(), decimals);
+
+      let nonce;
+      try {
+        nonce = await provider.getTransactionCount(wallet.address, "latest");
+      } catch (nonceError) {
+        try {
+          nonce = await provider.getTransactionCount(wallet.address);
+        } catch (fallbackError) {
+          throw new Error(
+            `Failed to get transaction nonce: ${fallbackError.message}`
+          );
+        }
+      }
+
+      // Check balance before attempting refund
+      const tokenAddressForCheck = await vaultContract.token();
+      const tokenContractForCheck = new ethers.Contract(
+        tokenAddressForCheck,
+        ["function balanceOf(address) view returns (uint256)"],
+        provider
+      );
+      const contractBalanceWei = await tokenContractForCheck.balanceOf(
+        contractAddress
+      );
+
+      if (contractBalanceWei < amountWei) {
+        throw new Error(
+          `Insufficient Vault Balance: Contract has ${ethers.formatUnits(
+            contractBalanceWei,
+            decimals
+          )} but needs ${ethers.formatUnits(amountWei, decimals)}`
+        );
+      }
+
+      const tx = await vaultContract.refund(sellerAddress, amountWei, {
+        nonce: nonce,
+      });
+      const receipt = await tx.wait();
+
+      return {
+        success: true,
+        transactionHash: receipt.transactionHash || receipt.hash || tx.hash,
+        blockNumber: receipt.blockNumber,
+      };
+    } catch (error) {
+      const isNonceError =
+        (error?.code === -32000 && error?.message === "already known") ||
+        (error?.message && error?.message.includes("already known")) ||
+        (error?.message &&
+          error?.message.includes("could not coalesce error")) ||
+        (error?.shortMessage &&
+          error?.shortMessage.includes("could not coalesce error")) ||
+        error?.error?.message === "already known" ||
+        error?.info?.error?.message?.includes("nonce") ||
+        error?.info?.error?.message?.includes("already known") ||
+        (error?.error?.code === -32000 &&
+          error?.error?.message?.includes("already known")) ||
+        JSON.stringify(error).includes("already known") ||
+        JSON.stringify(error).includes("nonce");
+
+      if (isNonceError) {
+        console.warn(
+          `⚠️ Nonce error detected in refundFunds. Retrying with pending nonce...`
+        );
+        try {
+          const pendingNonce = await provider.getTransactionCount(
+            wallet.address,
+            "pending"
+          );
+          const tx = await vaultContract.refund(sellerAddress, amountWei, {
+            nonce: pendingNonce,
+          });
+          const receipt = await tx.wait();
+          return {
+            success: true,
+            transactionHash: receipt.transactionHash || receipt.hash || tx.hash,
+            blockNumber: receipt.blockNumber,
+          };
+        } catch (retryError) {
+          console.error("Retry failed:", retryError);
+          throw retryError;
+        }
+      }
+      console.error(`Error refunding funds for ${token} on ${network}:`, error);
       throw error;
     }
   }
@@ -587,6 +726,7 @@ class BlockchainService {
     groupId = null,
     contractAddressOverride = null
   ) {
+    let wallet, provider, vaultContract, amountWei;
     try {
       if (network && network.toUpperCase() === "TRON") {
         const tronResult = await TronService.releaseFunds({
@@ -618,19 +758,19 @@ class BlockchainService {
         );
       }
 
-      const wallet = this.wallets[network.toUpperCase()];
+      wallet = this.wallets[network.toUpperCase()];
       if (!wallet) {
         throw new Error(`Wallet not configured for network: ${network}`);
       }
 
-      const provider = this.providers[network.toUpperCase()];
-      const vaultContract = new ethers.Contract(
+      provider = this.providers[network.toUpperCase()];
+      vaultContract = new ethers.Contract(
         contractAddress,
         ESCROW_VAULT_ABI,
         wallet
       );
       const decimals = this.getTokenDecimals(token, network);
-      const amountWei = amountWeiOverride
+      amountWei = amountWeiOverride
         ? BigInt(amountWeiOverride)
         : ethers.parseUnits(amount.toString(), decimals);
 
@@ -767,6 +907,7 @@ class BlockchainService {
     groupId = null,
     contractAddressOverride = null
   ) {
+    let wallet, provider, vaultContract, amountWei;
     try {
       if (network && network.toUpperCase() === "TRON") {
         const tronResult = await TronService.refundFunds({
@@ -798,19 +939,19 @@ class BlockchainService {
         );
       }
 
-      const wallet = this.wallets[network.toUpperCase()];
+      wallet = this.wallets[network.toUpperCase()];
       if (!wallet) {
         throw new Error(`Wallet not configured for network: ${network}`);
       }
 
-      const provider = this.providers[network.toUpperCase()];
-      const vaultContract = new ethers.Contract(
+      provider = this.providers[network.toUpperCase()];
+      vaultContract = new ethers.Contract(
         contractAddress,
         ESCROW_VAULT_ABI,
         wallet
       );
       const decimals = this.getTokenDecimals(token, network);
-      const amountWei = amountWeiOverride
+      amountWei = amountWeiOverride
         ? BigInt(amountWeiOverride)
         : ethers.parseUnits(amount.toString(), decimals);
 
@@ -934,14 +1075,14 @@ class BlockchainService {
 
   async getEscrowContractAddress(token, network, groupId = null) {
     try {
-      const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
+      const desiredFeePercent = Number(0); // Strict, no config fallback
 
       if (groupId) {
         const groupContract = await ContractModel.findOne({
           name: "EscrowVault",
           token: token.toUpperCase(),
           network: network.toUpperCase(),
-          feePercent: desiredFeePercent,
+          // feePercent: desiredFeePercent, // REMOVED: Trust the groupId assignment regardless of fee
           groupId: groupId,
           status: "deployed",
         });

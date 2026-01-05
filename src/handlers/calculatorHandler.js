@@ -54,11 +54,9 @@ module.exports = async (ctx, next) => {
       return next();
     }
 
-    // Format result
-    // If integer, show as integer. If decimal, limit precision.
     const formattedResult = Number.isInteger(result)
       ? result
-      : parseFloat(result.toFixed(8)); // Avoid 0.1 + 0.2 = 0.30000000000000004 formatting
+      : parseFloat(result.toFixed(8));
 
     await ctx.reply(`🔢 <b>Result:</b> ${formattedResult}`, {
       parse_mode: "HTML",

@@ -350,8 +350,6 @@ async function adminInitAddresses(ctx) {
       return ctx.reply("❌ Access denied. Admin privileges required.");
     }
 
-    const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
-
     const contracts = await Contract.find({
       name: "EscrowVault",
       status: "deployed",
@@ -377,22 +375,19 @@ async function adminInitAddresses(ctx) {
     });
 
     let message = `📋 **CONTRACT VERIFICATION**\n\n`;
-    message += `💰 Fee Percent: ${desiredFeePercent}%\n\n`;
 
-    const bscContracts = contracts.filter(
-      (c) => c.network === "BSC" && c.feePercent === desiredFeePercent
-    );
+    const bscContracts = contracts.filter((c) => c.network === "BSC");
     const bscTokens = bscContracts.map((c) => c.token);
 
     message += `🔗 **BSC Contracts:**\n`;
     if (bscContracts.length === 0) {
-      message += `❌ No BSC contracts found with ${desiredFeePercent}% fee\n`;
+      message += `❌ No BSC contracts found.\n`;
     } else {
       bscContracts.forEach((contract) => {
         const deployedDate = contract.deployedAt
           ? new Date(contract.deployedAt).toLocaleString()
           : "Unknown";
-        message += `✅ ${contract.token}: \`${contract.address}\`\n`;
+        message += `✅ ${contract.token} (${contract.feePercent}%): \`${contract.address}\`\n`;
         message += `   📅 Deployed: ${deployedDate}\n`;
       });
     }
@@ -550,7 +545,7 @@ async function adminPoolDeleteAll(ctx) {
 
     const GroupPool = require("../models/GroupPool");
     const res = await GroupPool.deleteMany({});
-    await ctx.reply(`🗑️ Deleted ${res.deletedCount || 0} groups from pool.`);
+    await ctx.reply(`🗑️ Deleted ${res.deletedCount} groups from pool.`);
   } catch (error) {
     console.error("Error deleting all groups:", error);
     await ctx.reply("❌ Error deleting groups.");
@@ -728,7 +723,7 @@ async function adminTradeStats(ctx) {
 
     const contractsByFee = {};
     contracts.forEach((contract) => {
-      const feePercent = contract.feePercent || 0;
+      const feePercent = contract.feePercent;
       if (!contractsByFee[feePercent]) {
         contractsByFee[feePercent] = [];
       }
@@ -745,8 +740,9 @@ async function adminTradeStats(ctx) {
       );
 
       const escrowsWithFee = validCompletedEscrows.filter((escrow) => {
-        const currentFee = Number(config.ESCROW_FEE_PERCENT || 0);
-        return currentFee.toString() === feePercent;
+        // Correctly link escrow to the contract it was settled on
+        if (!escrow.contractAddress) return false;
+        return contractAddresses.includes(escrow.contractAddress.toLowerCase());
       });
 
       const totalTrades = escrowsWithFee.length;
@@ -908,7 +904,7 @@ async function adminExportTrades(ctx) {
       const quantity =
         typeof escrow.quantity === "number"
           ? escrow.quantity
-          : parseFloat(escrow.quantity) || 0;
+          : parseFloat(escrow.quantity);
       const rate = escrow.rate != null && escrow.rate !== "" ? escrow.rate : "";
 
       // Add separator for readability
@@ -1160,8 +1156,8 @@ async function adminGroupReset(ctx) {
     const isCompleted = ["completed", "refunded"].includes(escrow.status);
     if (!isCompleted) {
       // Check if deposits were made (only for active trades)
-      const depositAmount = Number(escrow.depositAmount || 0);
-      const confirmedAmount = Number(escrow.confirmedAmount || 0);
+      const depositAmount = Number(escrow.depositAmount);
+      const confirmedAmount = Number(escrow.confirmedAmount);
       const hasDeposit = depositAmount > 0 || confirmedAmount > 0;
 
       if (hasDeposit) {
@@ -1703,8 +1699,7 @@ async function adminResetAllGroups(ctx) {
             if (escrow) {
               try {
                 await Escrow.deleteOne({ escrowId: escrow.escrowId });
-              } catch (deleteError) {
-              }
+              } catch (deleteError) {}
             }
 
             successCount++;

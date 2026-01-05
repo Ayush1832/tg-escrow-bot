@@ -31,10 +31,7 @@ class AddressAssignmentService {
       let normalizedNetwork = network
         ? this.normalizeChainToNetwork(network)
         : "BSC";
-      const normalizedFeePercent =
-        feePercent !== null
-          ? Number(feePercent)
-          : Number(config.ESCROW_FEE_PERCENT || 0);
+      const normalizedFeePercent = feePercent !== null ? Number(feePercent) : 0;
 
       if (!groupId) {
         const escrow = await Escrow.findOne({ escrowId });
@@ -50,11 +47,8 @@ class AddressAssignmentService {
 
       if (groupId) {
         try {
-          // 1. Try to find the specific contract assigned to this group via GroupPool
-          // This is the authoritative source for the 1:1 mapping
           const group = await GroupPool.findOne({ groupId });
           if (group && group.contracts) {
-            // Check contracts map (supports both Map and Object access for safety)
             let assignedContract = null;
             if (
               group.contracts.get &&
@@ -65,7 +59,6 @@ class AddressAssignmentService {
                 !assignedContract ||
                 assignedContract.network !== normalizedNetwork
               ) {
-                // Try specific key e.g. USDT_TRON
                 const specificKey = `${normalizedToken}_${normalizedNetwork}`;
                 const specificContract = group.contracts.get(specificKey);
                 if (specificContract) assignedContract = specificContract;
@@ -82,9 +75,7 @@ class AddressAssignmentService {
               }
             }
 
-            // Also check if network matches (default BSC)
             if (assignedContract && assignedContract.address) {
-              // Verify network if strict, but usually token+group implies the network
               return {
                 address: assignedContract.address,
                 contractAddress: assignedContract.address,
@@ -93,7 +84,6 @@ class AddressAssignmentService {
             }
           }
 
-          // 2. Fallback: Check for legacy contractAddress field (mostly for USDT on BSC)
           if (
             group &&
             group.contractAddress &&
@@ -107,7 +97,6 @@ class AddressAssignmentService {
             };
           }
 
-          // 3. Fallback: Look up Contract model (if populated with groupId - currently not used but good for future)
           let contract = await Contract.findOne({
             name: "EscrowVault",
             token: normalizedToken,
@@ -118,7 +107,6 @@ class AddressAssignmentService {
           });
 
           if (!contract) {
-            // 4. Final Fallback: Find ANY deployed contract for this token/tier
             contract = await Contract.findOne({
               name: "EscrowVault",
               token: normalizedToken,

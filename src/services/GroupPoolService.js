@@ -201,12 +201,15 @@ class GroupPoolService {
             );
             throw retryErr;
           }
-        } else if (chatError.message.includes("chat not found")) {
+        } else if (
+          chatError.message.includes("chat not found") ||
+          chatError.message.includes("not found")
+        ) {
           // User requested NOT to archive groups automatically.
-          // We will just throw the error, leaving the group as is (or assigned).
+          console.warn(`⚠️ Group ${groupId} is invalid (${chatError.message})`);
           // group.status = "archived";
           // await group.save();
-          throw new Error(`Group ${groupId} not found or bot is not a member.`);
+          throw new Error(`Group ${groupId} not found/invalid.`);
         }
         throw chatError;
       }
@@ -312,9 +315,7 @@ class GroupPoolService {
               if (refreshed) {
                 return refreshed;
               }
-            } catch (linkError) {
-              // Could not create invite link - will be created when needed
-            }
+            } catch (linkError) {}
           }
         }
         return existingGroup;
@@ -340,9 +341,7 @@ class GroupPoolService {
           if (refreshed) {
             return refreshed;
           }
-        } catch (linkError) {
-          // Could not create invite link - will be created when needed
-        }
+        } catch (linkError) {}
       }
 
       return group;
@@ -352,29 +351,22 @@ class GroupPoolService {
     }
   }
 
-  /**
-   * Verify that ADMIN_USER_ID2 is present in the group
-   * This is called to ensure admin stays in groups (they cannot be automatically added by bot)
-   */
   async ensureAdminInGroup(groupId, telegram) {
     try {
       const adminUserId2 = config.ADMIN_USER_ID2
         ? Number(config.ADMIN_USER_ID2)
         : null;
       if (!adminUserId2) {
-        return; // Admin not configured, skip check
+        return;
       }
 
       const chatId = String(groupId);
 
       try {
-        // Get chat administrators to check if admin is present
         const chatAdministrators = await telegram.getChatAdministrators(chatId);
         const adminIds = chatAdministrators.map((member) =>
           Number(member.user.id)
         );
-
-        // Also check regular members (if we can via getChatMember)
         let adminIsMember = false;
         try {
           const memberInfo = await telegram.getChatMember(chatId, adminUserId2);
@@ -382,7 +374,6 @@ class GroupPoolService {
             memberInfo.status
           );
         } catch (memberError) {
-          // Admin might not be in group
           adminIsMember = false;
         }
 
@@ -487,7 +478,6 @@ class GroupPoolService {
           ],
         };
       } else {
-        // Tiered Mode: Room 24+ (only show groups from tiered tier)
         query = {
           status,
           groupTitle: {

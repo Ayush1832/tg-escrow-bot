@@ -282,37 +282,34 @@ module.exports = async (ctx) => {
     let networkFee = 0.2; // default network fee
 
     // If config dictates 0% fee, force it and skip bio checks
-    if (config.ESCROW_FEE_PERCENT === 0) {
-      feePercent = 0;
-    } else {
-      // Tiered Fee Logic (only if ESCROW_FEE_PERCENT > 0)
-      try {
-        // Helper function to check bio
-        const checkBio = async (userId) => {
-          try {
-            const chat = await ctx.telegram.getChat(userId);
-            const bio = chat.bio || "";
-            return bio.toLowerCase().includes("@room");
-          } catch (e) {
-            console.error(`Error checking bio for ${userId}:`, e.message);
-            return false;
-          }
-        };
-
-        const initiatorHasTag = await checkBio(initiatorId);
-        const counterpartyHasTag = counterpartyId
-          ? await checkBio(counterpartyId)
-          : false;
-
-        if (initiatorHasTag && counterpartyHasTag) {
-          feePercent = 0.25;
-        } else if (initiatorHasTag || counterpartyHasTag) {
-          feePercent = 0.5;
+    // Dynamic Fee Logic: Check user bios for "@room"
+    // Removed legacy check for config.ESCROW_FEE_PERCENT === 0 to enable dynamic fees.
+    try {
+      // Helper function to check bio
+      const checkBio = async (userId) => {
+        try {
+          const chat = await ctx.telegram.getChat(userId);
+          const bio = chat.bio || "";
+          return bio.toLowerCase().includes("@room");
+        } catch (e) {
+          console.error(`Error checking bio for ${userId}:`, e.message);
+          return false;
         }
-      } catch (bioError) {
-        console.error("Error checking bios:", bioError);
-        // Fallback to default high fee
+      };
+
+      const initiatorHasTag = await checkBio(initiatorId);
+      const counterpartyHasTag = counterpartyId
+        ? await checkBio(counterpartyId)
+        : false;
+
+      if (initiatorHasTag && counterpartyHasTag) {
+        feePercent = 0.25;
+      } else if (initiatorHasTag || counterpartyHasTag) {
+        feePercent = 0.5;
       }
+    } catch (bioError) {
+      console.error("Error checking bios:", bioError);
+      // Fallback to default high fee (0.75) if bio check fails
     }
 
     // Default network fee is 0.2 (BSC/BEP20 default).

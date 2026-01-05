@@ -26,13 +26,13 @@ class UserStatsService {
 
     const [buyRank, sellRank, overallRank] = await Promise.all([
       User.countDocuments({
-        totalBoughtVolume: { $gt: user.totalBoughtVolume || 0 },
+        totalBoughtVolume: { $gt: user.totalBoughtVolume },
       }),
       User.countDocuments({
-        totalSoldVolume: { $gt: user.totalSoldVolume || 0 },
+        totalSoldVolume: { $gt: user.totalSoldVolume },
       }),
       User.countDocuments({
-        totalTradedVolume: { $gt: user.totalTradedVolume || 0 },
+        totalTradedVolume: { $gt: user.totalTradedVolume },
       }),
     ]);
 
@@ -54,7 +54,7 @@ class UserStatsService {
     }
 
     const formatCurrency = (amount) => {
-      return (amount || 0).toLocaleString("en-US", {
+      return amount.toLocaleString("en-US", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       });
@@ -65,16 +65,16 @@ class UserStatsService {
       : `User ${user.telegramId}`;
 
     const totalBought = formatCurrency(user.totalBoughtVolume);
-    const totalBuyTrades = user.totalBoughtTrades || 0;
+    const totalBuyTrades = user.totalBoughtTrades;
     const buyRank = user.globalBuyRank || "N/A";
 
     const totalSold = formatCurrency(user.totalSoldVolume);
-    const totalSellTrades = user.totalSoldTrades || 0;
+    const totalSellTrades = user.totalSoldTrades;
     const sellRank = user.globalSellRank || "N/A";
 
     const lifetimeVolume = formatCurrency(user.totalTradedVolume);
-    const totalDeals = user.totalCompletedTrades || 0;
-    const totalParticipated = user.totalParticipatedTrades || 0;
+    const totalDeals = user.totalCompletedTrades;
+    const totalParticipated = user.totalParticipatedTrades;
 
     let completionRate = 0;
     if (totalParticipated > 0) {
@@ -252,14 +252,14 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
     longest,
   }) {
     const formatCurrency = (val) =>
-      Number(val || 0).toLocaleString("en-US", {
+      Number(val).toLocaleString("en-US", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       });
 
     // Helper to format volume like "300K"
     const formatKVolume = (val) => {
-      const v = Number(val || 0);
+      const v = Number(val);
       if (v >= 1000000) return (v / 1000000).toFixed(1) + "M";
       if (v >= 1000) return (v / 1000).toFixed(0) + "K";
       return v.toFixed(0);
@@ -355,7 +355,7 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
 
   formatTopBuyers(users) {
     const formatCurrency = (val) =>
-      Number(val || 0).toLocaleString("en-US", {
+      Number(val).toLocaleString("en-US", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       });
@@ -380,7 +380,7 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
 
   formatTopSellers(users) {
     const formatCurrency = (val) =>
-      Number(val || 0).toLocaleString("en-US", {
+      Number(val).toLocaleString("en-US", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       });
@@ -422,7 +422,7 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
       escrowId,
     } = escrow;
 
-    const amount = Number(quantity || 0);
+    const amount = Number(quantity);
     const tradeDate = new Date();
 
     await User.findOneAndUpdate(

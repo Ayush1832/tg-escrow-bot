@@ -757,7 +757,7 @@ module.exports = async (ctx) => {
       } else if (chainKey === "BSC" && group.contractAddress) {
         contractInfo = {
           address: group.contractAddress,
-          feePercent: group.feePercent || 0.75,
+          feePercent: group.feePercent,
           network: "BSC",
         };
       }
@@ -871,12 +871,12 @@ module.exports = async (ctx) => {
 
       // Update deal summary message with approval status
       const buildDealSummary = async (escrow) => {
-        const amount = escrow.quantity || 0;
-        const rate = escrow.rate || 0;
-        const paymentMethod = escrow.paymentMethod || "N/A";
-        const chain = escrow.chain || "BSC";
-        const buyerAddress = escrow.buyerAddress || "Not set";
-        const sellerAddress = escrow.sellerAddress || "Not set";
+        const amount = escrow.quantity;
+        const rate = escrow.rate;
+        const paymentMethod = escrow.paymentMethod;
+        const chain = escrow.chain;
+        const buyerAddress = escrow.buyerAddress;
+        const sellerAddress = escrow.sellerAddress;
 
         const buyerUsername = escrow.buyerUsername || "Buyer";
         const sellerUsername = escrow.sellerUsername || "Seller";
@@ -905,8 +905,8 @@ module.exports = async (ctx) => {
 • <b>Rate:</b> ₹${rate.toFixed(1)}
 • <b>Payment:</b> ${paymentMethod}
 • <b>Chain:</b> ${chain}
-• <b>Network Fee:</b> ${escrow.networkFee || 0} ${escrow.token || "USDT"}
-• <b>Service Fee:</b> ${escrow.feeRate || 0}%
+• <b>Network Fee:</b> ${escrow.networkFee} ${escrow.token || "USDT"}
+• <b>Service Fee:</b> ${escrow.feeRate}%
 • <b>Buyer Address:</b> <code>${buyerAddress}</code>
 • <b>Seller Address:</b> <code>${sellerAddress}</code>
 
@@ -986,17 +986,20 @@ ${approvalStatus}`;
         const sellerTag = updatedEscrow.sellerUsername
           ? `@${updatedEscrow.sellerUsername}`
           : `[${updatedEscrow.sellerId}]`;
-        const amount = updatedEscrow.quantity || 0;
-        const rate = updatedEscrow.rate || 0;
-        const paymentMethod = updatedEscrow.paymentMethod || "N/A";
-        const chain = updatedEscrow.chain || "BSC";
+        const amount = updatedEscrow.quantity;
+        const rate = updatedEscrow.rate;
+        const paymentMethod = updatedEscrow.paymentMethod;
+        const chain = updatedEscrow.chain;
 
         // Calculate fees
-        const networkFee = updatedEscrow.networkFee || 0;
-        const escrowFeePercent =
-          updatedEscrow.feeRate !== undefined && updatedEscrow.feeRate !== null
-            ? Number(updatedEscrow.feeRate)
-            : Number(config.ESCROW_FEE_PERCENT || 0);
+        const networkFee = updatedEscrow.networkFee;
+        if (
+          updatedEscrow.feeRate === undefined ||
+          updatedEscrow.feeRate === null
+        ) {
+          return ctx.reply("❌ Error: Fee rate missing. Cannot confirm deal.");
+        }
+        const escrowFeePercent = Number(updatedEscrow.feeRate);
         const escrowFee = (amount * escrowFeePercent) / 100;
         const releaseAmount = amount - networkFee - escrowFee;
 
@@ -1059,10 +1062,7 @@ ${approvalStatus}`;
               updatedEscrow.token,
               network,
               updatedEscrow.quantity,
-              updatedEscrow.feeRate !== undefined &&
-                updatedEscrow.feeRate !== null
-                ? Number(updatedEscrow.feeRate)
-                : Number(config.ESCROW_FEE_PERCENT || 0),
+              0, // No longer using config.ESCROW_FEE_PERCENT for deposit address assignment
               updatedEscrow.groupId // Pass groupId explicitly
             );
 
@@ -1463,10 +1463,10 @@ Once you’ve sent the amount, tap the button below.`;
       });
 
       const newAmount = newDeposits.reduce(
-        (sum, tx) => sum + Number(tx.valueDecimal || 0),
+        (sum, tx) => sum + Number(tx.valueDecimal),
         0
       );
-      const previousAmount = escrow.depositAmount || 0;
+      const previousAmount = escrow.depositAmount;
       const totalAmount = previousAmount + newAmount;
 
       if (newAmount > 0) {
@@ -1951,20 +1951,15 @@ Once you’ve sent the amount, tap the button below.`;
           ? updatedEscrow.pendingReleaseAmount
           : formattedTotalDeposited;
 
-      // Calculate amount to release based on "Fee on Gross" logic
-      // User expects: Payout = Total - NetworkFee - (Total * FeeRate)
-      // Contract does: Payout = ReleaseAmount * (1 - FeeRate)
-      // So: ReleaseAmount = (Total - NetworkFee - (Total * FeeRate)) / (1 - FeeRate)
-
       if (
         updatedEscrow.pendingReleaseAmount === null ||
         updatedEscrow.pendingReleaseAmount === undefined
       ) {
-        const networkFee = updatedEscrow.networkFee || 0;
+        const networkFee = updatedEscrow.networkFee;
         const feeRate =
           typeof updatedEscrow.feeRate === "number"
             ? updatedEscrow.feeRate
-            : Number(config.ESCROW_FEE_PERCENT || 0);
+            : 0.75; // Strict default, no global config fallback
         const feeRateDecimal = feeRate / 100;
 
         // Calculate expected payout
@@ -1972,26 +1967,18 @@ Once you’ve sent the amount, tap the button below.`;
         const totalDeductions = networkFee + grossFee;
         let targetPayout = totalDeposited - totalDeductions;
 
-        // Round to 2 decimal places to match display precision (e.g., 0.7925 becomes 0.79)
-        // This ensures the actual release matches what users see in DEAL CONFIRMED message
         targetPayout = Math.floor(targetPayout * 100) / 100;
 
         if (targetPayout <= 0) {
-          // Fallback to naive calc if fees eat everything to avoid negative
           releaseAmount = totalDeposited - networkFee;
         } else {
-          // Reverse calculate the amount to send to contract to achieve target payout
-          // If fee is 0, divisor is 1, so it works.
           if (feeRateDecimal >= 1) {
-            // Safety: if 100% fee, can't divide by zero/negative
             releaseAmount = totalDeposited - networkFee;
           } else {
             releaseAmount = targetPayout / (1 - feeRateDecimal);
           }
         }
 
-        // Final sanity check: cannot release more than we have
-        // (Though theoretically we leave dust in vault, so releaseAmount should be < totalDeposited)
         if (releaseAmount > totalDeposited) {
           releaseAmount = totalDeposited;
         }
@@ -2002,12 +1989,11 @@ Once you’ve sent the amount, tap the button below.`;
         updatedEscrow.chain,
         updatedEscrow.buyerAddress,
         releaseAmount,
-        null, // wei override
-        updatedEscrow.groupId, // groupId (for logging/finding contract)
-        updatedEscrow.contractAddress // Pass specific contract address
+        null,
+        updatedEscrow.groupId,
+        updatedEscrow.contractAddress
       );
 
-      // Validate amount
       if (releaseAmount > formattedTotalDeposited) {
         return safeAnswerCbQuery(
           ctx,
@@ -2024,7 +2010,6 @@ Once you’ve sent the amount, tap the button below.`;
         );
       }
 
-      // Calculate wei amount for release
       const EPSILON = 0.00001;
       const isFullRelease =
         Math.abs(releaseAmount - formattedTotalDeposited) < EPSILON;
@@ -2094,10 +2079,9 @@ Once you’ve sent the amount, tap the button below.`;
         const isPartialRelease =
           Math.abs(releaseAmount - formattedTotalDeposited) >= EPSILON;
         const remainingAmount = formattedTotalDeposited - releaseAmount;
-        const isActuallyFullRelease = remainingAmount < EPSILON; // Check if remaining is essentially 0
+        const isActuallyFullRelease = remainingAmount < EPSILON;
 
         if (isPartialRelease && !isActuallyFullRelease) {
-          // True partial release: reduce the deposited amounts
           updatedEscrow.accumulatedDepositAmount = remainingAmount;
           updatedEscrow.depositAmount = remainingAmount;
           updatedEscrow.confirmedAmount = remainingAmount;
@@ -2108,9 +2092,7 @@ Once you’ve sent the amount, tap the button below.`;
             updatedEscrow.accumulatedDepositAmountWei =
               remainingWei < 0 ? "0" : remainingWei.toString();
           }
-          // Keep status as deposited/ready_to_release since there's still funds
         } else {
-          // Full release (either explicitly full or partial that emptied the balance)
           if (!updatedEscrow.quantity || updatedEscrow.quantity <= 0) {
             updatedEscrow.quantity = releaseAmount;
           }
@@ -2157,9 +2139,7 @@ Transaction: ${linkLine}`;
 
         await ctx.reply(successText, { parse_mode: "HTML" });
 
-        // Send completion messages if it's actually a full release (balance is 0)
         if (!isPartialRelease || isActuallyFullRelease) {
-          // Reload to get latest state
           const finalEscrow = await Escrow.findById(updatedEscrow._id);
 
           try {
@@ -2187,7 +2167,6 @@ Transaction: ${linkLine}`;
             console.error("Error broadcasting completion feed:", feedError);
           }
 
-          // Send completion message with close deal button
           const images = require("../config/images");
           const tradeStart =
             finalEscrow.tradeStartTime || finalEscrow.createdAt || new Date();
@@ -2239,7 +2218,6 @@ Thank you for using our safe escrow system.`;
             console.error("Error sending completion summary:", sendError);
           }
 
-          // Update the "Trade started" message in the main group
           await updateTradeStartedMessage(
             finalEscrow,
             ctx.telegram,
@@ -2247,7 +2225,6 @@ Thank you for using our safe escrow system.`;
             releaseResult?.transactionHash || null
           );
 
-          // Schedule automatic user removal after 5 minutes (same as refund)
           const settleAndRecycleGroup = async (escrow, telegram) => {
             try {
               const group = await GroupPool.findOne({
@@ -2288,7 +2265,6 @@ Thank you for using our safe escrow system.`;
             }
           };
 
-          // Delay user removal by 5 minutes (300,000 milliseconds)
           setTimeout(async () => {
             await settleAndRecycleGroup(finalEscrow, ctx.telegram);
           }, 5 * 60 * 1000);
@@ -2319,7 +2295,6 @@ Thank you for using our safe escrow system.`;
         return safeAnswerCbQuery(ctx, "❌ No active escrow found.");
       }
 
-      // Guard against duplicate / stale confirmations
       if (
         !escrow.releaseConfirmationMessageId ||
         (callbackMessageId &&
@@ -2331,7 +2306,6 @@ Thank you for using our safe escrow system.`;
         );
       }
 
-      // Also guard against already-settled deals
       if (
         escrow.releaseTransactionHash ||
         ["completed", "refunded"].includes(escrow.status)
@@ -2353,26 +2327,20 @@ Thank you for using our safe escrow system.`;
         );
       }
 
-      // Update confirmation status
       if (isBuyer) {
         escrow.buyerConfirmedRelease = true;
       }
       if (isSeller) {
         escrow.sellerConfirmedRelease = true;
       }
-      // If admin is neither buyer nor seller, they can approve on behalf of both
       if (isAdmin && !isBuyer && !isSeller) {
         escrow.buyerConfirmedRelease = true;
         escrow.sellerConfirmedRelease = true;
       }
       await escrow.save();
 
-      // Reload to get latest state
       const updatedEscrow = await Escrow.findById(escrow._id);
 
-      // Update message with current confirmation status
-      // Get usernames from escrow (exact same format as DEAL CONFIRMED message)
-      // At this point, buyerId and sellerId should always be set (deal must be confirmed to reach this status)
       const sellerTag = updatedEscrow.sellerUsername
         ? `@${updatedEscrow.sellerUsername}`
         : `[${updatedEscrow.sellerId}]`;
@@ -2415,10 +2383,8 @@ ${statusSection}
 
 ${approvalNote}`;
 
-      // Update the message
       if (updatedEscrow.releaseConfirmationMessageId) {
         try {
-          // Determine if we show buttons
           let showButtons = true;
           if (isPartialRelease) {
             if (
@@ -2465,7 +2431,6 @@ ${approvalNote}`;
         }
       }
 
-      // Give feedback to user
       if (
         updatedEscrow.buyerConfirmedRelease &&
         updatedEscrow.sellerConfirmedRelease
@@ -2481,7 +2446,6 @@ ${approvalNote}`;
         );
       }
 
-      // Check if both have confirmed
       if (
         updatedEscrow.buyerConfirmedRelease &&
         updatedEscrow.sellerConfirmedRelease
@@ -2523,14 +2487,12 @@ ${approvalNote}`;
           );
         }
 
-        // Use pending release amount if set (partial release), otherwise use full amount
         let releaseAmount =
           updatedEscrow.pendingReleaseAmount !== null &&
           updatedEscrow.pendingReleaseAmount !== undefined
             ? updatedEscrow.pendingReleaseAmount
             : formattedTotalDeposited;
 
-        // Validate amount doesn't exceed available balance (re-check to handle race conditions)
         if (releaseAmount > formattedTotalDeposited) {
           return safeAnswerCbQuery(
             ctx,
@@ -2540,7 +2502,6 @@ ${approvalNote}`;
           );
         }
 
-        // Validate minimum amount
         if (releaseAmount <= 0) {
           return safeAnswerCbQuery(
             ctx,
@@ -2548,19 +2509,13 @@ ${approvalNote}`;
           );
         }
 
-        // Use epsilon for floating point comparison
         const EPSILON = 0.00001;
         const isFullRelease =
           Math.abs(releaseAmount - formattedTotalDeposited) < EPSILON;
-
-        // Calculate wei amount for release
         let amountWeiOverride = null;
         if (isFullRelease && totalDepositedWei) {
-          // Full release: use full wei amount (exact amount in contract)
           amountWeiOverride = totalDepositedWei;
         } else if (totalDepositedWei && formattedTotalDeposited > 0) {
-          // Partial release with stored wei: calculate proportional wei amount for precision
-          // Use BigInt arithmetic to maintain precision: (totalWei * releaseAmount * 10^decimals) / (totalAmount * 10^decimals)
           try {
             const releaseAmountWei = ethers.parseUnits(
               releaseAmount.toFixed(decimals),
@@ -2570,13 +2525,11 @@ ${approvalNote}`;
               formattedTotalDeposited.toFixed(decimals),
               decimals
             );
-            // Calculate proportional wei: (totalDepositedWei * releaseAmountWei) / totalDepositedAmountWei
             const proportionalWei =
               (BigInt(totalDepositedWei) * BigInt(releaseAmountWei)) /
               BigInt(totalDepositedAmountWei);
             amountWeiOverride = proportionalWei.toString();
           } catch (e) {
-            // Fallback to direct conversion if proportional calculation fails
             try {
               amountWeiOverride = ethers
                 .parseUnits(releaseAmount.toFixed(decimals), decimals)
@@ -2586,7 +2539,6 @@ ${approvalNote}`;
             }
           }
         } else {
-          // No wei stored: convert amount to wei
           try {
             amountWeiOverride = ethers
               .parseUnits(releaseAmount.toFixed(decimals), decimals)
@@ -2596,21 +2548,21 @@ ${approvalNote}`;
           }
         }
 
-        // Calculate amount to release after network fees (if full release)
-        // Only deduct network fee if releasing the full amount (standard flow)
-        // If pendingReleaseAmount is set (partial), we assume exact amount needed
-        if (
-          updatedEscrow.pendingReleaseAmount === null ||
-          updatedEscrow.pendingReleaseAmount === undefined
-        ) {
-          const networkFee = updatedEscrow.networkFee || 0;
-          if (releaseAmount > networkFee) {
-            releaseAmount = releaseAmount - networkFee;
-          } else {
-            console.warn(
-              `Warning: Release amount ${releaseAmount} is less than network fee ${networkFee}. Ignoring network fee.`
-            );
-          }
+        // Calculate Fees (Strict Calculation)
+        // 1. Service Fee (Percentage of the gross release amount)
+        const feeRateVal = updatedEscrow.feeRate;
+        const serviceFee = (releaseAmount * feeRateVal) / 100;
+
+        // 2. Network Fee (Flat amount)
+        const networkFee = updatedEscrow.networkFee;
+
+        const grossReleaseAmount = releaseAmount;
+        const netReleaseAmount = grossReleaseAmount - serviceFee - networkFee;
+
+        if (netReleaseAmount <= 0) {
+          console.warn(
+            `Warning: Net release amount ${netReleaseAmount} is <= 0. Adjusted to 0 but transaction might fail if amount is required.`
+          );
         }
 
         try {
@@ -2618,38 +2570,34 @@ ${approvalNote}`;
             updatedEscrow.token,
             updatedEscrow.chain,
             updatedEscrow.buyerAddress,
-            releaseAmount,
-            amountWeiOverride,
+            netReleaseAmount > 0 ? netReleaseAmount : 0, // Use NET amount
+            null, // Disable override to ensure we don't accidentally sweep fees by sending totalDepositedWei
             updatedEscrow.groupId,
-            updatedEscrow.contractAddress // Pass specific contract address
+            updatedEscrow.contractAddress
           );
 
           if (!releaseResult || !releaseResult.success) {
             throw new Error("Release transaction failed - no result returned");
           }
 
-          // Ensure transaction hash exists (should always exist if transaction succeeded)
           if (!releaseResult.transactionHash) {
             throw new Error(
               "Release transaction succeeded but no transaction hash returned"
             );
           }
 
-          // Always set transaction hash when release succeeds
           updatedEscrow.releaseTransactionHash = releaseResult.transactionHash;
 
-          // Use epsilon for floating point comparison
           const EPSILON = 0.00001;
+          // Simplify Partial Release Check:
+          // Since releaseAmount is now GROSS (before fee deduction), we simply compare it to the Total Deposited.
           const isPartialRelease =
-            Math.abs(releaseAmount - formattedTotalDeposited) >= EPSILON;
+            formattedTotalDeposited - grossReleaseAmount > EPSILON;
 
           if (isPartialRelease) {
-            // Partial release: reduce the deposited amounts
             const remainingAmount = formattedTotalDeposited - releaseAmount;
 
-            // Handle edge case: if remaining amount is essentially zero, treat as full release
             if (remainingAmount < EPSILON) {
-              // Ensure quantity is preserved for statistics (use released amount if quantity is missing)
               if (!updatedEscrow.quantity || updatedEscrow.quantity <= 0) {
                 updatedEscrow.quantity = releaseAmount;
               }
@@ -2665,11 +2613,9 @@ ${approvalNote}`;
               updatedEscrow.depositAmount = remainingAmount;
               updatedEscrow.confirmedAmount = remainingAmount;
 
-              // Update wei amount if we have it
               if (totalDepositedWei && amountWeiOverride) {
                 const remainingWei =
                   BigInt(totalDepositedWei) - BigInt(amountWeiOverride);
-                // Ensure wei doesn't go negative
                 if (remainingWei < 0) {
                   updatedEscrow.accumulatedDepositAmountWei = "0";
                 } else {
@@ -2677,13 +2623,8 @@ ${approvalNote}`;
                     remainingWei.toString();
                 }
               }
-
-              // Keep status as deposited/ready_to_release since there's still funds
-              // Don't change status for partial release
             }
           } else {
-            // Full release: mark as completed
-            // Ensure quantity is preserved for statistics (use released amount if quantity is missing)
             if (!updatedEscrow.quantity || updatedEscrow.quantity <= 0) {
               updatedEscrow.quantity = releaseAmount;
             }
@@ -2705,7 +2646,7 @@ ${approvalNote}`;
                 buyerUsername: updatedEscrow.buyerUsername,
                 sellerId: updatedEscrow.sellerId,
                 sellerUsername: updatedEscrow.sellerUsername,
-                amount: releaseAmount,
+                amount: grossReleaseAmount, // Record GROSS amount for stats
                 token: updatedEscrow.token,
                 escrowId: updatedEscrow.escrowId,
               });
@@ -2716,7 +2657,7 @@ ${approvalNote}`;
             try {
               await CompletionFeedService.handleCompletion({
                 escrow: updatedEscrow,
-                amount: releaseAmount,
+                amount: netReleaseAmount, // Log NET amount released to buyer
                 transactionHash: releaseResult.transactionHash,
                 telegram: ctx.telegram,
               });
@@ -2754,11 +2695,9 @@ ${approvalNote}`;
               : `<code>${releaseResult.transactionHash}</code>`
             : "Not available";
 
-          // Reload escrow to get latest status after save
           const reloadedEscrow = await Escrow.findById(updatedEscrow._id);
           const isActuallyFullRelease = reloadedEscrow.status === "completed";
 
-          // Only show completion message and close trade option for full release
           if (isActuallyFullRelease) {
             const completionText = `🎉 <b>Deal Complete!</b> ✅
 
@@ -2803,7 +2742,6 @@ Thank you for using our safe escrow system.`;
               await updatedEscrow.save();
             }
 
-            // Update the "Trade started" message in the main group
             await updateTradeStartedMessage(
               updatedEscrow,
               ctx.telegram,
@@ -2811,7 +2749,6 @@ Thank you for using our safe escrow system.`;
               releaseResult?.transactionHash || null
             );
 
-            // Schedule automatic user removal after 5 minutes (same as refund)
             const settleAndRecycleGroup = async (escrow, telegram) => {
               try {
                 const group = await GroupPool.findOne({
@@ -2852,18 +2789,13 @@ Thank you for using our safe escrow system.`;
               }
             };
 
-            // Delay user removal by 5 minutes (300,000 milliseconds)
             setTimeout(async () => {
               await settleAndRecycleGroup(reloadedEscrow, ctx.telegram);
             }, 5 * 60 * 1000);
           } else {
-            // Partial release: send success message
             const partialReleaseText = `✅ Partial Release Complete!
 
-Amount Released: ${releaseAmount.toFixed(5)} ${updatedEscrow.token}
-Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${
-              updatedEscrow.token
-            }
+Amount Released: ${netReleaseAmount.toFixed(5)} ${updatedEscrow.token}
 🔗 Transaction: ${linkLine}`;
 
             try {
@@ -2879,7 +2811,7 @@ Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${
 
           try {
             const releaseStatusText = isPartialRelease
-              ? `✅ Partial release completed: ${releaseAmount.toFixed(5)} ${
+              ? `✅ Partial release completed: ${netReleaseAmount.toFixed(5)} ${
                   updatedEscrow.token
                 }`
               : "✅ Release completed.";
@@ -2893,7 +2825,6 @@ Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${
           } catch (e) {
             const description = e?.response?.description || e?.message || "";
             if (description.toLowerCase().includes("message is not modified")) {
-              // Safe to ignore - message is already in correct state
             } else {
               try {
                 const releaseStatusText = isPartialRelease
@@ -2905,7 +2836,6 @@ Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${
               } catch (e2) {
                 const desc2 = e2?.response?.description || e2?.message || "";
                 if (!desc2.toLowerCase().includes("message is not modified")) {
-                  // Only log if it's not the "message is not modified" error
                 }
               }
             }
@@ -2984,7 +2914,6 @@ Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${
       }
       await escrow.save();
 
-      // Update Message
       const updatedEscrow = await Escrow.findById(escrow._id);
       const sellerTag = updatedEscrow.sellerUsername
         ? `@${updatedEscrow.sellerUsername}`
@@ -3049,7 +2978,6 @@ Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${
         } catch (e) {}
       }
 
-      // EXECUTE REFUND
       if (
         updatedEscrow.buyerConfirmedRefund &&
         updatedEscrow.sellerConfirmedRefund
@@ -3067,7 +2995,6 @@ Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${
         if (refundAmount <= 0)
           return safeAnswerCbQuery(ctx, "❌ Invalid amount.");
 
-        // Calculate Wei
         const decimals = BlockchainService.getTokenDecimals(
           updatedEscrow.token,
           updatedEscrow.chain
@@ -3084,7 +3011,6 @@ Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${
           amountWeiOverride = updatedEscrow.accumulatedDepositAmountWei;
         }
 
-        // Ensure refundAmountStr is fixed to decimals to avoid float issues in parseUnits
         const refundAmountStr = refundAmount.toFixed(decimals);
 
         try {
@@ -3097,15 +3023,12 @@ Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${
           );
         } catch (e) {}
 
-        // Calculate amount to refund after network fees (if full refund)
-        // Only deduct network fee if refunding the full amount (standard flow)
-        // If pendingRefundAmount is set (partial), we assume exact amount needed
         const refundAmountNum = parseFloat(refundAmountStr);
         if (
           updatedEscrow.pendingRefundAmount === null ||
           updatedEscrow.pendingRefundAmount === undefined
         ) {
-          const networkFee = updatedEscrow.networkFee || 0;
+          const networkFee = updatedEscrow.networkFee;
           if (refundAmountNum > networkFee) {
             const newRefundAmount = refundAmountNum - networkFee;
             refundAmountStr = newRefundAmount.toFixed(decimals);
@@ -3121,10 +3044,10 @@ Remaining: ${(formattedTotalDeposited - releaseAmount).toFixed(5)} ${
             updatedEscrow.token,
             updatedEscrow.chain,
             updatedEscrow.sellerAddress,
-            refundAmountStr, // Pass string fixed to decimals
+            refundAmountStr,
             amountWeiOverride,
             updatedEscrow.groupId,
-            updatedEscrow.contractAddress // Pass specific contract address
+            updatedEscrow.contractAddress
           );
 
           updatedEscrow.refundTransactionHash = refundResult.transactionHash;
@@ -3243,7 +3166,7 @@ Transaction: ${linkLine}`;
 
       // Update escrow to proceed with partial amount
       const partialAmount =
-        escrow.accumulatedDepositAmount || escrow.depositAmount || 0;
+        escrow.accumulatedDepositAmount || escrow.depositAmount;
       escrow.confirmedAmount = partialAmount;
       escrow.depositAmount = partialAmount;
       escrow.status = "deposited";
@@ -3352,9 +3275,9 @@ Use /release After Fund Transfer to Seller
       await escrow.save();
 
       // Calculate remaining amount
-      const expectedAmount = escrow.quantity || 0;
+      const expectedAmount = escrow.quantity;
       const currentAmount =
-        escrow.accumulatedDepositAmount || escrow.depositAmount || 0;
+        escrow.accumulatedDepositAmount || escrow.depositAmount;
       const remainingAmount = expectedAmount - currentAmount;
       const remainingFormatted = remainingAmount.toFixed(2);
 
@@ -4155,11 +4078,35 @@ Trade completed successfully.`;
         const actualAmount = amountWeiOverride
           ? Number(ethers.formatUnits(BigInt(amountWeiOverride), decimals))
           : parseFloat(amount);
-        const escrowFee = (actualAmount * config.ESCROW_FEE_PERCENT) / 100;
-        const networkFee = 0.1;
-        const netAmount = actualAmount - networkFee;
 
-        // Action should be 'release' only (checked earlier)
+        // Fee Calculation Logic
+        // Use the specific rate assigned to this deal (e.g. 0.25, 0.5, 0.75) from bio tags
+        // Fallback to standard 0.75% ONLY if deal rate is missing (legacy data).
+        // WE DO NOT USE config.ESCROW_FEE_PERCENT here as it is for group filtering only.
+        // Fee Calculation Logic - STRICT NO FALLBACKS
+        if (escrow.feeRate === undefined || escrow.feeRate === null) {
+          return ctx.reply(
+            "❌ Critical Error: Deal fee rate is missing. Cannot calculate fees."
+          );
+        }
+        if (escrow.networkFee === undefined || escrow.networkFee === null) {
+          return ctx.reply(
+            "❌ Critical Error: Network fee is missing. Cannot calculate fees."
+          );
+        }
+
+        const escrowFeePercent = escrow.feeRate;
+        const escrowFee = (actualAmount * escrowFeePercent) / 100;
+        const networkFee = escrow.networkFee;
+
+        const netAmount = actualAmount - escrowFee - networkFee;
+
+        if (netAmount <= 0) {
+          return ctx.reply(
+            "❌ Error: Calculated release amount (after fees) is zero or negative."
+          );
+        }
+
         const targetAddress = escrow.buyerAddress;
         if (!targetAddress) {
           return ctx.reply(
@@ -4172,26 +4119,22 @@ Trade completed successfully.`;
             escrow.token,
             escrow.chain,
             targetAddress,
-            actualAmount,
-            amountWeiOverride,
+            netAmount,
+            null,
             escrow.groupId
           );
 
-          // Ensure transaction hash exists (should always exist if transaction succeeded)
           if (!releaseResult || !releaseResult.transactionHash) {
             throw new Error(
               "Release transaction succeeded but no transaction hash returned"
             );
           }
 
-          // Ensure quantity is preserved for statistics (use released amount if quantity is missing)
           if (!escrow.quantity || escrow.quantity <= 0) {
             escrow.quantity = actualAmount;
           }
-          // Update escrow status to completed and save transaction hash
           escrow.status = "completed";
           escrow.releaseTransactionHash = releaseResult.transactionHash;
-          // Zero out deposit amounts after preserving quantity
           escrow.accumulatedDepositAmount = 0;
           escrow.depositAmount = 0;
           escrow.confirmedAmount = 0;
@@ -4541,29 +4484,85 @@ Approved By: ${
       const stats = await UserStatsService.getHighLevelStats();
       const message = UserStatsService.formatMainLeaderboard(stats);
 
-      await ctx.editMessageText(message, {
-        parse_mode: "HTML",
-        reply_markup: {
-          inline_keyboard: [
-            [
-              {
-                text: "Buyer's Leaderboard",
-                callback_data: "leaderboard_buyers",
-              },
-              {
-                text: "Seller's Leaderboard",
-                callback_data: "leaderboard_sellers",
-              },
+      await safeEditMessageText(
+        ctx,
+        ctx.callbackQuery.message.chat.id,
+        ctx.callbackQuery.message.message_id,
+        message,
+        {
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "🔴 Sellers", callback_data: "leaderboard_sellers" },
+                { text: "🌍 Overall", callback_data: "leaderboard_overall" },
+              ],
+              [{ text: "📊 Deal Stats", callback_data: "leaderboard_stats" }],
+              [{ text: "🔄 Refresh", callback_data: "leaderboard_buyers" }],
             ],
-          ],
-        },
-      });
+          },
+        }
+      );
       await safeAnswerCbQuery(ctx);
       return;
     }
+    const safeEditMessageText = async (
+      ctx,
+      chatId,
+      messageId,
+      text,
+      extra = {}
+    ) => {
+      try {
+        await ctx.telegram.editMessageText(
+          chatId,
+          messageId,
+          undefined,
+          text,
+          extra
+        );
+      } catch (error) {
+        if (
+          error.description &&
+          error.description.includes("message is not modified")
+        ) {
+          return;
+        }
+
+        if (
+          error.code === 429 ||
+          (error.description && error.description.includes("Too Many Requests"))
+        ) {
+          const retryAfter = error.parameters?.retry_after || 5;
+          if (retryAfter < 30) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, retryAfter * 1000 + 1000)
+            );
+            try {
+              await ctx.telegram.editMessageText(
+                chatId,
+                messageId,
+                undefined,
+                text,
+                extra
+              );
+            } catch (retryErr) {
+              console.error(`Rate limit retry failed: ${retryErr.message}`);
+            }
+            return;
+          }
+        }
+
+        console.error(`Edit Msg Error: ${error.message}`);
+      }
+    };
   } catch (error) {
-    console.error("Error in callback handler:", error);
-    // Try to answer callback query - safeAnswerCbQuery handles expired queries internally
+    if (
+      error.description &&
+      error.description.includes("message is not modified")
+    ) {
+      return;
+    }
     await safeAnswerCbQuery(ctx, "❌ An error occurred");
   }
 };

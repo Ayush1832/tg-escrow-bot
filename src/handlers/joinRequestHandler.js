@@ -819,7 +819,8 @@ async function joinRequestHandler(ctx) {
           "seller",
           { html: true }
         );
-        const startedMsg = await telegram.sendMessage(
+        const startedMsg = await safeSendMessage(
+          telegram,
           originChatId,
           `✅ Trade started between ${initiatorLabel} and ${counterpartyLabel}.`,
           { parse_mode: "HTML" }
@@ -927,8 +928,37 @@ async function joinRequestHandler(ctx) {
       console.error("Failed to send disclaimer/role selection:", msgError);
       // Non-critical - users can still proceed
     }
+    // Helper for safe message sending (handles 429 rate limits)
+    async function safeSendMessage(telegram, chatId, text, extra = {}) {
+      try {
+        return await telegram.sendMessage(chatId, text, extra);
+      } catch (error) {
+        if (
+          error.code === 429 ||
+          (error.description && error.description.includes("Too Many Requests"))
+        ) {
+          const retryAfter = error.parameters?.retry_after || 5;
+          if (retryAfter < 30) {
+            // Wait and retry once
+            await new Promise((resolve) =>
+              setTimeout(resolve, retryAfter * 1000 + 1000)
+            );
+            try {
+              return await telegram.sendMessage(chatId, text, extra);
+            } catch (retryErr) {
+              console.error(
+                `Rate limit retry failed (send): ${retryErr.message}`
+              );
+              throw retryErr; // Propagate so caller knows it failed
+            }
+          }
+        }
+        console.error(`Send Msg Error: ${error.message}`);
+        throw error;
+      }
+    }
   } catch (error) {
-    console.error("joinRequestHandler error:", error);
+    console.error("joinRequestHandler error:", error.message); // Shortened log
     // Silently ignore to avoid spamming
   }
 }

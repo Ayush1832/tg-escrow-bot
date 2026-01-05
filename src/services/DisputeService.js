@@ -149,7 +149,7 @@ ${escapedReason}
       }
 
 💰 <b>Trade Details:</b>
-• Amount: ${escapeHtml(String(escrow.quantity || 0))} ${escapeHtml(
+• Amount: ${escapeHtml(String(escrow.quantity))} ${escapeHtml(
         escrow.token || "USDT"
       )}
 • Network: ${escapeHtml(escrow.chain || "BSC")}

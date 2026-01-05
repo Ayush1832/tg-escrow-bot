@@ -26,7 +26,7 @@ class CompletionFeedService {
       return;
     }
 
-    const releaseAmount = Number(amount || 0);
+    const releaseAmount = Number(amount);
     if (!Number.isFinite(releaseAmount) || releaseAmount <= 0) {
       console.error(`CompletionFeedService: Invalid release amount: ${amount}`);
       return;
@@ -97,8 +97,8 @@ class CompletionFeedService {
     // Update user stats
     await UserStatsService.updateUserStats(freshEscrow);
 
-    const newVolume = stats.totalCompletedVolume || 0;
-    const newTrades = stats.totalCompletedTrades || 0;
+    const newVolume = stats.totalCompletedVolume;
+    const newTrades = stats.totalCompletedTrades;
 
     const buyerDisplay = formatParticipantById(
       freshEscrow,
@@ -210,15 +210,15 @@ ${transactionLine}`;
   }
 
   formatAmount(value) {
-    return Number(value || 0).toFixed(2);
+    return Number(value).toFixed(2);
   }
 
   estimateUsdValue(amount, escrow) {
-    return Number(amount || 0);
+    return Number(amount);
   }
 
   formatLargeNumber(value) {
-    const num = Number(value || 0);
+    const num = Number(value);
     if (!Number.isFinite(num)) {
       return "0";
     }
@@ -275,7 +275,7 @@ ${transactionLine}`;
       return;
     }
 
-    const amount = Number(partialAmount || 0);
+    const amount = Number(partialAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
       return;
     }
@@ -319,10 +319,10 @@ ${transactionLine}`;
     const network = (freshEscrow.chain || "BSC").toUpperCase();
     const explorerLink = this.getExplorerLink(network, transactionHash);
     const amountDisplay = this.formatAmount(amount);
-    const expectedAmount = freshEscrow.quantity || 0;
+    const expectedAmount = freshEscrow.quantity;
     const remainingAmount = Math.max(
       0,
-      expectedAmount - (freshEscrow.accumulatedDepositAmount || 0)
+      expectedAmount - (freshEscrow.accumulatedDepositAmount)
     );
 
     const transactionLine = explorerLink
@@ -330,42 +330,6 @@ ${transactionLine}`;
       : transactionHash
       ? `🔗 Transaction: <code>${transactionHash.substring(0, 10)}...</code>`
       : "";
-
-    /* 
-    // Partial deposit logging disabled by user request
-    const message = `💰<b>PARTIAL DEPOSIT RECEIVED</b>
-
-⚡️ Buyer: ${buyerDisplay}
-⚡️ Seller: ${sellerDisplay}
-✅ CRYPTO: ${token}
-✅ NETWORK: ${network}
-🪙 Partial Amount: ${amountDisplay} ${token}
-📊 Expected: ${this.formatAmount(expectedAmount)} ${token}
-📊 Remaining: ${this.formatAmount(remainingAmount)} ${token}
-${transactionLine}`;
-
-    const withRetry = require("../utils/retry");
-    try {
-      await withRetry(() =>
-        telegram.sendMessage(this.chatId, message, {
-          parse_mode: "HTML",
-          disable_web_page_preview: true,
-        })
-      );
-
-      freshEscrow.partialDepositLogSent = true;
-      await freshEscrow.save();
-
-      console.log(
-        `CompletionFeedService: Successfully sent partial deposit log for escrow ${freshEscrow.escrowId}`
-      );
-    } catch (error) {
-      console.error(
-        "CompletionFeedService: Failed to send partial deposit log:",
-        error.message
-      );
-    }
-    */
   }
 
   /**
@@ -384,7 +348,7 @@ ${transactionLine}`;
       return;
     }
 
-    const amount = Number(refundAmount || 0);
+    const amount = Number(refundAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
       return;
     }
@@ -456,7 +420,7 @@ ${transactionLine}`;
       { upsert: true, new: true }
     );
 
-    const newRefundedVolume = stats.totalRefundedVolume || 0;
+    const newRefundedVolume = stats.totalRefundedVolume;
 
     const message = `${statusEmoji} <b>TRADE ${typeText}</b>
 
@@ -530,16 +494,16 @@ ${transactionLine}`;
 
     // Determine specific message content based on type
     // Common details
-    const rate = freshEscrow.rate || 0;
-    const paymentMethod = freshEscrow.paymentMethod || "N/A";
-    const dealAmount = freshEscrow.quantity || 0;
+    const rate = freshEscrow.rate;
+    const paymentMethod = freshEscrow.paymentMethod;
+    const dealAmount = freshEscrow.quantity;
 
     if (type === "completed") {
       titleIcon = "✅";
       titleText = "TRADE COMPLETED SUCCESSFULLY";
 
-      const networkFee = freshEscrow.networkFee || 0;
-      const serviceFeePercent = freshEscrow.feeRate || 0;
+      const networkFee = freshEscrow.networkFee;
+      const serviceFeePercent = freshEscrow.feeRate;
       const serviceFee = (dealAmount * serviceFeePercent) / 100;
 
       messageBody = `

@@ -83,7 +83,9 @@ class TronService {
   async getVaultContract(token = "USDT", groupId = null) {
     await this.init();
 
-    const desiredFeePercent = Number(config.ESCROW_FEE_PERCENT || 0);
+    // We don't rely on global config anymore. default to 0 if we must search without group context.
+    // If groupId is provided, we should ideally finding the contract by groupId regardless of fee.
+    const desiredFeePercent = 0;
     const query = {
       name: "EscrowVault",
       token: token.toUpperCase(),
@@ -94,6 +96,9 @@ class TronService {
 
     if (groupId) {
       query.groupId = groupId;
+      // vital: ignore feePercent if we are looking up by specific group ID,
+      // as the group's contract might have a non-zero fee.
+      delete query.feePercent;
     }
 
     const contractEntry = await ContractModel.findOne(query);
@@ -200,21 +205,10 @@ class TronService {
       // The BlockchainService uses vault.feePercent().
       // Let's add feePercent to ABI in TronService just in case, or just return from config.
       // Let's fetch it from config for now to be safe, or check ABI.
-      // Actually, let's check ABI in Step 3770. It ends at line 50.
-      // Step 3610 shows lines 1-36.
-      // I added withdrawToken etc.
-      // I should update ABI to include feePercent too if I want to read it.
-      // But looking at BlockchainService, it uses vault.feePercent().
-      // Let's assume I need to add it to ABI.
-
-      // But first, let's write the function assuming 0 if not dynamic, or fetching from contract if I update ABI.
-      // Wait, getVaultContract uses config.ESCROW_FEE_PERCENT to find the contract.
-      // So returning that is safe.
-
       // Return raw values, normalizer will handle formatting
       return {
         feeWallet: this.tronWeb.address.fromHex(feeWallet),
-        feePercent: Number(config.ESCROW_FEE_PERCENT || 0),
+        feePercent: 0,
         accumulated: accumulated.toString(),
       };
     } catch (error) {

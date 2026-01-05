@@ -98,19 +98,19 @@ async function executeRPCWithRetry(fn, maxRetries = 3) {
 }
 
 async function buildDealSummary(escrow) {
-  const amount = escrow.quantity || 0;
-  const rate = escrow.rate || 0;
-  const paymentMethod = escrow.paymentMethod || "N/A";
-  const chain = escrow.chain || "BSC";
-  const buyerAddress = escrow.buyerAddress || "Not set";
-  const sellerAddress = escrow.sellerAddress || "Not set";
+  const amount = escrow.quantity;
+  const rate = escrow.rate;
+  const paymentMethod = escrow.paymentMethod;
+  const chain = escrow.chain;
+  const buyerAddress = escrow.buyerAddress;
+  const sellerAddress = escrow.sellerAddress;
 
   const buyerUsername = escrow.buyerUsername || "Buyer";
   const sellerUsername = escrow.sellerUsername || "Seller";
 
   // Calculate release amount
-  const networkFee = escrow.networkFee || 0;
-  const escrowFeePercent = escrow.feeRate || 0;
+  const networkFee = escrow.networkFee;
+  const escrowFeePercent = escrow.feeRate;
   const escrowFee = (amount * escrowFeePercent) / 100;
   const releaseAmount = amount - networkFee - escrowFee;
 
@@ -134,13 +134,13 @@ async function buildDealSummary(escrow) {
 
   return `📋 <b> Deal Summary</b>
 
-• <b>Amount:</b> ${amount} ${escrow.token || "USDT"}
+• <b>Amount:</b> ${amount} ${escrow.token}
 • <b>Rate:</b> ₹${rate.toFixed(1)}
 • <b>Payment:</b> ${paymentMethod}
 • <b>Chain:</b> ${chain}
-• <b>Network Fee:</b> ${networkFee} ${escrow.token || "USDT"}
+• <b>Network Fee:</b> ${networkFee} ${escrow.token}
 • <b>Service Fee:</b> ${escrowFeePercent}%
-• <b>Release Amount:</b> ${releaseAmount.toFixed(4)} ${escrow.token || "USDT"}
+• <b>Release Amount:</b> ${releaseAmount.toFixed(4)} ${escrow.token}
 • <b>Buyer Address:</b> <code>${buyerAddress}</code>
 • <b>Seller Address:</b> <code>${sellerAddress}</code>
 
@@ -385,7 +385,6 @@ class EscrowBot {
   }
 
   setupHandlers() {
-    // Calculator Feature
     this.bot.use(calculatorHandler);
 
     this.bot.command("cancel", async (ctx) => {
@@ -395,20 +394,24 @@ class EscrowBot {
         if (!chat || !from) return;
 
         const chatId = chat.id;
-        // Find escrow in draft or awaiting_details
         const escrow = await findGroupEscrow(chatId, [
           "draft",
           "awaiting_details",
+          "awaiting_deposit",
         ]);
 
         if (!escrow) {
           return;
         }
 
-        // Check if deposit address is already provided
-        if (escrow.depositAddress || escrow.uniqueDepositAddress) {
+        if (
+          (escrow.depositAddress || escrow.uniqueDepositAddress) &&
+          escrow.status !== "awaiting_deposit" &&
+          escrow.status !== "draft" &&
+          escrow.status !== "awaiting_details"
+        ) {
           return ctx.reply(
-            "❌ Cannot cancel the deal after deposit address has been provided."
+            "❌ Cannot cancel the deal after funds have been deposited."
           );
         }
 
@@ -586,7 +589,7 @@ class EscrowBot {
         const chainName = escrow.chain || "BSC";
 
         const addressExample = getAddressExample(chainName)
-          .replace("Step 5", "Step 8") // Reuse helper but correct the step number
+          .replace("Step 5", "Step 8")
           .replace("{username}", sellerUsername)
           .replace("{chain}", chainName);
 
@@ -643,11 +646,8 @@ class EscrowBot {
           return next();
         }
 
-        // For non-awaiting states, we check if this looks like a TX hash to treat it as a top-up
-        // If it's just random text in a deposited chat, ignore it
         if (escrow.status !== "awaiting_deposit") {
           const potentialHash = ctx.message.text.trim();
-          // Basic regex check to see if it MIGHT be a hash
           if (
             !/^(0x)?[a-fA-F0-9]{64}$/.test(potentialHash) &&
             !potentialHash.includes("scan")
@@ -664,8 +664,6 @@ class EscrowBot {
         }
 
         let txHash = text;
-        // Relaxed hash extraction: matches any 64-char hex string
-        // Handles full URLs, raw hashes, and variations
         const hashMatch = text.match(/(?:0x)?([a-fA-F0-9]{64})/);
         if (hashMatch) {
           txHash = hashMatch[1];
@@ -722,7 +720,7 @@ class EscrowBot {
         const chainUpper = (escrow.chain || "").toUpperCase();
         let txFrom = null;
         let amount = 0;
-        let amountWeiBigInt = 0n; // Declare amount in outer scope
+        let amountWeiBigInt = 0n;
 
         if (chainUpper === "TRON" || chainUpper === "TRX") {
           try {
@@ -768,14 +766,12 @@ class EscrowBot {
 
             for (const log of txInfo.log || []) {
               try {
-                // Use Hex comparison for safety (avoids Base58 casing issues)
-                // log.address is Hex (41...)
                 const logContractHex = log.address;
                 const expectedTokenHex = tronWeb.address.toHex(tokenAddress);
 
                 if (
-                  logContractHex.toLowerCase() !==
-                  expectedTokenHex.toLowerCase()
+                  logContractHex.toLowerCase().replace(/^0x/, "41") !==
+                  expectedTokenHex.toLowerCase().replace(/^0x/, "41")
                 ) {
                   continue;
                 }
@@ -787,16 +783,14 @@ class EscrowBot {
                     log.topics[0] === transferEventSig ||
                     log.topics[0].toLowerCase() === transferEventSig
                   ) {
-                    // Convert log topics to Hex addresses (41 prefix + last 20 bytes)
                     const fromHex = "41" + log.topics[1].slice(-40);
                     const toHex = "41" + log.topics[2].slice(-40);
 
                     const depositAddrHex = tronWeb.address.toHex(depositAddr);
 
-                    // Robust Hex Comparison
                     if (toHex.toLowerCase() === depositAddrHex.toLowerCase()) {
-                      fromAddr = tronWeb.address.fromHex(fromHex); // Convert back to Base58 for storage
-                      toAddr = tronWeb.address.fromHex(toHex); // Convert back to Base58 for display
+                      fromAddr = tronWeb.address.fromHex(fromHex);
+                      toAddr = tronWeb.address.fromHex(toHex);
 
                       const valueHex = log.data || "0";
                       const value = BigInt("0x" + valueHex);
@@ -836,15 +830,13 @@ class EscrowBot {
 
           try {
             let tx = null;
-            // Retry loop to handle RPC indexing delays (wait up to ~6s)
             for (let attempt = 0; attempt < 3; attempt++) {
               try {
                 tx = await executeRPCWithRetry(async () => {
                   return await provider.getTransaction(txHash);
                 });
-                if (tx) break; // Found it
+                if (tx) break;
               } catch (ignore) {}
-              // Wait 2s before retrying
               if (attempt < 2) await new Promise((r) => setTimeout(r, 2000));
             }
 
@@ -940,12 +932,12 @@ class EscrowBot {
           }
         }
 
-        const expectedAmount = escrow.quantity || 0;
+        const expectedAmount = escrow.quantity;
         const tolerance = 0.01;
 
         const freshEscrow = await Escrow.findById(escrow._id);
 
-        const currentAccumulated = freshEscrow.accumulatedDepositAmount || 0;
+        const currentAccumulated = freshEscrow.accumulatedDepositAmount;
         const newAccumulated = currentAccumulated + amount;
         const remainingAmount = expectedAmount - newAccumulated;
 
@@ -1041,7 +1033,7 @@ class EscrowBot {
           const fromAddress =
             freshEscrow.depositTransactionFromAddress || from || "N/A";
           const depositAddress = freshEscrow.depositAddress || "N/A";
-          const expectedAmountDisplay = (freshEscrow.quantity || 0).toFixed(2);
+          const expectedAmountDisplay = freshEscrow.quantity.toFixed(2);
           const overDelivered =
             expectedAmount > 0 && newAccumulated - expectedAmount > tolerance;
 
@@ -1258,7 +1250,6 @@ Use /release After Fund Transfer to Seller
           }
           await escrow.save();
 
-          // Step 7: Show buyer address prompt
           const buyerUsername = escrow.buyerUsername
             ? `@${escrow.buyerUsername}`
             : "Buyer";
@@ -1435,11 +1426,41 @@ Use /release After Fund Transfer to Seller
           return ctx.reply("❌ Release amount must be greater than 0.");
         }
 
-        escrow.pendingReleaseAmount =
-          requestedAmount !== null ? releaseAmount : null;
+        // NET CALCULATION: Deduct fees from the gross release amount
+        const currentFeeRate =
+          escrow.feeRate !== undefined ? Number(escrow.feeRate) : 0.75; // Fallback if missing, though should be set
+        const currentNetworkFee =
+          escrow.networkFee !== undefined ? Number(escrow.networkFee) : 0.2;
+
+        const grossReleaseAmount =
+          requestedAmount !== null ? requestedAmount : formattedTotalDeposited;
+
+        // Fee is percentage of the GROSS amount being released
+        const serviceFee = (grossReleaseAmount * currentFeeRate) / 100;
+
+        // Net amount = Gross - ServiceFee - NetworkFee
+        // Ensure we don't go below zero
+        const netReleaseAmount = Math.max(
+          0,
+          grossReleaseAmount - serviceFee - currentNetworkFee
+        );
+
+        if (netReleaseAmount <= 0) {
+          return ctx.reply(
+            `❌ Release amount too small to cover fees (Service: ${serviceFee.toFixed(
+              4
+            )}, Network: ${currentNetworkFee}).`
+          );
+        }
+
+        escrow.pendingReleaseAmount = netReleaseAmount;
         escrow.pendingRefundAmount = null;
+
         const isPartialReleaseByAdmin = hasAmount && isAdmin;
         const isPartialReleaseBySeller = hasAmount && isSeller && !isAdmin;
+        const isFullAmount =
+          grossReleaseAmount >= formattedTotalDeposited - 0.000001;
+        const releaseType = isFullAmount ? "Full" : "Partial";
 
         if (isPartialReleaseByAdmin) {
           escrow.adminConfirmedRelease = false;
@@ -1447,7 +1468,7 @@ Use /release After Fund Transfer to Seller
           escrow.sellerConfirmedRelease = false;
           await escrow.save();
 
-          const releaseCaption = `<b>Admin Partial Release Confirmation</b>
+          const releaseCaption = `<b>Admin Release Confirmation (${releaseType})</b>
 
 Amount: ${releaseAmount.toFixed(5)} ${escrow.token}
 Total Deposited: ${formattedTotalDeposited.toFixed(5)} ${escrow.token}
@@ -1477,16 +1498,12 @@ Total Deposited: ${formattedTotalDeposited.toFixed(5)} ${escrow.token}
           escrow.releaseConfirmationMessageId = releaseMsg.message_id;
           await escrow.save();
         } else {
-          // Seller Release (Partial or Full)
           escrow.adminConfirmedRelease = false;
 
           if (isPartialReleaseBySeller) {
-            // For partial release by seller, BOTH must confirm
             escrow.buyerConfirmedRelease = false;
             escrow.sellerConfirmedRelease = false;
           } else {
-            // For full release, only Seller confirms (Buyer implicitly receives) - Default logic
-            // But usually seller initiates, seller approves. Buyer doesn't need to approve receiving money.
             escrow.buyerConfirmedRelease = true;
             escrow.sellerConfirmedRelease = false;
           }
@@ -1499,16 +1516,15 @@ Total Deposited: ${formattedTotalDeposited.toFixed(5)} ${escrow.token}
             ? `@${escrow.buyerUsername}`
             : `[${escrow.buyerId}]`;
 
-          const releaseType = requestedAmount !== null ? "Partial" : "Full";
+          const isPartial = !isFullAmount;
 
           let approvalNote =
             "Only the seller needs to approve to release payment.";
           let statusSection = "";
 
-          if (isPartialReleaseBySeller) {
+          if (isPartial) {
             approvalNote =
               "⚠️ Both Seller and Buyer must confirm this partial release.";
-            // Reset confirmations for new request
             escrow.sellerConfirmedRelease = false;
             escrow.buyerConfirmedRelease = false;
 
@@ -1529,15 +1545,11 @@ Total Deposited: ${formattedTotalDeposited.toFixed(5)} ${escrow.token}
 
           const releaseCaption = `<b>Release Confirmation (${releaseType})</b>
 
-${
-  requestedAmount !== null
-    ? `Amount: ${releaseAmount.toFixed(5)} ${
-        escrow.token
-      }\nTotal Deposited: ${formattedTotalDeposited.toFixed(5)} ${
-        escrow.token
-      }\n\n`
-    : ""
-}${statusSection}
+Amount: ${grossReleaseAmount.toFixed(5)} ${escrow.token}
+<b>Net to Seller:</b> ${netReleaseAmount.toFixed(5)} ${escrow.token}
+<i>(Fees: ${currentFeeRate}% + ${currentNetworkFee})</i>
+
+${statusSection}
 
 ${approvalNote}`;
 
@@ -1619,7 +1631,7 @@ ${approvalNote}`;
         let requestedAmount = null;
 
         if (parts.length > 1) {
-          const amountStr = parts[1].replace(/^-/, ""); // Remove leading minus if present
+          const amountStr = parts[1].replace(/^-/, "");
           requestedAmount = parseFloat(amountStr);
           if (isNaN(requestedAmount) || requestedAmount <= 0) {
             return ctx.reply(
@@ -1662,7 +1674,6 @@ ${approvalNote}`;
           requestedAmount !== null ? refundAmount : null;
         escrow.pendingReleaseAmount = null;
 
-        // Reset confirmation flags
         escrow.adminConfirmedRelease = false;
         escrow.buyerConfirmedRelease = false;
         escrow.sellerConfirmedRelease = false;
@@ -1679,10 +1690,15 @@ ${approvalNote}`;
           "⚠️ Buyer, please confirm you want to return these funds to the Seller.";
         let statusSection = `⌛️ ${buyerTag} - Waiting for confirmation...`;
 
+        if (isAdmin) {
+          approvalNote =
+            "⚠️ Admin Action: Confirming this will refund funds to the Seller immediately.";
+          statusSection = `⚠️ Admin initiated refund. Waiting for admin confirmation...`;
+        }
+
         if (isPartialRefund) {
           approvalNote =
             "⚠️ Both Buyer and Seller must confirm this partial refund.";
-          // Reset confirmations for new request
           escrow.buyerConfirmedRefund = false;
           escrow.sellerConfirmedRefund = false;
 
@@ -1741,11 +1757,153 @@ ${approvalNote}`;
       }
     });
 
-    // Handle refund confirmation callback
     this.bot.action(/^refund_confirm_yes_(.+)$/, async (ctx) => {
-      const escrowId = ctx.match[1];
-      // ... (this logic is likely in callbackHandler, so I won't add it here unless it's missing)
-      // I will just add the require for CompletionFeedService at the top of callbackHandler.js
+      try {
+        const escrowId = ctx.match[1];
+        const Escrow = require("./models/Escrow");
+        const BlockchainService = require("./services/BlockchainService");
+        const CompletionFeedService = require("./services/CompletionFeedService");
+        const GroupPool = require("./models/GroupPool");
+        const GroupPoolService = require("./services/GroupPoolService");
+        const { ethers } = require("ethers");
+        const config = require("./config");
+        const { safeAnswerCbQuery } = require("./utils/telegramUtils");
+
+        const escrow = await Escrow.findOne({ escrowId });
+        if (!escrow) {
+          return ctx.reply("❌ Escrow not found.");
+        }
+
+        const isUserAdmin = config
+          .getAllAdminIds()
+          .includes(String(ctx.from.id));
+
+        if (escrow.buyerId !== ctx.from.id && !isUserAdmin) {
+          try {
+            await ctx.answerCbQuery(
+              "❌ Only the buyer or admin can confirm refund."
+            );
+          } catch (e) {}
+          return;
+        }
+
+        const decimals = BlockchainService.getTokenDecimals(
+          escrow.token,
+          escrow.chain
+        );
+        const amountWeiOverride =
+          escrow.accumulatedDepositAmountWei &&
+          escrow.accumulatedDepositAmountWei !== "0"
+            ? escrow.accumulatedDepositAmountWei
+            : null;
+
+        let refundAmount = escrow.pendingRefundAmount;
+        const totalDeposited = Number(
+          escrow.accumulatedDepositAmount ||
+            escrow.depositAmount ||
+            escrow.confirmedAmount ||
+            0
+        );
+
+        if (!refundAmount || refundAmount <= 0) {
+          const amountWeiOverride =
+            escrow.accumulatedDepositAmountWei &&
+            escrow.accumulatedDepositAmountWei !== "0"
+              ? escrow.accumulatedDepositAmountWei
+              : null;
+          refundAmount = amountWeiOverride
+            ? Number(ethers.formatUnits(BigInt(amountWeiOverride), decimals))
+            : totalDeposited;
+        }
+
+        const networkFee = escrow.networkFee;
+        const netRefundAmount = refundAmount - networkFee;
+
+        if (netRefundAmount <= 0) {
+          return ctx.reply(
+            `❌ Refund amount too small to cover network fees (${networkFee} ${escrow.token}).`
+          );
+        }
+
+        await ctx.reply("🔄 Processing refund... please wait.");
+
+        try {
+          if (!escrow.sellerAddress) {
+            return ctx.reply("❌ Seller address missing.");
+          }
+
+          const refundResult = await BlockchainService.refundFunds(
+            escrow.token,
+            escrow.chain,
+            escrow.sellerAddress,
+            netRefundAmount,
+            null,
+            escrow.groupId
+          );
+
+          if (!refundResult || !refundResult.transactionHash) {
+            throw new Error("Refund transaction failed (no hash).");
+          }
+
+          escrow.status = "refunded";
+          escrow.refundTransactionHash = refundResult.transactionHash;
+          escrow.accumulatedDepositAmount = 0;
+          escrow.depositAmount = 0;
+          escrow.confirmedAmount = 0;
+          escrow.accumulatedDepositAmountWei = "0";
+          await escrow.save();
+
+          try {
+            await CompletionFeedService.handleRefund({
+              escrow,
+              refundAmount: netRefundAmount,
+              transactionHash: refundResult.transactionHash,
+              telegram: ctx.telegram,
+            });
+          } catch (e) {
+            console.error("Feed error", e);
+          }
+
+          const successMsg = `✅ <b>Refund Successful!</b>
+            
+💸 <b>Refunded:</b> ${netRefundAmount.toFixed(5)} ${escrow.token}
+🔗 <b>TX:</b> <code>${refundResult.transactionHash}</code>
+
+Funds returned to Seller.`;
+
+          await ctx.reply(successMsg, { parse_mode: "HTML" });
+
+          setTimeout(async () => {
+            try {
+              const group = await GroupPool.findOne({
+                assignedEscrowId: escrow.escrowId,
+              });
+              if (group) {
+                await GroupPoolService.removeUsersFromGroup(
+                  escrow,
+                  group.groupId,
+                  ctx.telegram
+                );
+                await GroupPoolService.refreshInviteLink(
+                  group.groupId,
+                  ctx.telegram
+                );
+                group.status = "available";
+                group.assignedEscrowId = null;
+                await group.save();
+                await ctx.reply("♻️ Group recycled.");
+              }
+            } catch (e) {
+              console.error("Recycle error", e);
+            }
+          }, 60 * 1000);
+        } catch (err) {
+          console.error("Refund Execution Error:", err);
+          await ctx.reply(`❌ Refund Failed: ${err.message}`);
+        }
+      } catch (error) {
+        console.error("Refund Action Error:", error);
+      }
     });
 
     this.bot.command("balance", async (ctx) => {
@@ -1791,11 +1949,32 @@ ${approvalNote}`;
 
         const networkName = (escrow.chain || "BSC").toUpperCase();
 
-        const balanceMessage = `<b>💰 Available Balance</b>
+        if (escrow.feeRate === undefined || escrow.feeRate === null) {
+          return ctx.reply(
+            "❌ Critical Error: Deal fee rate is missing (0.25%, 0.5%, or 0.75% not set). Cannot calculate balance."
+          );
+        }
+        if (escrow.networkFee === undefined || escrow.networkFee === null) {
+          return ctx.reply(
+            "❌ Critical Error: Network fee is missing. Cannot calculate balance."
+          );
+        }
 
-<b>Amount:</b> ${availableBalance.toFixed(5)} ${escrow.token}
+        const escrowFeePercent = escrow.feeRate;
+        const escrowFee = (availableBalance * escrowFeePercent) / 100;
+        const networkFee = escrow.networkFee;
+        const netBalance = Math.max(
+          0,
+          availableBalance - escrowFee - networkFee
+        );
+
+        const balanceMessage = `<b>💰 Balance Information</b>
+
+<b>Gross Amount:</b> ${availableBalance.toFixed(5)} ${escrow.token}
+<b>Net Release Amount:</b> ${netBalance.toFixed(5)} ${escrow.token} (After Fees)
 <b>Token:</b> ${escrow.token}
 <b>Network:</b> ${networkName}
+<b>Fees:</b> ${escrowFeePercent}% + ${networkFee} ${escrow.token}
 
 This is the current available balance for this trade.`;
 
