@@ -10,6 +10,7 @@ const config = require("../../config");
 const images = require("../config/images");
 const UserStatsService = require("../services/UserStatsService");
 const CompletionFeedService = require("../services/CompletionFeedService");
+const feeConfig = require("../config/feeConfig");
 const {
   getParticipants,
   formatParticipant,
@@ -521,18 +522,9 @@ module.exports = async (ctx) => {
 
       escrow.chain = chain;
 
-      // Update network fee based on chain selection
-      // Strict Network Fee Logic (User Defined)
-      if (escrow.chain === "TRON") {
-        if (escrow.feeRate !== undefined && escrow.feeRate < 0.75) {
-          escrow.networkFee = 2.0;
-        } else {
-          escrow.networkFee = 3.0;
-        }
-      } else {
-        // BSC and others default to 0.2
-        escrow.networkFee = 0.2;
-      }
+      // Update network fee based on chain selection (using centralized config)
+      const hasBioTag = escrow.feeRate !== undefined && escrow.feeRate < 0.75;
+      escrow.networkFee = feeConfig.getNetworkFee(escrow.chain, hasBioTag);
 
       await escrow.save();
 
@@ -614,18 +606,10 @@ module.exports = async (ctx) => {
 
       escrow.token = coin;
 
-      // Strict Network Fee Logic (User Defined)
-      if (escrow.chain === "TRON") {
-        // If feeRate is discounted (< 0.75), it means @room tag was found
-        if (escrow.feeRate !== undefined && escrow.feeRate < 0.75) {
-          escrow.networkFee = 2.0;
-        } else {
-          escrow.networkFee = 3.0;
-        }
-      } else {
-        // BSC and others default to 0.2
-        escrow.networkFee = 0.2;
-      }
+      // Network Fee Logic (using centralized config)
+      // Check if any user has @room bio tag (indicated by discounted feeRate)
+      const hasBioTag = escrow.feeRate !== undefined && escrow.feeRate < 0.75;
+      escrow.networkFee = feeConfig.getNetworkFee(escrow.chain, hasBioTag);
 
       await escrow.save();
 
@@ -769,16 +753,9 @@ module.exports = async (ctx) => {
       escrow.chain = chainKey === "TRON" ? "TRON" : "BSC";
       escrow.contractAddress = contractInfo.address;
 
-      // Strict Network Fee Logic (User Defined)
-      if (escrow.chain === "TRON") {
-        if (escrow.feeRate !== undefined && escrow.feeRate < 0.75) {
-          escrow.networkFee = 2.0;
-        } else {
-          escrow.networkFee = 3.0;
-        }
-      } else {
-        escrow.networkFee = 0.2;
-      }
+      // Network Fee Logic (using centralized config)
+      const hasBioTag = escrow.feeRate !== undefined && escrow.feeRate < 0.75;
+      escrow.networkFee = feeConfig.getNetworkFee(escrow.chain, hasBioTag);
 
       escrow.tradeDetailsStep = "step1_amount";
 
@@ -855,6 +832,17 @@ module.exports = async (ctx) => {
 
       if (!isBuyer && !isSeller) {
         return safeAnswerCbQuery(ctx, "❌ Only buyer or seller can approve.");
+      }
+
+      // Idempotency: prevent double processing
+      if (
+        (isBuyer && escrow.buyerApproved) ||
+        (isSeller && escrow.sellerApproved)
+      ) {
+        return safeAnswerCbQuery(
+          ctx,
+          "✅ You have already approved this deal."
+        );
       }
 
       // Update approval status
@@ -1789,7 +1777,16 @@ Once you’ve sent the amount, tap the button below.`;
       escrow.sellerConfirmedRelease = false;
       await escrow.save();
 
-      await safeAnswerCbQuery(ctx, "❎ Release cancelled");
+      try {
+        await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+      } catch (e) {}
+
+      try {
+        await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+      } catch (e) {}
+
+      await safeAnswerCbQuery(ctx, "❌ Release cancelled.");
+      await ctx.reply("❌ Release cancelled by user.");
       try {
         await ctx.editMessageCaption(
           escrow.groupId,
@@ -1983,11 +1980,15 @@ Once you’ve sent the amount, tap the button below.`;
         }
       }
 
+      // Send (gross - networkFee) to contract, contract will deduct service fee
+      const networkFee = updatedEscrow.networkFee || 0;
+      const amountToContract = releaseAmount - networkFee;
+
       const releaseResult = await BlockchainService.releaseFunds(
         updatedEscrow.token,
         updatedEscrow.chain,
         updatedEscrow.buyerAddress,
-        releaseAmount,
+        amountToContract,
         null,
         updatedEscrow.groupId,
         updatedEscrow.contractAddress
@@ -2124,6 +2125,14 @@ Once you’ve sent the amount, tap the button below.`;
             : `<code>${releaseResult.transactionHash}</code>`
           : "Not available";
 
+        const feeRate =
+          typeof updatedEscrow.feeRate === "number"
+            ? updatedEscrow.feeRate
+            : 0.75;
+        const feeRateDecimal = feeRate / 100;
+        const serviceFee = formattedTotalDeposited * feeRateDecimal;
+        const netReleaseAmount = releaseAmount;
+
         const successText = `✅ <b>Admin Release Complete!</b>
 
 Amount Released: ${releaseAmount.toFixed(5)} ${updatedEscrow.token}
@@ -2133,8 +2142,7 @@ ${
         5
       )} ${updatedEscrow.token}\n`
     : ""
-}
-Transaction: ${linkLine}`;
+}Transaction: ${linkLine}`;
 
         await ctx.reply(successText, { parse_mode: "HTML" });
 
@@ -2309,6 +2317,9 @@ Thank you for using our safe escrow system.`;
         escrow.releaseTransactionHash ||
         ["completed", "refunded"].includes(escrow.status)
       ) {
+        try {
+          await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+        } catch (e) {}
         return safeAnswerCbQuery(ctx, "❌ This deal has already been settled.");
       }
 
@@ -2547,20 +2558,23 @@ ${approvalNote}`;
           }
         }
 
-        // Calculate Fees (Strict Calculation)
-        // 1. Service Fee (Percentage of the gross release amount)
+        // Fee Calculation
         const feeRateVal = updatedEscrow.feeRate;
-        const serviceFee = (releaseAmount * feeRateVal) / 100;
-
-        // 2. Network Fee (Flat amount)
         const networkFee = updatedEscrow.networkFee;
-
         const grossReleaseAmount = releaseAmount;
-        const netReleaseAmount = grossReleaseAmount - serviceFee - networkFee;
 
-        if (netReleaseAmount <= 0) {
+        // Amount sent to contract (after network fee)
+        const amountToContract = grossReleaseAmount - networkFee;
+
+        // Contract will deduct service fee from this amount
+        const serviceFeeOnNet = (amountToContract * feeRateVal) / 100;
+
+        // This is what user will ACTUALLY receive
+        const actualAmountToUser = amountToContract - serviceFeeOnNet;
+
+        if (actualAmountToUser <= 0) {
           console.warn(
-            `Warning: Net release amount ${netReleaseAmount} is <= 0. Adjusted to 0 but transaction might fail if amount is required.`
+            `Warning: Actual amount to user ${actualAmountToUser} is <= 0.`
           );
         }
 
@@ -2569,8 +2583,8 @@ ${approvalNote}`;
             updatedEscrow.token,
             updatedEscrow.chain,
             updatedEscrow.buyerAddress,
-            netReleaseAmount > 0 ? netReleaseAmount : 0, // Use NET amount
-            null, // Disable override to ensure we don't accidentally sweep fees by sending totalDepositedWei
+            amountToContract,
+            null,
             updatedEscrow.groupId,
             updatedEscrow.contractAddress
           );
@@ -2588,17 +2602,21 @@ ${approvalNote}`;
           updatedEscrow.releaseTransactionHash = releaseResult.transactionHash;
 
           const EPSILON = 0.00001;
-          // Simplify Partial Release Check:
-          // Since releaseAmount is now GROSS (before fee deduction), we simply compare it to the Total Deposited.
+
+          const maxAmountToContract = formattedTotalDeposited - networkFee;
+          const maxServiceFee = (maxAmountToContract * feeRateVal) / 100;
+          const maxReceivable = maxAmountToContract - maxServiceFee;
+
           const isPartialRelease =
-            formattedTotalDeposited - grossReleaseAmount > EPSILON;
+            Math.abs(actualAmountToUser - maxReceivable) > EPSILON;
 
           if (isPartialRelease) {
-            const remainingAmount = formattedTotalDeposited - releaseAmount;
+            const remainingAmount =
+              formattedTotalDeposited - grossReleaseAmount;
 
             if (remainingAmount < EPSILON) {
               if (!updatedEscrow.quantity || updatedEscrow.quantity <= 0) {
-                updatedEscrow.quantity = releaseAmount;
+                updatedEscrow.quantity = actualAmountToUser;
               }
               updatedEscrow.status = "completed";
               updatedEscrow.buyerClosedTrade = false;
@@ -2625,7 +2643,7 @@ ${approvalNote}`;
             }
           } else {
             if (!updatedEscrow.quantity || updatedEscrow.quantity <= 0) {
-              updatedEscrow.quantity = releaseAmount;
+              updatedEscrow.quantity = actualAmountToUser;
             }
             updatedEscrow.status = "completed";
             updatedEscrow.buyerClosedTrade = false;
@@ -2645,7 +2663,7 @@ ${approvalNote}`;
                 buyerUsername: updatedEscrow.buyerUsername,
                 sellerId: updatedEscrow.sellerId,
                 sellerUsername: updatedEscrow.sellerUsername,
-                amount: grossReleaseAmount, // Record GROSS amount for stats
+                amount: grossReleaseAmount,
                 token: updatedEscrow.token,
                 escrowId: updatedEscrow.escrowId,
               });
@@ -2656,7 +2674,7 @@ ${approvalNote}`;
             try {
               await CompletionFeedService.handleCompletion({
                 escrow: updatedEscrow,
-                amount: netReleaseAmount, // Log NET amount released to buyer
+                amount: actualAmountToUser,
                 transactionHash: releaseResult.transactionHash,
                 telegram: ctx.telegram,
               });
@@ -3023,28 +3041,29 @@ Amount Released: ${netReleaseAmount.toFixed(5)} ${updatedEscrow.token}
         } catch (e) {}
 
         const refundAmountNum = parseFloat(refundAmountStr);
-        if (
-          updatedEscrow.pendingRefundAmount === null ||
-          updatedEscrow.pendingRefundAmount === undefined
-        ) {
-          const networkFee = updatedEscrow.networkFee;
-          if (refundAmountNum > networkFee) {
-            const newRefundAmount = refundAmountNum - networkFee;
-            refundAmountStr = newRefundAmount.toFixed(decimals);
-          } else {
-            console.warn(
-              `Warning: Refund amount ${refundAmountNum} is less than network fee ${networkFee}. Ignoring network fee.`
-            );
-          }
+        // Admin initiated refund: Calculate amount to send to contract
+        const networkFee = updatedEscrow.networkFee || 0;
+        let amountToContract = refundAmountNum - networkFee;
+
+        if (amountToContract <= 0) {
+          console.warn(
+            `Warning: Refund amount ${refundAmountNum} is less than or equal to network fee ${networkFee}. Using full amount.`
+          );
+          amountToContract = refundAmountNum;
         }
+
+        // Contract will deduct service fee from amountToContract
+        const serviceFeeOnNet =
+          (amountToContract * (updatedEscrow.feeRate || 0)) / 100;
+        const actualAmountToUser = amountToContract - serviceFeeOnNet;
 
         try {
           const refundResult = await BlockchainService.refundFunds(
             updatedEscrow.token,
             updatedEscrow.chain,
             updatedEscrow.sellerAddress,
-            refundAmountStr,
-            amountWeiOverride,
+            amountToContract,
+            null,
             updatedEscrow.groupId,
             updatedEscrow.contractAddress
           );
@@ -3801,12 +3820,16 @@ Thank you for using our safe escrow system.`;
         await ctx.editMessageText("🚀 Releasing funds to the buyer...");
       } catch (e) {}
       try {
+        // Send (gross - networkFee) to contract, contract will deduct service fee
+        const networkFee = escrow.networkFee || 0;
+        const amountToContract = amount - networkFee;
+
         const releaseResult = await BlockchainService.releaseFunds(
           escrow.token,
           escrow.chain,
           escrow.buyerAddress,
-          amount,
-          amountWeiOverride,
+          amountToContract,
+          null,
           escrow.groupId
         );
         // Ensure transaction hash exists (should always exist if transaction succeeded)
@@ -4098,9 +4121,14 @@ Trade completed successfully.`;
         const escrowFee = (actualAmount * escrowFeePercent) / 100;
         const networkFee = escrow.networkFee;
 
-        const netAmount = actualAmount - escrowFee - networkFee;
+        // Send (gross - networkFee) to contract, contract will deduct service fee
+        const amountToContract = actualAmount - networkFee;
 
-        if (netAmount <= 0) {
+        // Calculate what user will ACTUALLY receive after contract deducts service fee
+        const serviceFeeOnNet = (amountToContract * escrowFeePercent) / 100;
+        const actualAmountToUser = amountToContract - serviceFeeOnNet;
+
+        if (actualAmountToUser <= 0) {
           return ctx.reply(
             "❌ Error: Calculated release amount (after fees) is zero or negative."
           );
@@ -4118,7 +4146,7 @@ Trade completed successfully.`;
             escrow.token,
             escrow.chain,
             targetAddress,
-            netAmount,
+            amountToContract,
             null,
             escrow.groupId
           );

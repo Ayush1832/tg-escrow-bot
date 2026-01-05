@@ -1378,7 +1378,7 @@ Use /release After Fund Transfer to Seller
         let requestedAmount = null;
 
         if (hasAmount) {
-          requestedAmount = parseFloat(amountStr);
+          requestedAmount = parseFloat(parts[1]);
           if (isNaN(requestedAmount) || requestedAmount <= 0) {
             return ctx.reply(
               "❌ Invalid amount. Usage: /release or /release <amount>"
@@ -1778,6 +1778,16 @@ ${approvalNote}`;
           .getAllAdminIds()
           .includes(String(ctx.from.id));
 
+        // Idempotency: prevent double refund
+        if (escrow.status === "refunded" || escrow.refundTransactionHash) {
+          try {
+            // Remove the buttons to prevent further clicks
+            await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+            await ctx.reply("✅ Refund already processed.");
+          } catch (e) {}
+          return;
+        }
+
         if (escrow.buyerId !== ctx.from.id && !isUserAdmin) {
           try {
             await ctx.answerCbQuery(
@@ -1817,11 +1827,17 @@ ${approvalNote}`;
         }
 
         const networkFee = escrow.networkFee;
-        const netRefundAmount = refundAmount - networkFee;
+        const amountToContract = refundAmount - networkFee;
 
-        if (netRefundAmount <= 0) {
+        // Contract will deduct service fee from this amount
+        const serviceFeeOnNet = (amountToContract * escrow.feeRate) / 100;
+        const actualAmountToUser = amountToContract - serviceFeeOnNet;
+
+        if (actualAmountToUser <= 0) {
           return ctx.reply(
-            `❌ Refund amount too small to cover network fees (${networkFee} ${escrow.token}).`
+            `❌ Refund amount too small to cover fees (Network: ${networkFee}, Service: ~${serviceFeeOnNet.toFixed(
+              2
+            )} ${escrow.token}).`
           );
         }
 
@@ -1836,7 +1852,7 @@ ${approvalNote}`;
             escrow.token,
             escrow.chain,
             escrow.sellerAddress,
-            netRefundAmount,
+            amountToContract, // Send amount after network fee, contract deducts service fee
             null,
             escrow.groupId,
             escrow.contractAddress // Pass explicit contract address to avoid lookup error
@@ -1857,7 +1873,7 @@ ${approvalNote}`;
           try {
             await CompletionFeedService.handleRefund({
               escrow,
-              refundAmount: netRefundAmount,
+              refundAmount: actualAmountToUser, // Log ACTUAL amount user receives
               transactionHash: refundResult.transactionHash,
               telegram: ctx.telegram,
             });
@@ -1867,7 +1883,7 @@ ${approvalNote}`;
 
           const successMsg = `✅ <b>Refund Successful!</b>
             
-💸 <b>Refunded:</b> ${netRefundAmount.toFixed(5)} ${escrow.token}
+💸 <b>Refunded:</b> ${actualAmountToUser.toFixed(5)} ${escrow.token}
 🔗 <b>TX:</b> <code>${refundResult.transactionHash}</code>
 
 Funds returned to Seller.`;
@@ -1904,6 +1920,35 @@ Funds returned to Seller.`;
         }
       } catch (error) {
         console.error("Refund Action Error:", error);
+      }
+    });
+
+    this.bot.action(/^refund_confirm_no_(.+)$/, async (ctx) => {
+      try {
+        const escrowId = ctx.match[1];
+        const Escrow = require("./models/Escrow");
+        const { safeAnswerCbQuery } = require("./utils/telegramUtils");
+
+        const escrow = await Escrow.findOne({ escrowId });
+
+        // Remove buttons
+        try {
+          await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
+        } catch (e) {}
+
+        if (!escrow) {
+          return safeAnswerCbQuery(ctx, "❌ Escrow not found.");
+        }
+
+        // Reset confirmations
+        escrow.buyerConfirmedRefund = false;
+        escrow.sellerConfirmedRefund = false;
+        await escrow.save();
+
+        await safeAnswerCbQuery(ctx, "❌ Refund cancelled.");
+        await ctx.reply("❌ Refund cancelled by user.");
+      } catch (error) {
+        console.error("Refund Cancel Error:", error);
       }
     });
 

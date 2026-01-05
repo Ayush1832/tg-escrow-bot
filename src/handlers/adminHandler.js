@@ -2271,8 +2271,8 @@ async function handleWithdrawAll(ctx, network) {
       return ctx.reply(`❌ No deployed contracts found for ${network}.`);
     }
 
-    const bs = new BlockchainService();
-    await bs.initialize();
+    // BlockchainService is a singleton, no need to instantiate
+    const bs = BlockchainService;
 
     let report = `💸 <b>${network} FEE WITHDRAWAL REPORT</b>\n\n`;
     let totalWithdrawnFees = 0;

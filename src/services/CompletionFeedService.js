@@ -322,7 +322,7 @@ ${transactionLine}`;
     const expectedAmount = freshEscrow.quantity;
     const remainingAmount = Math.max(
       0,
-      expectedAmount - (freshEscrow.accumulatedDepositAmount)
+      expectedAmount - freshEscrow.accumulatedDepositAmount
     );
 
     const transactionLine = explorerLink
@@ -455,16 +455,7 @@ ${transactionLine}`;
         freshEscrow.refundTransactionHash = transactionHash;
       }
       await freshEscrow.save();
-
-      console.log(
-        `CompletionFeedService: Successfully sent refund log for escrow ${freshEscrow.escrowId}`
-      );
-    } catch (error) {
-      console.error(
-        "CompletionFeedService: Failed to send refund log:",
-        error.message
-      );
-    }
+    } catch (error) {}
   }
 
   async sendDirectMessageNotification(
@@ -545,12 +536,7 @@ ${messageBody}`;
           parse_mode: "HTML",
           disable_web_page_preview: true,
         });
-      } catch (error) {
-        // Ignore if bot can't initiate convo with user or blocked
-        console.log(
-          `CompletionFeedService: Could not DM user ${userId}: ${error.message}`
-        );
-      }
+      } catch (error) {}
     };
 
     // Send to both parties

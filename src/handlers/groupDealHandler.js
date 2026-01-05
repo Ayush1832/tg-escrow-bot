@@ -2,6 +2,7 @@ const Escrow = require("../models/Escrow");
 const GroupPool = require("../models/GroupPool");
 const GroupPoolService = require("../services/GroupPoolService");
 const config = require("../../config");
+const feeConfig = require("../config/feeConfig");
 const joinRequestHandler = require("./joinRequestHandler");
 const findGroupEscrow = require("../utils/findGroupEscrow");
 const {
@@ -279,7 +280,8 @@ module.exports = async (ctx) => {
 
     // Check user bios for "@room" to determine fee
     let feePercent = 0.75;
-    let networkFee = 0.2; // default network fee
+    let initiatorHasTag = false;
+    let counterpartyHasTag = false;
 
     // If config dictates 0% fee, force it and skip bio checks
     // Dynamic Fee Logic: Check user bios for "@room"
@@ -315,24 +317,22 @@ module.exports = async (ctx) => {
         return false;
       };
 
-      const initiatorHasTag = await checkBio(initiatorId);
-      const counterpartyHasTag = counterpartyId
+      initiatorHasTag = await checkBio(initiatorId);
+      counterpartyHasTag = counterpartyId
         ? await checkBio(counterpartyId)
         : false;
 
-      if (initiatorHasTag && counterpartyHasTag) {
-        feePercent = 0.25;
-      } else if (initiatorHasTag || counterpartyHasTag) {
-        feePercent = 0.5;
-      }
+      // Use feeConfig to determine service fee based on bio tags
+      feePercent = feeConfig.getServiceFee(initiatorHasTag, counterpartyHasTag);
     } catch (bioError) {
       console.error("Error checking bios:", bioError);
       // Fallback to default high fee (0.75) if bio check fails
     }
 
-    // Default network fee is 0.2 (BSC/BEP20 default).
-    // This will be updated to 3.0 if user selects TRON in the deal flow.
-    networkFee = 0.2;
+    // Network fee will be set based on chain selection (BSC or TRON) and bio status
+    // For now, use BSC default (0.2). This will be updated when user selects chain.
+    const hasBioTag = initiatorHasTag || counterpartyHasTag;
+    const networkFee = feeConfig.getNetworkFee("BSC", hasBioTag);
 
     // Create a new managed-room escrow and assign a pool group
     const escrowId = `ESC${Date.now()}`;
