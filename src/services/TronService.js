@@ -60,6 +60,11 @@ class TronService {
   constructor() {
     this.tronWeb = null;
     this.initialized = false;
+    this.providers = [
+      config.TRON_RPC_URL || "https://api.trongrid.io",
+      "https://tron-rpc.publicnode.com",
+    ];
+    this.currentProviderIndex = 0;
   }
 
   async init() {
@@ -69,11 +74,26 @@ class TronService {
     const privateKey = rawKey.startsWith("0x") ? rawKey.slice(2) : rawKey;
 
     this.tronWeb = new TronWeb({
-      fullHost: config.TRON_RPC_URL || "https://api.trongrid.io",
+      fullHost: this.providers[this.currentProviderIndex],
       privateKey,
     });
 
     this.initialized = true;
+  }
+
+  async _rotateProvider() {
+    this.currentProviderIndex =
+      (this.currentProviderIndex + 1) % this.providers.length;
+    const newProvider = this.providers[this.currentProviderIndex];
+    console.log(`🔄 Switching Tron Provider to: ${newProvider}`);
+
+    const rawKey = config.TRC_PRIVATE_KEY || config.HOT_WALLET_PRIVATE_KEY;
+    const privateKey = rawKey.startsWith("0x") ? rawKey.slice(2) : rawKey;
+
+    this.tronWeb = new TronWeb({
+      fullHost: newProvider,
+      privateKey,
+    });
   }
 
   toSun(amount) {
@@ -231,17 +251,6 @@ class TronService {
       // TRON calls
       const feeWallet = await contract.feeWallet().call();
       const accumulated = await contract.accumulatedFees().call();
-      // feePercent might be in the contract if you added it to ABI, but sticking to basics:
-      // If feePercent is not in ABI, we return config value or fetch if added.
-      // The user's Solidity likely has feePercent(). Check ABI first.
-      // ABI from previous step HAS accumulatedFees and feeWallet.
-      // It DOES NOT have feePercent in the snippet I pasted (Step 3770/3736).
-      // But EscrowVault.sol usually has it.
-      // For now, let's assume we can rely on config or add feePercent to ABI if needed.
-      // The BlockchainService uses vault.feePercent().
-      // Let's add feePercent to ABI in TronService just in case, or just return from config.
-      // Let's fetch it from config for now to be safe, or check ABI.
-      // Return raw values, normalizer will handle formatting
       return {
         feeWallet: this.tronWeb.address.fromHex(feeWallet),
         feePercent: 0,
@@ -253,15 +262,46 @@ class TronService {
     }
   }
 
+  _wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async _retryWithBackoff(fn, retries = 5, delay = 5000) {
+    try {
+      return await fn();
+    } catch (err) {
+      const msg = err.message || "";
+      if (
+        retries > 0 &&
+        (msg.includes("429") ||
+          msg.includes("Too Many Requests") ||
+          msg.includes("request rate exceeded"))
+      ) {
+        await this._rotateProvider();
+        await this._wait(1000); // Short wait after switch
+        return this._retryWithBackoff(fn, retries - 1, delay); // Maintain original delay if we recurse again
+      }
+      throw err;
+    }
+  }
+
   async withdrawFees({ token = "USDT", contractAddress = null }) {
     await this.init();
-    try {
+    return this._retryWithBackoff(async () => {
       let contract;
       if (contractAddress) {
         contract = await this.tronWeb.contract().at(contractAddress);
       } else {
         const vault = await this.getVaultContract(token);
         contract = vault.contract;
+      }
+
+      // Pre-check: Don't waste energy if no fees
+      const accumulated = await contract.accumulatedFees().call();
+      if (accumulated.toString() === "0") {
+        throw new Error(
+          `Validation Error: no-balance - Accumulated fees are 0. Withdrawal would fail.`
+        );
       }
 
       const tx = await contract.withdrawFees().send({
@@ -273,11 +313,9 @@ class TronService {
         success: true,
         transactionHash: tx,
         contractAddress: contractAddress,
+        amount: accumulated.toString(),
       };
-    } catch (error) {
-      console.error("TRON withdrawFees error:", error);
-      throw error;
-    }
+    });
   }
 
   /**

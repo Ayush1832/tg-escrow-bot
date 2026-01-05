@@ -2291,7 +2291,14 @@ async function handleWithdrawAll(ctx, network) {
 
         if (feeResult.success) {
           totalWithdrawnFees++;
-          report += `💰 <b>${contract.token}:</b> Fees withdrawn (TX: <code>${feeResult.transactionHash}</code>)\n`;
+          let amountDisplay = "";
+          if (feeResult.amount) {
+            const decimals = network.toUpperCase().includes("TRON") ? 6 : 18; // Fallback logic as decimals aren't handy here
+            amountDisplay = ` (${parseFloat(
+              ethers.formatUnits(feeResult.amount, decimals)
+            ).toFixed(4)})`;
+          }
+          report += `💰 <b>${contract.token}:</b> Fees withdrawn${amountDisplay} (TX: <code>${feeResult.transactionHash}</code>)\n`;
         } else {
           // If 0 fees, it's not a failure, just nothing to withdraw
         }
@@ -2353,7 +2360,7 @@ async function handleWithdrawAll(ctx, network) {
       }
 
       // 3. Rate Limit Protection (TronGrid 3 RPS limit)
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await new Promise((resolve) => setTimeout(resolve, 5000));
     }
 
     if (totalWithdrawnFees === 0 && totalSweptSurplus === 0) {

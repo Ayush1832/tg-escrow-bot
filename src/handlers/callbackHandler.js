@@ -2663,7 +2663,7 @@ ${approvalNote}`;
                 buyerUsername: updatedEscrow.buyerUsername,
                 sellerId: updatedEscrow.sellerId,
                 sellerUsername: updatedEscrow.sellerUsername,
-                amount: grossReleaseAmount,
+                quantity: grossReleaseAmount,
                 token: updatedEscrow.token,
                 escrowId: updatedEscrow.escrowId,
               });

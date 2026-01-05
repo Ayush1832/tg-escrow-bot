@@ -219,6 +219,7 @@ class BlockchainService {
           success: result.success,
           transactionHash: result.transactionHash,
           blockNumber: 0, // TRON tx result might not have block immediately
+          amount: result.amount,
         };
       }
 
@@ -270,11 +271,11 @@ class BlockchainService {
         const balStr = ethers.formatUnits(actualBalance, decimals);
 
         throw new Error(
-          `Validation Error: Contract balance (${balStr}) is less than accumulated fees (${accStr}). Withdrawal would fail.`
+          `Validation Error: no-balance - Contract balance (${balStr}) is less than accumulated fees (${accStr}). Withdrawal would fail.`
         );
       }
 
-      const tx = await vault.withdrawFees({ nonce });
+      const tx = await vaultContract.withdrawFees({ nonce });
       const receipt = await tx.wait();
 
       return {
@@ -293,6 +294,17 @@ class BlockchainService {
         console.warn(
           `⚠️ Transaction Failed: Contract likely has insufficient balance (transfer exceeds balance).`
         );
+        throw error;
+      }
+
+      // Suppress validation errors from console (handled by adminHandler)
+      if (
+        errorMessage.includes("Validation Error") ||
+        errorMessage.includes("no-balance") ||
+        errorMessage.includes("429") ||
+        errorMessage.includes("Too Many Requests") ||
+        errorMessage.includes("request rate exceeded")
+      ) {
         throw error;
       }
 
