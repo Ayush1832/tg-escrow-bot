@@ -109,9 +109,9 @@ async function buildDealSummary(escrow) {
   const sellerUsername = escrow.sellerUsername || "Seller";
 
   // Calculate release amount
-  const networkFee = escrow.networkFee;
+  const networkFee = escrow.networkFee || 0;
   const escrowFeePercent = escrow.feeRate;
-  const escrowFee = (amount * escrowFeePercent) / 100;
+  const escrowFee = ((amount - networkFee) * escrowFeePercent) / 100;
   const releaseAmount = amount - networkFee - escrowFee;
 
   let approvalStatus = "";

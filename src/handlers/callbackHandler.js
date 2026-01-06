@@ -1055,6 +1055,7 @@ ${approvalStatus}`;
 
           updatedEscrow.depositAddress = addressInfo.address;
           updatedEscrow.uniqueDepositAddress = addressInfo.address;
+          updatedEscrow.contractAddress = addressInfo.contractAddress; // Explicitly save the assigned contract address
           updatedEscrow.status = "awaiting_deposit";
           await updatedEscrow.save();
 
@@ -2055,13 +2056,24 @@ Once you’ve sent the amount, tap the button below.`;
       } catch (e) {}
 
       try {
+        // Deduct networkFee for admin release as well ensures consistency
+        const networkFee = updatedEscrow.networkFee || 0;
+        const amountToRelease = releaseAmount - networkFee;
+
+        if (amountToRelease <= 0) {
+          throw new Error(
+            `Release amount (${amountToRelease}) after network fee (${networkFee}) is <= 0`
+          );
+        }
+
         const releaseResult = await BlockchainService.releaseFunds(
           updatedEscrow.token,
           updatedEscrow.chain,
           updatedEscrow.buyerAddress,
-          releaseAmount,
+          amountToRelease,
           amountWeiOverride,
-          updatedEscrow.groupId
+          updatedEscrow.groupId,
+          updatedEscrow.contractAddress // Pass contract address override
         );
 
         if (!releaseResult || !releaseResult.success) {
