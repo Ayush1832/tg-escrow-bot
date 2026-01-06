@@ -49,6 +49,13 @@ const ESCROW_VAULT_ABI = [
   },
   {
     inputs: [],
+    name: "token",
+    outputs: [{ internalType: "address", name: "", type: "address" }],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
     name: "feeWallet",
     outputs: [{ internalType: "address", name: "", type: "address" }],
     stateMutability: "view",
@@ -158,6 +165,30 @@ class TronService {
         address = vault.address;
       }
 
+      // Resolve token address for balance check
+      let tokenForCheck = token;
+      if (token.toUpperCase() !== "USDT" && !token.startsWith("T")) {
+        try {
+          const onChainToken = await contract.token().call();
+          if (onChainToken) {
+            tokenForCheck = this.tronWeb.address.fromHex(onChainToken);
+          }
+        } catch (e) {
+          console.warn(
+            "Could not resolve token address from vault:",
+            e.message
+          );
+        }
+      }
+
+      // Pre-check balance
+      const currentBalance = await this.getTokenBalance(tokenForCheck, address);
+      if (currentBalance < amount) {
+        throw new Error(
+          `Insufficient Vault Balance: Contract has ${currentBalance} but needs ${amount}`
+        );
+      }
+
       const amountSun = this.toSun(amount);
 
       const tx = await contract.release(to, amountSun).send({
@@ -192,6 +223,30 @@ class TronService {
         const vault = await this.getVaultContract(token, groupId);
         contract = vault.contract;
         address = vault.address;
+      }
+
+      // Resolve token address for balance check
+      let tokenForCheck = token;
+      if (token.toUpperCase() !== "USDT" && !token.startsWith("T")) {
+        try {
+          const onChainToken = await contract.token().call();
+          if (onChainToken) {
+            tokenForCheck = this.tronWeb.address.fromHex(onChainToken);
+          }
+        } catch (e) {
+          console.warn(
+            "Could not resolve token address from vault:",
+            e.message
+          );
+        }
+      }
+
+      // Pre-check balance
+      const currentBalance = await this.getTokenBalance(tokenForCheck, address);
+      if (currentBalance < amount) {
+        throw new Error(
+          `Insufficient Vault Balance: Contract has ${currentBalance} but needs ${amount}`
+        );
       }
 
       const amountSun = this.toSun(amount);
@@ -377,12 +432,11 @@ class TronService {
   }
 
   async getTokenBalance(token, address) {
-    if (token.toUpperCase() !== "USDT") return 0; // Only USDT supported mostly
     await this.init();
     try {
-      const tokenAddress = config.USDT_TRON;
-      // DEBUG LOG
-      console.log(`DEBUG TRON: Provider=${this.tronWeb?.fullNode?.host}`);
+      const tokenAddress =
+        token.toUpperCase() === "USDT" ? config.USDT_TRON : token;
+
       if (!tokenAddress) return 0;
 
       const contract = await this.tronWeb.contract().at(tokenAddress);

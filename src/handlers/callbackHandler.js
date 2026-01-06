@@ -2875,27 +2875,46 @@ Amount Released: ${actualAmountToUser.toFixed(5)} ${updatedEscrow.token}
           }
         } catch (error) {
           const errStr = (error?.message || "") + (error?.toString() || "");
-          if (!errStr.includes("Insufficient Vault Balance")) {
+
+          // Log error appropriately
+          if (errStr.includes("Insufficient Vault Balance")) {
+            console.warn(
+              "⚠️ Insufficient Vault Balance: " +
+                (error.message || "").split("\n")[0]
+            );
+          } else {
             console.error("Error releasing funds via confirmation:", error);
           }
 
-          try {
-            let errorText =
-              "❌ Release failed. Please try again or contact support.";
-            if (error.message.includes("Insufficient Vault Balance")) {
-              const match = error.message.match(
-                /Contract has ([0-9.]+) but needs ([0-9.]+)/
-              );
-              const available = match ? match[1] : "???";
-              errorText = `⚠️ <b>Insufficient Vault Balance</b>
+          let errorText =
+            "❌ Release failed. Please try again or contact support.";
+          if (errStr.includes("Insufficient Vault Balance")) {
+            const match = errStr.match(
+              /Contract has ([0-9.]+) but needs ([0-9.]+)/
+            );
+            const available = match ? match[1] : "???";
+            errorText = `⚠️ <b>Insufficient Vault Balance</b>
 The contract does not have enough funds to complete this release.
 <b>Available:</b> ${available} ${updatedEscrow.token}
 Please contact support to resolve this vault balance issue.`;
-            }
-            await ctx.editMessageText(errorText, { parse_mode: "HTML" });
-          } catch (e) {}
+          }
 
-          if (!error.message.includes("Insufficient Vault Balance")) {
+          // Try to update UI - handle both Photo (caption) and Text messages
+          try {
+            await ctx.editMessageCaption(errorText, { parse_mode: "HTML" });
+          } catch (captionError) {
+            // Fallback if editCaption fails (e.g. not a photo message)
+            try {
+              await ctx.editMessageText(errorText, { parse_mode: "HTML" });
+            } catch (textError) {
+              // If editing fails completely (e.g. message deleted), send a new reply
+              try {
+                await ctx.reply(errorText, { parse_mode: "HTML" });
+              } catch (replyError) {}
+            }
+          }
+
+          if (!errStr.includes("Insufficient Vault Balance")) {
             await safeAnswerCbQuery(ctx, "❌ Release failed");
           } else {
             await safeAnswerCbQuery(ctx, "❌ Insufficient Balance");
