@@ -32,8 +32,6 @@ class AddressAssignmentService {
         ? this.normalizeChainToNetwork(network)
         : "BSC";
 
-      const normalizedFeePercent = feePercent !== null ? Number(feePercent) : 0;
-
       if (!groupId) {
         const escrow = await Escrow.findOne({ escrowId });
         if (escrow && escrow.groupId) {
@@ -46,97 +44,90 @@ class AddressAssignmentService {
 
       normalizedNetwork = normalizedNetwork.toUpperCase();
 
+      // Fetch group's fee percent as the authoritative source
+      let groupFeePercent = null;
       if (groupId) {
         try {
           const group = await GroupPool.findOne({ groupId });
-          if (group && group.contracts) {
-            let assignedContract = null;
-            if (
-              group.contracts.get &&
-              typeof group.contracts.get === "function"
-            ) {
-              assignedContract = group.contracts.get(normalizedToken);
+          if (group) {
+            groupFeePercent = group.feePercent || 0.75; // Default to 0.75% if not set
+
+            if (group.contracts) {
+              let assignedContract = null;
               if (
-                !assignedContract ||
-                assignedContract.network !== normalizedNetwork
+                group.contracts.get &&
+                typeof group.contracts.get === "function"
               ) {
-                const specificKey = `${normalizedToken}_${normalizedNetwork}`;
-                const specificContract = group.contracts.get(specificKey);
-                if (specificContract) assignedContract = specificContract;
+                assignedContract = group.contracts.get(normalizedToken);
+                if (
+                  !assignedContract ||
+                  assignedContract.network !== normalizedNetwork
+                ) {
+                  const specificKey = `${normalizedToken}_${normalizedNetwork}`;
+                  const specificContract = group.contracts.get(specificKey);
+                  if (specificContract) assignedContract = specificContract;
+                }
+              } else {
+                assignedContract = group.contracts[normalizedToken];
+                if (
+                  !assignedContract ||
+                  assignedContract.network !== normalizedNetwork
+                ) {
+                  const specificKey = `${normalizedToken}_${normalizedNetwork}`;
+                  if (group.contracts[specificKey])
+                    assignedContract = group.contracts[specificKey];
+                }
               }
-            } else {
-              assignedContract = group.contracts[normalizedToken];
-              if (
-                !assignedContract ||
-                assignedContract.network !== normalizedNetwork
-              ) {
-                const specificKey = `${normalizedToken}_${normalizedNetwork}`;
-                if (group.contracts[specificKey])
-                  assignedContract = group.contracts[specificKey];
+
+              if (assignedContract && assignedContract.address) {
+                // CRITICAL VALIDATION: Ensure contract fee matches group fee
+                if (assignedContract.feePercent !== groupFeePercent) {
+                  console.warn(
+                    `⚠️ Contract fee mismatch for group ${groupId}: ` +
+                      `Group expects ${groupFeePercent}% but contract has ${assignedContract.feePercent}%. ` +
+                      `Falling back to query correct contract.`
+                  );
+                  // Don't return this contract, fall through to query with correct fee
+                } else {
+                  return {
+                    address: assignedContract.address,
+                    contractAddress: assignedContract.address,
+                    sharedWithAmount: null,
+                  };
+                }
               }
             }
 
-            if (assignedContract && assignedContract.address) {
+            // Legacy fallback for old groups with contractAddress field
+            if (
+              group.contractAddress &&
+              normalizedToken === "USDT" &&
+              normalizedNetwork === "BSC"
+            ) {
               return {
-                address: assignedContract.address,
-                contractAddress: assignedContract.address,
+                address: group.contractAddress,
+                contractAddress: group.contractAddress,
                 sharedWithAmount: null,
               };
             }
           }
-
-          if (
-            group &&
-            group.contractAddress &&
-            normalizedToken === "USDT" &&
-            normalizedNetwork === "BSC"
-          ) {
-            return {
-              address: group.contractAddress,
-              contractAddress: group.contractAddress,
-              sharedWithAmount: null,
-            };
-          }
-
-          let contract = await Contract.findOne({
-            name: "EscrowVault",
-            token: normalizedToken,
-            network: normalizedNetwork,
-            feePercent: normalizedFeePercent,
-            groupId: groupId,
-            status: "deployed",
-          });
-
-          if (!contract) {
-            contract = await Contract.findOne({
-              name: "EscrowVault",
-              token: normalizedToken,
-              network: normalizedNetwork,
-              feePercent: normalizedFeePercent,
-              status: "deployed",
-            });
-          }
-
-          if (!contract) {
-            throw new Error(
-              `No EscrowVault contract found for ${normalizedToken} on ${normalizedNetwork} with ${normalizedFeePercent}% fee. ` +
-                `Please deploy the contract first using: npm run deploy`
-            );
-          }
-
-          return {
-            address: contract.address,
-            contractAddress: contract.address,
-            sharedWithAmount: null,
-          };
         } catch (groupError) {
           console.error(
-            "Error getting group-specific contract address, falling back to general contract:",
+            "Error getting group-specific contract address:",
             groupError
           );
         }
       }
 
+      // Use group's fee if available, otherwise use passed parameter
+      const normalizedFeePercent =
+        groupFeePercent !== null
+          ? groupFeePercent
+          : feePercent !== null
+          ? Number(feePercent)
+          : 0.75;
+
+      // Query Contract collection with the correct fee
       let contract = null;
       if (groupId) {
         contract = await Contract.findOne({
@@ -166,11 +157,9 @@ class AddressAssignmentService {
         );
       }
 
-      const contractAddress = contract.address;
-
       return {
-        address: contractAddress,
-        contractAddress: contractAddress,
+        address: contract.address,
+        contractAddress: contract.address,
         sharedWithAmount: null,
       };
     } catch (error) {

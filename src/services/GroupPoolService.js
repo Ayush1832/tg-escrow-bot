@@ -18,10 +18,13 @@ class GroupPoolService {
         query.groupTitle = /^Room (2[4-9]|[3-9][0-9]|[1-9][0-9]{2,})$/;
       }
 
-      // NOTE: We do NOT filter by feePercent here. Tiered groups are generic and adopt the fee of the deal.
-      // if (typeof requiredFeePercent === "number") {
-      //   query.feePercent = requiredFeePercent;
-      // }
+      // CRITICAL: Filter by required fee percent to match bio-based assignment
+      if (typeof requiredFeePercent === "number") {
+        query.feePercent = requiredFeePercent;
+      } else {
+        // If no fee specified, exclude 0% groups (disabled groups)
+        query.feePercent = { $ne: 0 };
+      }
 
       const updateData = {
         status: "assigned",
@@ -29,9 +32,7 @@ class GroupPoolService {
         assignedAt: new Date(),
       };
 
-      if (typeof requiredFeePercent === "number") {
-        updateData.feePercent = requiredFeePercent;
-      }
+      // Fee percent is now set in query, not in updateData
 
       const updatedGroup = await GroupPool.findOneAndUpdate(
         query,

@@ -888,11 +888,11 @@ module.exports = async (ctx) => {
 
         return `📋 <b> Deal Summary</b>
 
-• <b>Amount:</b> ${amount} ${escrow.token || "USDT"}
+• <b>Amount:</b> ${amount} ${escrow.token}
 • <b>Rate:</b> ₹${rate.toFixed(1)}
 • <b>Payment:</b> ${paymentMethod}
 • <b>Chain:</b> ${chain}
-• <b>Network Fee:</b> ${escrow.networkFee} ${escrow.token || "USDT"}
+• <b>Network Fee:</b> ${escrow.networkFee} ${escrow.token}
 • <b>Service Fee:</b> ${escrow.feeRate}%
 • <b>Buyer Address:</b> <code>${buyerAddress}</code>
 • <b>Seller Address:</b> <code>${sellerAddress}</code>
@@ -999,12 +999,8 @@ ${approvalStatus}`;
 
 <b>Deal Amount:</b> ${amount.toFixed(1)} ${updatedEscrow.token || "USDT"}
 <b>Network Fee:</b> ${networkFee} ${updatedEscrow.token || "USDT"}
-<b>Service Fee:</b> ${escrowFee.toFixed(4)} ${
-          updatedEscrow.token || "USDT"
-        } (${escrowFeePercent}%)
-<b>Release Amount:</b> ${releaseAmount.toFixed(2)} ${
-          updatedEscrow.token || "USDT"
-        }
+<b>Service Fee:</b> ${updatedEscrow.feeRate}%
+<b>Release Amount:</b> ${releaseAmount.toFixed(2)} ${updatedEscrow.token}
 <b>Rate:</b> ₹${rate.toFixed(1)}
 <b>Payment:</b> ${paymentMethod}
 <b>Chain:</b> ${chain}

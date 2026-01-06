@@ -160,9 +160,6 @@ ${transactionLine}`;
       freshEscrow.completionLogSent = true;
       await freshEscrow.save();
 
-      console.log(
-        `CompletionFeedService: Successfully sent completion log for escrow ${freshEscrow.escrowId}`
-      );
     } catch (error) {
       if (error.response && error.response.error_code === 400) {
         if (
