@@ -42,7 +42,9 @@ module.exports = {
   SEPOLIA_RPC_URL: process.env.SEPOLIA_RPC_URL,
   ETH_RPC_URL: process.env.ETH_RPC_URL,
   LTC_RPC_URL: process.env.LTC_RPC_URL,
-  TRON_RPC_URL: process.env.TRON_RPC_URL || "https://api.trongrid.io",
+  TRON_RPC_URL:
+    process.env.TRON_RPC_URL ||
+    "https://icy-holy-snow.tron-mainnet.quiknode.pro/9236e8e0de17867c93a9db58840aed12a689f94e/jsonrpc",
 
   // Wallet Configuration
   HOT_WALLET_PRIVATE_KEY: process.env.HOT_WALLET_PRIVATE_KEY,

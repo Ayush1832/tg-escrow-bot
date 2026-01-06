@@ -255,6 +255,15 @@ class BlockchainService {
       // Check balance before attempting withdrawal
       const accumulatedFees = await vaultContract.accumulatedFees();
 
+      // If no fees, skip withdrawal to avoid revert
+      if (accumulatedFees.toString() === "0") {
+        return {
+          success: true,
+          skipped: true,
+          message: "No fees to withdraw",
+        };
+      }
+
       // Get contract address and check actual token balance
       const tokenAddress = await vaultContract.token();
       const tokenContract = new ethers.Contract(
@@ -298,9 +307,11 @@ class BlockchainService {
       }
 
       // Suppress validation errors from console (handled by adminHandler)
+      // Also suppress "no-fees" revert if it slips through
       if (
         errorMessage.includes("Validation Error") ||
         errorMessage.includes("no-balance") ||
+        errorMessage.includes("no-fees") ||
         errorMessage.includes("429") ||
         errorMessage.includes("Too Many Requests") ||
         errorMessage.includes("request rate exceeded")
@@ -726,6 +737,10 @@ class BlockchainService {
       const tokenAddress = this.getTokenAddress(token, network);
       if (!tokenAddress) return 0;
 
+      if (network && network.toUpperCase() === "TRON") {
+        return await TronService.getTokenBalance(token, address);
+      }
+
       if (
         network.toUpperCase() === "ETH" ||
         network.toUpperCase() === "SEPOLIA"
@@ -951,10 +966,14 @@ class BlockchainService {
         throw error;
       }
 
-      console.error(
-        `Error releasing funds on ${network} (token: ${token}, contract: ${contractAddress}, amount: ${amount}):`,
-        error
-      );
+      // Robust check for "Insufficient Vault Balance" to prevent console spam
+      const errString = (error?.message || "") + (error?.toString() || "");
+      if (!errString.includes("Insufficient Vault Balance")) {
+        console.error(
+          `Error releasing funds on ${network} (token: ${token}, contract: ${contractAddress}, amount: ${amount}):`,
+          error
+        );
+      }
       throw error;
     }
   }

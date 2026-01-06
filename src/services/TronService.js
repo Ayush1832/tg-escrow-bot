@@ -61,7 +61,10 @@ class TronService {
     this.tronWeb = null;
     this.initialized = false;
     this.providers = [
-      config.TRON_RPC_URL || "https://api.trongrid.io",
+      (config.TRON_RPC_URL || "https://api.trongrid.io").replace(
+        /\/jsonrpc$/,
+        "/"
+      ),
       "https://tron-rpc.publicnode.com",
     ];
     this.currentProviderIndex = 0;
@@ -369,6 +372,28 @@ class TronService {
       return block?.block_header?.raw_data?.number || 0;
     } catch (error) {
       console.error("TRON getLatestBlockNumber error:", error);
+      return 0;
+    }
+  }
+
+  async getTokenBalance(token, address) {
+    if (token.toUpperCase() !== "USDT") return 0; // Only USDT supported mostly
+    await this.init();
+    try {
+      const tokenAddress = config.USDT_TRON;
+      // DEBUG LOG
+      console.log(`DEBUG TRON: Provider=${this.tronWeb?.fullNode?.host}`);
+      if (!tokenAddress) return 0;
+
+      const contract = await this.tronWeb.contract().at(tokenAddress);
+      const balance = await contract.balanceOf(address).call();
+
+      return Number(balance.toString()) / 1e6;
+    } catch (error) {
+      console.error(
+        "TRON getTokenBalance error:",
+        JSON.stringify(error, Object.getOwnPropertyNames(error))
+      );
       return 0;
     }
   }

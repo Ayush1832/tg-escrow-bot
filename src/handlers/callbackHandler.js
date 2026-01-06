@@ -2277,8 +2277,24 @@ Thank you for using our safe escrow system.`;
           }, 5 * 60 * 1000);
         }
       } catch (releaseError) {
-        console.error("Error in admin release:", releaseError);
-        await ctx.reply(`❌ Error releasing funds: ${releaseError.message}`);
+        const errStr =
+          (releaseError?.message || "") + (releaseError?.toString() || "");
+        if (!errStr.includes("Insufficient Vault Balance")) {
+          console.error("Error in admin release:", releaseError);
+        }
+
+        let errorMsg = `❌ Error releasing funds: ${releaseError.message}`;
+        if (releaseError.message.includes("Insufficient Vault Balance")) {
+          const match = releaseError.message.match(
+            /Contract has ([0-9.]+) but needs ([0-9.]+)/
+          );
+          const available = match ? match[1] : "???";
+          errorMsg = `⚠️ <b>Insufficient Vault Balance</b>
+The contract does not have enough funds to release ${releaseAmount} ${updatedEscrow.token}.
+<b>Available:</b> ${available} ${updatedEscrow.token}
+Please check the contract balance or top up the vault.`;
+        }
+        await ctx.reply(errorMsg, { parse_mode: "HTML" });
       }
 
       return;
@@ -2858,13 +2874,32 @@ Amount Released: ${actualAmountToUser.toFixed(5)} ${updatedEscrow.token}
             }
           }
         } catch (error) {
-          console.error("Error releasing funds via confirmation:", error);
+          const errStr = (error?.message || "") + (error?.toString() || "");
+          if (!errStr.includes("Insufficient Vault Balance")) {
+            console.error("Error releasing funds via confirmation:", error);
+          }
+
           try {
-            await ctx.editMessageText(
-              "❌ Release failed. Please try again or contact support."
-            );
+            let errorText =
+              "❌ Release failed. Please try again or contact support.";
+            if (error.message.includes("Insufficient Vault Balance")) {
+              const match = error.message.match(
+                /Contract has ([0-9.]+) but needs ([0-9.]+)/
+              );
+              const available = match ? match[1] : "???";
+              errorText = `⚠️ <b>Insufficient Vault Balance</b>
+The contract does not have enough funds to complete this release.
+<b>Available:</b> ${available} ${updatedEscrow.token}
+Please contact support to resolve this vault balance issue.`;
+            }
+            await ctx.editMessageText(errorText, { parse_mode: "HTML" });
           } catch (e) {}
-          await safeAnswerCbQuery(ctx, "❌ Release failed");
+
+          if (!error.message.includes("Insufficient Vault Balance")) {
+            await safeAnswerCbQuery(ctx, "❌ Release failed");
+          } else {
+            await safeAnswerCbQuery(ctx, "❌ Insufficient Balance");
+          }
           return;
         }
       }

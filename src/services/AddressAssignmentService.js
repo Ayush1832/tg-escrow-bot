@@ -31,6 +31,7 @@ class AddressAssignmentService {
       let normalizedNetwork = network
         ? this.normalizeChainToNetwork(network)
         : "BSC";
+
       const normalizedFeePercent = feePercent !== null ? Number(feePercent) : 0;
 
       if (!groupId) {
