@@ -2272,7 +2272,7 @@ async function handleWithdrawAll(ctx, network) {
     const bs = BlockchainService;
 
     const totalFeeTokens = {};
-    const totalSurplusTokens = {};
+    const surplusSweeps = [];
 
     for (const contract of contracts) {
       const decimals = bs.getTokenDecimals(contract.token, network);
@@ -2296,55 +2296,49 @@ async function handleWithdrawAll(ctx, network) {
         // Silent catch for bulk consistency
       }
 
-      // 2. Sweep Surplus (if idle)
-      const activeCount = await Escrow.countDocuments({
-        contractAddress: contract.address,
-        status: {
-          $in: [
-            "awaiting_deposit",
-            "deposited",
-            "in_fiat_transfer",
-            "ready_to_release",
-          ],
-        },
-      });
+      // 2. Sweep Surplus (Force Sweep: Ignores active deals as per admin request)
+      const targetWallet =
+        network.toUpperCase() === "TRON" || network.toUpperCase() === "TRX"
+          ? config.FEE_WALLET_TRC
+          : config.FEE_WALLET_BSC;
 
-      if (activeCount === 0) {
-        const targetWallet =
-          network.toUpperCase() === "TRON" || network.toUpperCase() === "TRX"
-            ? config.FEE_WALLET_TRC
-            : config.FEE_WALLET_BSC;
+      if (targetWallet) {
+        try {
+          // Check balance first
+          const contractBalance = await bs.getTokenBalance(
+            contract.token,
+            network,
+            contract.address
+          );
 
-        if (targetWallet) {
-          try {
-            // Check balance first
-            const contractBalance = await bs.getTokenBalance(
+          if (contractBalance > 0) {
+            const result = await bs.withdrawToken(
               contract.token,
               network,
-              contract.address
+              contract.address,
+              targetWallet
             );
 
-            if (contractBalance > 0) {
-              const result = await bs.withdrawToken(
-                contract.token,
-                network,
-                contract.address,
-                targetWallet
-              );
-              // bs.withdrawToken doesn't return amount usually, assume full balance swept
-              if (result.success) {
-                totalSurplusTokens[contract.token] =
-                  (totalSurplusTokens[contract.token] || 0) + contractBalance;
-              }
+            if (result.success) {
+              surplusSweeps.push({
+                token: contract.token,
+                amount: contractBalance,
+                tx: result.transactionHash,
+              });
             }
-          } catch (e) {
-            // Silect catch
           }
+        } catch (e) {
+          // Silent catch
         }
       }
 
-      // 3. Rate Limit Protection (TronGrid 3 RPS limit)
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      // 3. Rate Limit Protection
+      // TRON requires slower pacing due to aggressive rate limits on free nodes
+      const delay = network.toUpperCase().includes("TRON") ? 5000 : 200;
+      console.log(
+        `[Admin] Processed ${contract.address} (${contract.token}). Waiting ${delay}ms...`
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
 
     let report = `💸 <b>${network} FEE WITHDRAWAL REPORT</b>\n\n`;
@@ -2363,11 +2357,16 @@ async function handleWithdrawAll(ctx, network) {
     report += `\n`;
 
     // Surplus Section
-    const surplusTokens = Object.keys(totalSurplusTokens);
-    if (surplusTokens.length > 0) {
+    if (surplusSweeps.length > 0) {
       report += `🧹 <b>Surplus Swept:</b>\n`;
-      surplusTokens.forEach((t) => {
-        report += `• ${totalSurplusTokens[t].toFixed(4)} ${t}\n`;
+      surplusSweeps.forEach((item) => {
+        const txDisplay = item.tx
+          ? ` (<a href="https://bscscan.com/tx/${item.tx}">TX</a>)`
+          : "";
+        // Note: Link format depends on network, generalizing:
+        report += `• ${item.amount.toFixed(4)} ${item.token} (TX: <code>${
+          item.tx
+        }</code>)\n`;
       });
     } else {
       report += `🧹 <b>Surplus Swept:</b> None`;
@@ -2378,7 +2377,7 @@ async function handleWithdrawAll(ctx, network) {
       statusMsg.message_id,
       null,
       report,
-      { parse_mode: "HTML" }
+      { parse_mode: "HTML", disable_web_page_preview: true }
     );
   } catch (error) {
     console.error("Error in withdraw all:", error);

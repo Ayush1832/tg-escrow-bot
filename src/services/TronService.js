@@ -61,6 +61,13 @@ const ESCROW_VAULT_ABI = [
     stateMutability: "view",
     type: "function",
   },
+  {
+    inputs: [],
+    name: "feePercent",
+    outputs: [{ internalType: "uint256", name: "", type: "uint256" }],
+    stateMutability: "view",
+    type: "function",
+  },
 ];
 
 class TronService {
@@ -308,10 +315,11 @@ class TronService {
 
       // TRON calls
       const feeWallet = await contract.feeWallet().call();
+      const feePercent = await contract.feePercent().call();
       const accumulated = await contract.accumulatedFees().call();
       return {
         feeWallet: this.tronWeb.address.fromHex(feeWallet),
-        feePercent: 0,
+        feePercent: Number(feePercent),
         accumulated: accumulated.toString(),
       };
     } catch (error) {
