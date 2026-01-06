@@ -2335,9 +2335,7 @@ async function handleWithdrawAll(ctx, network) {
       // 3. Rate Limit Protection
       // TRON requires slower pacing due to aggressive rate limits on free nodes
       const delay = network.toUpperCase().includes("TRON") ? 5000 : 200;
-      console.log(
-        `[Admin] Processed ${contract.address} (${contract.token}). Waiting ${delay}ms...`
-      );
+      // console.log(`[Admin] Processed ${contract.address} (${contract.token}). Waiting ${delay}ms...`);
       await new Promise((resolve) => setTimeout(resolve, delay));
     }
 
