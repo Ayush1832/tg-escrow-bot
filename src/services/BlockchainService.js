@@ -291,6 +291,7 @@ class BlockchainService {
         success: true,
         transactionHash: receipt.hash || receipt.transactionHash,
         blockNumber: receipt.blockNumber,
+        amount: accumulatedFees,
       };
     } catch (error) {
       const errorMessage = error?.message || "";

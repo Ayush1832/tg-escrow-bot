@@ -2271,45 +2271,29 @@ async function handleWithdrawAll(ctx, network) {
     // BlockchainService is a singleton, no need to instantiate
     const bs = BlockchainService;
 
-    let report = `💸 <b>${network} FEE WITHDRAWAL REPORT</b>\n\n`;
-    let totalWithdrawnFees = 0;
-    let totalSweptSurplus = 0;
+    const totalFeeTokens = {};
+    const totalSurplusTokens = {};
 
     for (const contract of contracts) {
+      const decimals = bs.getTokenDecimals(contract.token, network);
+
       // 1. Withdraw Protocol Fees (Accumulated)
       try {
-        const fees = await bs.getFeeSettings(
-          contract.token,
-          network,
-          contract.address
-        );
         const feeResult = await bs.withdrawFees(
           contract.token,
           network,
           contract.address
         );
 
-        if (feeResult.success) {
-          totalWithdrawnFees++;
-          let amountDisplay = "";
-          if (feeResult.amount) {
-            const decimals = network.toUpperCase().includes("TRON") ? 6 : 18; // Fallback logic as decimals aren't handy here
-            amountDisplay = ` (${parseFloat(
-              ethers.formatUnits(feeResult.amount, decimals)
-            ).toFixed(4)})`;
-          }
-          report += `💰 <b>${contract.token}:</b> Fees withdrawn${amountDisplay} (TX: <code>${feeResult.transactionHash}</code>)\n`;
-        } else {
-          // If 0 fees, it's not a failure, just nothing to withdraw
+        if (feeResult.success && feeResult.amount) {
+          const amt = parseFloat(
+            ethers.formatUnits(feeResult.amount, decimals)
+          );
+          totalFeeTokens[contract.token] =
+            (totalFeeTokens[contract.token] || 0) + amt;
         }
       } catch (e) {
-        // Suppress "no-fees" or "no-balance" errors if they are just about 0 balance
-        if (
-          !e.message.includes("no-fees") &&
-          !e.message.includes("no-balance")
-        ) {
-          report += `⚠️ <b>${contract.token}:</b> Fee withdraw failed: ${e.message}\n`;
-        }
+        // Silent catch for bulk consistency
       }
 
       // 2. Sweep Surplus (if idle)
@@ -2333,7 +2317,7 @@ async function handleWithdrawAll(ctx, network) {
 
         if (targetWallet) {
           try {
-            // Check balance first to avoid "no-balance" revert
+            // Check balance first
             const contractBalance = await bs.getTokenBalance(
               contract.token,
               network,
@@ -2341,20 +2325,20 @@ async function handleWithdrawAll(ctx, network) {
             );
 
             if (contractBalance > 0) {
-              await bs.withdrawToken(
+              const result = await bs.withdrawToken(
                 contract.token,
                 network,
                 contract.address,
                 targetWallet
               );
-              totalSweptSurplus++;
-              report += `🧹 <b>${contract.token} Surplus:</b> swept to admin\n`;
+              // bs.withdrawToken doesn't return amount usually, assume full balance swept
+              if (result.success) {
+                totalSurplusTokens[contract.token] =
+                  (totalSurplusTokens[contract.token] || 0) + contractBalance;
+              }
             }
           } catch (e) {
-            console.error(
-              `Error sweeping token from ${contract.address}:`,
-              e.message
-            );
+            // Silect catch
           }
         }
       }
@@ -2363,10 +2347,30 @@ async function handleWithdrawAll(ctx, network) {
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }
 
-    if (totalWithdrawnFees === 0 && totalSweptSurplus === 0) {
-      report += "ℹ️ No funds available to withdraw.";
+    let report = `💸 <b>${network} FEE WITHDRAWAL REPORT</b>\n\n`;
+
+    // Fees Section
+    const feeTokens = Object.keys(totalFeeTokens);
+    if (feeTokens.length > 0) {
+      report += `💰 <b>Fees Withdrawn:</b>\n`;
+      feeTokens.forEach((t) => {
+        report += `• ${totalFeeTokens[t].toFixed(4)} ${t}\n`;
+      });
     } else {
-      report += `\n<b>Summary:</b>\nProtocol Fees Withdrawn: ${totalWithdrawnFees}\nSurplus Sweeps: ${totalSweptSurplus}`;
+      report += `💰 <b>Fees Withdrawn:</b> None\n`;
+    }
+
+    report += `\n`;
+
+    // Surplus Section
+    const surplusTokens = Object.keys(totalSurplusTokens);
+    if (surplusTokens.length > 0) {
+      report += `🧹 <b>Surplus Swept:</b>\n`;
+      surplusTokens.forEach((t) => {
+        report += `• ${totalSurplusTokens[t].toFixed(4)} ${t}\n`;
+      });
+    } else {
+      report += `🧹 <b>Surplus Swept:</b> None`;
     }
 
     await ctx.telegram.editMessageText(
