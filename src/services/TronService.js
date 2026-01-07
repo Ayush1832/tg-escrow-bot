@@ -277,19 +277,31 @@ class TronService {
   async withdrawToken({ contractAddress, token = "USDT", to }) {
     await this.init();
     try {
+      console.log(`[TRON] withdrawToken called:`);
+      console.log(`  Contract: ${contractAddress}`);
+      console.log(`  Token: ${token}`);
+      console.log(`  To: ${to}`);
+
       // If token is USDT, resolve address from config
       const tokenAddress =
         token.toUpperCase() === "USDT" ? config.USDT_TRON : token;
+
+      console.log(`  Token Address: ${tokenAddress}`);
 
       const contract = await this.tronWeb.contract(
         ESCROW_VAULT_ABI,
         contractAddress
       );
 
+      console.log(`[TRON] Calling withdrawToken on vault contract...`);
+
       const tx = await contract.withdrawToken(tokenAddress, to).send({
         feeLimit: 100_000_000,
         callValue: 0,
       });
+
+      console.log(`[TRON] Transaction sent: ${tx}`);
+      console.log(`[TRON] View: https://tronscan.org/#/transaction/${tx}`);
 
       return {
         success: true,
@@ -297,7 +309,11 @@ class TronService {
         contractAddress: contractAddress,
       };
     } catch (error) {
-      console.error("TRON withdrawToken error:", error);
+      console.error("[TRON] withdrawToken error:", error);
+      console.error("[TRON] Error message:", error.message);
+      if (error.error) {
+        console.error("[TRON] Error details:", error.error);
+      }
       throw error;
     }
   }
@@ -442,20 +458,29 @@ class TronService {
   async getTokenBalance(token, address) {
     await this.init();
     try {
+      console.log(`[TRON] getTokenBalance called:`);
+      console.log(`  Token: ${token}`);
+      console.log(`  Address: ${address}`);
+
       const tokenAddress =
         token.toUpperCase() === "USDT" ? config.USDT_TRON : token;
 
-      if (!tokenAddress) return 0;
+      console.log(`  Token Contract: ${tokenAddress}`);
+
+      if (!tokenAddress) {
+        console.log(`[TRON] No token address found, returning 0`);
+        return 0;
+      }
 
       const contract = await this.tronWeb.contract().at(tokenAddress);
       const balance = await contract.balanceOf(address).call();
+      const balanceDecimal = Number(balance.toString()) / 1e6;
 
-      return Number(balance.toString()) / 1e6;
+      console.log(`[TRON] Balance: ${balanceDecimal} ${token}`);
+
+      return balanceDecimal;
     } catch (error) {
-      console.error(
-        "TRON getTokenBalance error:",
-        JSON.stringify(error, Object.getOwnPropertyNames(error))
-      );
+      console.error("[TRON] getTokenBalance error:", error.message);
       return 0;
     }
   }
