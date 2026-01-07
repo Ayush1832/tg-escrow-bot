@@ -1,0 +1,20 @@
+﻿≡ƒöì Final Diagnosis - Why withdrawToken Fails
+
+Vault: TLut6E4vtz4h3icKfNsFDnewAQNyXaZtdh
+USDT: TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t
+
+Vault's configured token: TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t
+USDT address: TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t
+Match: Γ£à YES
+
+≡ƒöì ANALYSIS:
+The withdrawToken function accepts an erc20Token parameter,
+but it should withdraw ANY token, not just the vault's configured token.
+
+However, if the function is checking the vault's configured token
+instead of the parameter, it will fail.
+
+Actual USDT balance in vault: 1089 USDT
+
+Γ£à Token addresses match!
+The issue must be something else in the contract logic.

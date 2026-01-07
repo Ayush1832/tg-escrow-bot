@@ -484,10 +484,7 @@ module.exports = async (ctx) => {
             parse_mode: "HTML",
             reply_markup: {
               inline_keyboard: [
-                [
-                  { text: "BSC", callback_data: "step2_select_chain_BSC" },
-                  { text: "TRON", callback_data: "step2_select_chain_TRON" },
-                ],
+                [{ text: "BSC", callback_data: "step2_select_chain_BSC" }],
               ],
             },
           }
@@ -530,7 +527,7 @@ module.exports = async (ctx) => {
 
       // Update blockchain selection message with checkmark
       if (escrow.step2MessageId) {
-        const chains = ["BSC", "TRON"];
+        const chains = ["BSC"];
         const buttons = chains.map((c) => ({
           text: c === chain ? `✔ ${c}` : c,
           callback_data: `step2_select_chain_${c}`,
@@ -1142,7 +1139,7 @@ Once you’ve sent the amount, tap the button below.`;
 
       // Update blockchain selection message with tick mark
       if (escrow.step4ChainMessageId) {
-        const chains = ["BSC", "TRON"];
+        const chains = ["BSC"];
         const buttons = chains.map((c) => ({
           text: c === chain ? `✔ ${c}` : c,
           callback_data: `step4_select_chain_${c}`,
