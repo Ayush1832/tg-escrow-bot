@@ -850,7 +850,7 @@ class BlockchainService {
 
       let nonce;
       try {
-        nonce = await provider.getTransactionCount(wallet.address, "latest");
+        nonce = await provider.getTransactionCount(wallet.address, "pending");
       } catch (nonceError) {
         try {
           nonce = await provider.getTransactionCount(wallet.address);
@@ -896,50 +896,6 @@ class BlockchainService {
         blockNumber: receipt.blockNumber,
       };
     } catch (error) {
-      // Handle "already known" / nonce errors
-      // Handle "already known" / nonce errors
-      // Use exhaustive check for various provider error formats
-      const isNonceError =
-        (error?.code === -32000 && error?.message === "already known") ||
-        (error?.message && error?.message.includes("already known")) ||
-        (error?.message &&
-          error?.message.includes("could not coalesce error")) ||
-        (error?.shortMessage &&
-          error?.shortMessage.includes("could not coalesce error")) ||
-        // Check nested error structures often returned by RPCs
-        error?.error?.message === "already known" ||
-        error?.info?.error?.message?.includes("nonce") ||
-        error?.info?.error?.message?.includes("already known") ||
-        (error?.error?.code === -32000 &&
-          error?.error?.message?.includes("already known")) ||
-        JSON.stringify(error).includes("already known") ||
-        JSON.stringify(error).includes("nonce");
-
-      if (isNonceError) {
-        console.warn(
-          `⚠️ Nonce error detected in releaseFunds. Retrying with pending nonce...`
-        );
-        try {
-          const pendingNonce = await provider.getTransactionCount(
-            wallet.address,
-            "pending"
-          );
-          const tx = await vaultContract.release(buyerAddress, amountWei, {
-            nonce: pendingNonce,
-          });
-          const receipt = await tx.wait();
-          return {
-            success: true,
-            transactionHash: receipt.transactionHash || receipt.hash || tx.hash,
-            blockNumber: receipt.blockNumber,
-          };
-        } catch (retryError) {
-          console.error("Retry failed:", retryError);
-          // Verify if it actually succeeded despite error (idempotency check would be ideal here but complex)
-          throw retryError;
-        }
-      }
-
       // Provide a concise log for common provider errors (like insufficient gas funds)
       const code = error?.code || error?.shortMessage || "";
       const providerMessage =
@@ -1039,7 +995,7 @@ class BlockchainService {
 
       let nonce;
       try {
-        nonce = await provider.getTransactionCount(wallet.address, "latest");
+        nonce = await provider.getTransactionCount(wallet.address, "pending");
       } catch (nonceError) {
         try {
           nonce = await provider.getTransactionCount(wallet.address);
@@ -1085,45 +1041,6 @@ class BlockchainService {
         blockNumber: receipt.blockNumber,
       };
     } catch (error) {
-      // Handle "already known" / nonce errors
-      // Use exhaustive check for various provider error formats
-      const isNonceError =
-        (error?.code === -32000 && error?.message === "already known") ||
-        (error?.message && error?.message.includes("already known")) ||
-        (error?.message &&
-          error?.message.includes("could not coalesce error")) ||
-        (error?.shortMessage &&
-          error?.shortMessage.includes("could not coalesce error")) ||
-        error?.error?.message === "already known" ||
-        error?.error?.message === "already known" ||
-        error?.info?.error?.message === "already known" ||
-        JSON.stringify(error).includes("already known") ||
-        JSON.stringify(error).includes("nonce");
-
-      if (isNonceError) {
-        console.warn(
-          `⚠️ Nonce error detected in refundFunds. Retrying with pending nonce...`
-        );
-        try {
-          const pendingNonce = await provider.getTransactionCount(
-            wallet.address,
-            "pending"
-          );
-          const tx = await vaultContract.refund(sellerAddress, amountWei, {
-            nonce: pendingNonce,
-          });
-          const receipt = await tx.wait();
-          return {
-            success: true,
-            transactionHash: receipt.transactionHash || receipt.hash || tx.hash,
-            blockNumber: receipt.blockNumber,
-          };
-        } catch (retryError) {
-          console.error("Retry failed:", retryError);
-          throw retryError;
-        }
-      }
-
       // Provide a concise log for common provider errors (like insufficient gas funds)
       const code = error?.code || error?.shortMessage || "";
       const providerMessage =

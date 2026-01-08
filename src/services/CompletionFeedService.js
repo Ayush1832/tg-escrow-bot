@@ -40,24 +40,17 @@ class CompletionFeedService {
       return;
     }
 
-    if (freshEscrow.completionLogSent) {
-      console.log(
-        `CompletionFeedService: Completion log already sent for escrow ${freshEscrow.escrowId}. Skipping duplicate.`
-      );
-      return;
-    }
-
-    if (transactionHash && freshEscrow.releaseTransactionHash) {
+    if (freshEscrow.completionLogSent && freshEscrow.status === "completed") {
       if (
+        transactionHash &&
+        freshEscrow.releaseTransactionHash &&
         freshEscrow.releaseTransactionHash.toLowerCase() ===
-        transactionHash.toLowerCase()
+          transactionHash.toLowerCase()
       ) {
-        if (freshEscrow.completionLogSent) {
-          console.log(
-            `CompletionFeedService: Completion log already sent for transaction ${transactionHash}. Skipping duplicate.`
-          );
-          return;
-        }
+        console.log(
+          `CompletionFeedService: Completion log already sent for transaction ${transactionHash}. Skipping duplicate.`
+        );
+        return;
       }
     }
     try {
@@ -127,15 +120,27 @@ class CompletionFeedService {
       ? `🔗 PROOF OF RELEASE: <a href="${explorerLink}">[Link]</a>`
       : "🔗 PROOF OF RELEASE: N/A";
 
-    const message = `🚀 NEW DEAL LOCKED & RELEASED
+    // Determine release type
+    const isCompleted = freshEscrow.status === "completed";
+    const titleText = isCompleted
+      ? "ROCKET NEW DEAL LOCKED & RELEASED"
+      : "PARTIAL FUNDS RELEASED";
+    const emoji = isCompleted ? "🚀" : "💸";
+    const statusLine = isCompleted ? "🏆 Success Record" : "⚠️ Status";
+    const statusValue = isCompleted
+      ? `<code>${newTrades}</code>`
+      : "<code>Partial Release</code>";
 
+    const message = `${emoji} ${titleText}
+
+<b>Trade ID:</b> #${freshEscrow.escrowId}
 PARTIES: ${buyerDisplay} & ${sellerDisplay}
 
 🪙 Token: <code>${token}</code>
 🌐 Chain: <code>${network}</code>
 💰 Value: <code>${amountDisplay} ${token}</code>
 📊 TVL Processed: <code>$${this.formatLargeNumber(newVolume)}</code>
-🏆 Success Record: <code>${newTrades}</code>
+${statusLine}: ${statusValue}
 
 ${transactionLine}`;
 
@@ -143,7 +148,7 @@ ${transactionLine}`;
     await this.sendDirectMessageNotification(
       freshEscrow,
       telegram,
-      "completed",
+      isCompleted ? "completed" : "partial_release",
       releaseAmount,
       transactionHash || freshEscrow.releaseTransactionHash
     );
@@ -157,9 +162,14 @@ ${transactionLine}`;
         })
       );
 
-      freshEscrow.completionLogSent = true;
+      if (isCompleted) {
+        freshEscrow.completionLogSent = true;
+      }
+      // Only overwrite the main release hash if it's the final completion or if none existed
+      if (isCompleted || !freshEscrow.releaseTransactionHash) {
+        freshEscrow.releaseTransactionHash = transactionHash;
+      }
       await freshEscrow.save();
-
     } catch (error) {
       if (error.response && error.response.error_code === 400) {
         if (
@@ -284,6 +294,8 @@ ${transactionLine}`;
       return;
     }
 
+    // Partial deposits don't typically have a 'completed' state blocking them,
+    // but check logic if needed. Assuming ok for now.
     if (freshEscrow.partialDepositLogSent) {
       const existingHashes = [
         freshEscrow.transactionHash,
@@ -357,7 +369,18 @@ ${transactionLine}`;
       return;
     }
 
-    if (freshEscrow.refundLogSent) {
+    const totalDeposited =
+      freshEscrow.accumulatedDepositAmount ||
+      freshEscrow.depositAmount ||
+      freshEscrow.confirmedAmount ||
+      0;
+    const isFullRefund = amount >= totalDeposited - 0.01;
+
+    // Only block if FULL refund log is already sent. Partials always go through (idempotency handled by caller/hash checks)
+    if (
+      freshEscrow.refundLogSent &&
+      (isFullRefund || freshEscrow.status === "refunded")
+    ) {
       if (
         transactionHash &&
         freshEscrow.refundTransactionHash &&
@@ -385,14 +408,6 @@ ${transactionLine}`;
     const explorerLink = this.getExplorerLink(network, transactionHash);
     const amountDisplay = this.formatAmount(amount);
 
-    // Determine if full or partial
-    // If refund amount >= total confirmed amount, it's a full refund
-    const totalDeposited =
-      freshEscrow.accumulatedDepositAmount ||
-      freshEscrow.depositAmount ||
-      freshEscrow.confirmedAmount ||
-      0;
-    const isFullRefund = amount >= totalDeposited - 0.01;
     const typeText = isFullRefund ? "FULL REFUND" : "PARTIAL REFUND";
     const statusEmoji = isFullRefund ? "🔄" : "⚠️";
 
@@ -421,6 +436,7 @@ ${transactionLine}`;
 
     const message = `${statusEmoji} <b>TRADE ${typeText}</b>
 
+<b>Trade ID:</b> #${freshEscrow.escrowId}
 PARTIES: ${buyerDisplay} & ${sellerDisplay}
 
 🪙 Token: <code>${token}</code>
@@ -447,7 +463,9 @@ ${transactionLine}`;
         })
       );
 
-      freshEscrow.refundLogSent = true;
+      if (isFullRefund) {
+        freshEscrow.refundLogSent = true;
+      }
       if (transactionHash) {
         freshEscrow.refundTransactionHash = transactionHash;
       }
@@ -519,11 +537,31 @@ The funds have been released to the buyer. Thank you for using our escrow servic
 🔗 <b>Transaction:</b> <code>${transactionHash || "N/A"}</code>
 
 The funds have been refunded to the seller.`;
+    } else if (type === "partial_release") {
+      titleIcon = "💸";
+      titleText = "PARTIAL FUNDS RELEASED";
+      const networkFee = freshEscrow.networkFee;
+      const serviceFeePercent = freshEscrow.feeRate;
+      const serviceFee = (amount * serviceFeePercent) / 100; // Calculate fee on partial amount
+
+      messageBody = `
+💰 <b>Released Amount:</b> ${amountDisplay} ${token}
+💵 <b>Total Deal Amount:</b> ${this.formatAmount(dealAmount)} ${token}
+📊 <b>Rate:</b> ₹${rate}
+💳 <b>Payment Method:</b> ${paymentMethod}
+🛡 <b>Network Fee:</b> ${networkFee} ${token}
+🤝 <b>Service Fee:</b> ${this.formatAmount(
+        serviceFee
+      )} ${token} (${serviceFeePercent}%)
+🌐 <b>Chain:</b> ${network}
+🔗 <b>Transaction:</b> <code>${transactionHash || "N/A"}</code>
+
+These funds have been released to the buyer.`;
     }
 
     const fullMessage = `${titleIcon} <b>${titleText}</b>
 
-<b>Trade ID:</b> ${freshEscrow.escrowId}
+<b>Trade ID:</b> #${freshEscrow.escrowId}
 ${messageBody}`;
 
     const sendToUser = async (userId) => {

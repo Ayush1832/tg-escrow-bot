@@ -1723,15 +1723,10 @@ ${approvalNote}`;
 
         const refundCaption = `<b>Refund Confirmation (${refundType})</b>
 
-${
-  requestedAmount !== null
-    ? `Amount: ${refundAmount.toFixed(5)} ${
-        escrow.token
-      }\nTotal Deposited: ${formattedTotalDeposited.toFixed(5)} ${
-        escrow.token
-      }\n\n`
-    : ""
-}${statusSection}
+<b>Refund Amount:</b> ${refundAmount.toFixed(5)} ${escrow.token}
+<b>Available Balance:</b> ${formattedTotalDeposited.toFixed(5)} ${escrow.token}
+
+${statusSection}
 
 ${approvalNote}`;
 
@@ -1785,7 +1780,16 @@ ${approvalNote}`;
           .includes(String(ctx.from.id));
 
         // Idempotency: prevent double refund
-        if (escrow.status === "refunded" || escrow.refundTransactionHash) {
+        const callbackMessageId = ctx.callbackQuery?.message?.message_id;
+        if (
+          escrow.refundConfirmationMessageId &&
+          callbackMessageId &&
+          escrow.refundConfirmationMessageId !== callbackMessageId
+        ) {
+          return safeAnswerCbQuery(ctx, "❌ This request has expired.");
+        }
+
+        if (escrow.status === "refunded") {
           try {
             // Remove the buttons to prevent further clicks
             await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
@@ -1868,12 +1872,30 @@ ${approvalNote}`;
             throw new Error("Refund transaction failed (no hash).");
           }
 
-          escrow.status = "refunded";
-          escrow.refundTransactionHash = refundResult.transactionHash;
-          escrow.accumulatedDepositAmount = 0;
-          escrow.depositAmount = 0;
-          escrow.confirmedAmount = 0;
-          escrow.accumulatedDepositAmountWei = "0";
+          const isPartialRefund =
+            Math.abs(totalDeposited - actualAmountToUser) > 0.00001;
+
+          if (isPartialRefund) {
+            const remaining = totalDeposited - refundAmount;
+            if (remaining < 0.00001) {
+              escrow.status = "refunded";
+              escrow.accumulatedDepositAmount = 0;
+              escrow.depositAmount = 0;
+              escrow.confirmedAmount = 0;
+              escrow.accumulatedDepositAmountWei = "0";
+            } else {
+              escrow.accumulatedDepositAmount = remaining;
+              escrow.depositAmount = remaining;
+              escrow.confirmedAmount = remaining;
+              // Status stays 'deposited' or whatever previous state was
+            }
+          } else {
+            escrow.status = "refunded";
+            escrow.accumulatedDepositAmount = 0;
+            escrow.depositAmount = 0;
+            escrow.confirmedAmount = 0;
+            escrow.accumulatedDepositAmountWei = "0";
+          }
           await escrow.save();
 
           try {
@@ -1896,30 +1918,32 @@ Funds returned to Seller.`;
 
           await ctx.reply(successMsg, { parse_mode: "HTML" });
 
-          setTimeout(async () => {
-            try {
-              const group = await GroupPool.findOne({
-                assignedEscrowId: escrow.escrowId,
-              });
-              if (group) {
-                await GroupPoolService.removeUsersFromGroup(
-                  escrow,
-                  group.groupId,
-                  ctx.telegram
-                );
-                await GroupPoolService.refreshInviteLink(
-                  group.groupId,
-                  ctx.telegram
-                );
-                group.status = "available";
-                group.assignedEscrowId = null;
-                await group.save();
-                await ctx.reply("♻️ Group recycled.");
+          if (escrow.status === "refunded") {
+            setTimeout(async () => {
+              try {
+                const group = await GroupPool.findOne({
+                  assignedEscrowId: escrow.escrowId,
+                });
+                if (group) {
+                  await GroupPoolService.removeUsersFromGroup(
+                    escrow,
+                    group.groupId,
+                    ctx.telegram
+                  );
+                  await GroupPoolService.refreshInviteLink(
+                    group.groupId,
+                    ctx.telegram
+                  );
+                  group.status = "available";
+                  group.assignedEscrowId = null;
+                  await group.save();
+                  await ctx.reply("♻️ Group recycled.");
+                }
+              } catch (e) {
+                console.error("Recycle error", e);
               }
-            } catch (e) {
-              console.error("Recycle error", e);
-            }
-          }, 60 * 1000);
+            }, 5 * 60 * 1000);
+          }
         } catch (err) {
           if (!err.message.includes("Insufficient Vault Balance")) {
             console.error("Refund Execution Error:", err);
@@ -1938,6 +1962,16 @@ Funds returned to Seller.`;
         const { safeAnswerCbQuery } = require("./utils/telegramUtils");
 
         const escrow = await Escrow.findOne({ escrowId });
+
+        const callbackMessageId = ctx.callbackQuery?.message?.message_id;
+        if (
+          escrow &&
+          escrow.refundConfirmationMessageId &&
+          callbackMessageId &&
+          escrow.refundConfirmationMessageId !== callbackMessageId
+        ) {
+          return safeAnswerCbQuery(ctx, "❌ This request has expired.");
+        }
 
         // Remove buttons
         try {

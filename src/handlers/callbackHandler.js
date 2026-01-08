@@ -1723,6 +1723,8 @@ Once you’ve sent the amount, tap the button below.`;
       }
     } else if (callbackData.startsWith("release_confirm_no_")) {
       const escrowId = callbackData.replace("release_confirm_no_", "");
+      const callbackMessageId = ctx.callbackQuery?.message?.message_id;
+
       const escrow = await Escrow.findOne({
         escrowId,
         status: {
@@ -1734,6 +1736,15 @@ Once you’ve sent the amount, tap the button below.`;
           ],
         },
       });
+
+      if (
+        escrow &&
+        callbackMessageId &&
+        escrow.releaseConfirmationMessageId &&
+        escrow.releaseConfirmationMessageId !== callbackMessageId
+      ) {
+        return safeAnswerCbQuery(ctx, "❌ This request has expired.");
+      }
 
       if (!escrow) {
         return safeAnswerCbQuery(ctx, "❌ No active escrow found.");
@@ -1797,6 +1808,8 @@ Once you’ve sent the amount, tap the button below.`;
       return;
     } else if (callbackData.startsWith("admin_release_confirm_no_")) {
       const escrowId = callbackData.replace("admin_release_confirm_no_", "");
+      const callbackMessageId = ctx.callbackQuery?.message?.message_id;
+
       const escrow = await Escrow.findOne({
         escrowId,
         status: {
@@ -1808,6 +1821,15 @@ Once you’ve sent the amount, tap the button below.`;
           ],
         },
       });
+
+      if (
+        escrow &&
+        callbackMessageId &&
+        escrow.releaseConfirmationMessageId &&
+        escrow.releaseConfirmationMessageId !== callbackMessageId
+      ) {
+        return safeAnswerCbQuery(ctx, "❌ This request has expired.");
+      }
 
       if (!escrow) {
         return safeAnswerCbQuery(ctx, "❌ No active escrow found.");
@@ -1880,10 +1902,7 @@ Once you’ve sent the amount, tap the button below.`;
       }
 
       // Also guard against already-settled deals
-      if (
-        escrow.releaseTransactionHash ||
-        ["completed", "refunded"].includes(escrow.status)
-      ) {
+      if (["completed", "refunded"].includes(escrow.status)) {
         return safeAnswerCbQuery(ctx, "❌ This deal has already been settled.");
       }
 
@@ -2080,6 +2099,9 @@ Once you’ve sent the amount, tap the button below.`;
         }
 
         updatedEscrow.releaseTransactionHash = releaseResult.transactionHash;
+        updatedEscrow.partialReleaseTransactionHashes.push(
+          releaseResult.transactionHash
+        );
 
         const isPartialRelease =
           Math.abs(releaseAmount - formattedTotalDeposited) >= EPSILON;
@@ -2153,31 +2175,6 @@ ${
 
         if (!isPartialRelease || isActuallyFullRelease) {
           const finalEscrow = await Escrow.findById(updatedEscrow._id);
-
-          try {
-            await UserStatsService.recordTrade({
-              buyerId: finalEscrow.buyerId,
-              buyerUsername: finalEscrow.buyerUsername,
-              sellerId: finalEscrow.sellerId,
-              sellerUsername: finalEscrow.sellerUsername,
-              amount: releaseAmount,
-              token: finalEscrow.token,
-              escrowId: finalEscrow.escrowId,
-            });
-          } catch (statsError) {
-            console.error("Error recording trade stats:", statsError);
-          }
-
-          try {
-            await CompletionFeedService.handleCompletion({
-              escrow: finalEscrow,
-              amount: releaseAmount,
-              transactionHash: releaseResult.transactionHash,
-              telegram: ctx.telegram,
-            });
-          } catch (feedError) {
-            console.error("Error broadcasting completion feed:", feedError);
-          }
 
           const images = require("../config/images");
           const tradeStart =
@@ -2281,6 +2278,34 @@ Thank you for using our safe escrow system.`;
             await settleAndRecycleGroup(finalEscrow, ctx.telegram);
           }, 5 * 60 * 1000);
         }
+
+        // Record stats and logs for ALL releases (partial or full)
+        try {
+          await UserStatsService.recordTrade({
+            buyerId: updatedEscrow.buyerId,
+            buyerUsername: updatedEscrow.buyerUsername,
+            sellerId: updatedEscrow.sellerId,
+            sellerUsername: updatedEscrow.sellerUsername,
+            amount: releaseAmount,
+            token: updatedEscrow.token,
+            escrowId: updatedEscrow.escrowId,
+          });
+        } catch (statsError) {
+          console.error("Error recording trade stats:", statsError);
+        }
+
+        try {
+          // Reload one last time to ensure status is correct for the feed service logic
+          const feedEscrow = await Escrow.findById(updatedEscrow._id);
+          await CompletionFeedService.handleCompletion({
+            escrow: feedEscrow,
+            amount: releaseAmount, // Use release amount for this specific transaction
+            transactionHash: releaseResult.transactionHash,
+            telegram: ctx.telegram,
+          });
+        } catch (feedError) {
+          console.error("Error broadcasting completion feed:", feedError);
+        }
       } catch (releaseError) {
         const errStr =
           (releaseError?.message || "") + (releaseError?.toString() || "");
@@ -2334,10 +2359,7 @@ Please check the contract balance or top up the vault.`;
         );
       }
 
-      if (
-        escrow.releaseTransactionHash ||
-        ["completed", "refunded"].includes(escrow.status)
-      ) {
+      if (["completed", "refunded"].includes(escrow.status)) {
         try {
           await ctx.editMessageReplyMarkup({ inline_keyboard: [] });
         } catch (e) {}
@@ -2621,6 +2643,9 @@ ${approvalNote}`;
           }
 
           updatedEscrow.releaseTransactionHash = releaseResult.transactionHash;
+          updatedEscrow.partialReleaseTransactionHashes.push(
+            releaseResult.transactionHash
+          );
 
           const EPSILON = 0.00001;
 
@@ -2677,31 +2702,32 @@ ${approvalNote}`;
           updatedEscrow.pendingReleaseAmount = null;
           await updatedEscrow.save();
 
-          if (!isPartialRelease || updatedEscrow.status === "completed") {
-            try {
-              await UserStatsService.recordTrade({
-                buyerId: updatedEscrow.buyerId,
-                buyerUsername: updatedEscrow.buyerUsername,
-                sellerId: updatedEscrow.sellerId,
-                sellerUsername: updatedEscrow.sellerUsername,
-                quantity: grossReleaseAmount,
-                token: updatedEscrow.token,
-                escrowId: updatedEscrow.escrowId,
-              });
-            } catch (statsError) {
-              console.error("Error recording trade stats:", statsError);
-            }
+          // Record stats and logs for ALL releases (partial or full)
+          try {
+            await UserStatsService.recordTrade({
+              buyerId: updatedEscrow.buyerId,
+              buyerUsername: updatedEscrow.buyerUsername,
+              sellerId: updatedEscrow.sellerId,
+              sellerUsername: updatedEscrow.sellerUsername,
+              quantity: grossReleaseAmount,
+              token: updatedEscrow.token,
+              escrowId: updatedEscrow.escrowId,
+            });
+          } catch (statsError) {
+            console.error("Error recording trade stats:", statsError);
+          }
 
-            try {
-              await CompletionFeedService.handleCompletion({
-                escrow: updatedEscrow,
-                amount: actualAmountToUser,
-                transactionHash: releaseResult.transactionHash,
-                telegram: ctx.telegram,
-              });
-            } catch (feedError) {
-              console.error("Error broadcasting completion feed:", feedError);
-            }
+          try {
+            // Reload one last time to ensure status is correct for the feed service logic
+            const feedEscrow = await Escrow.findById(updatedEscrow._id);
+            await CompletionFeedService.handleCompletion({
+              escrow: feedEscrow,
+              amount: actualAmountToUser,
+              transactionHash: releaseResult.transactionHash,
+              telegram: ctx.telegram,
+            });
+          } catch (feedError) {
+            console.error("Error broadcasting completion feed:", feedError);
           }
 
           const tradeStart =

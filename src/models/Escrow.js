@@ -255,6 +255,26 @@ const escrowSchema = new mongoose.Schema({
     type: Number,
     required: false,
   },
+  // Track if release/refund buttons have been used (to prevent reuse)
+  // Transaction hashes for partial releases/refunds to maintain history
+  partialReleaseTransactionHashes: {
+    type: [String],
+    default: [],
+  },
+  partialRefundTransactionHashes: {
+    type: [String],
+    default: [],
+  },
+
+  releaseButtonUsed: {
+    type: Boolean,
+    default: false,
+  },
+  refundButtonUsed: {
+    type: Boolean,
+    default: false,
+  },
+
   buyerStatsParticipationRecorded: {
     type: Boolean,
     default: false,
