@@ -335,7 +335,14 @@ module.exports = async (ctx) => {
     const networkFee = feeConfig.getNetworkFee("BSC", hasBioTag);
 
     // Create a new managed-room escrow and assign a pool group
-    const escrowId = `ESC${Date.now()}`;
+    // Generate sequential ID
+    // Start at 10000000, so first is 10000001
+    const counter = await Counter.findByIdAndUpdate(
+      { _id: "escrowId" },
+      { $inc: { seq: 1 }, $setOnInsert: { seq: 10000000 } },
+      { new: true, upsert: true }
+    );
+    const escrowId = `P2PMMX${counter.seq}`;
 
     // Retry logic for assigning group and generating invite link
     // This handles cases where a group in the pool is invalid (bot kicked, etc.)

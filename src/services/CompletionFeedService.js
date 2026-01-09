@@ -26,10 +26,18 @@ class CompletionFeedService {
       return;
     }
 
-    const releaseAmount = Number(amount);
+    let releaseAmount = Number(amount);
     if (!Number.isFinite(releaseAmount) || releaseAmount <= 0) {
       console.error(`CompletionFeedService: Invalid release amount: ${amount}`);
       return;
+    }
+
+    // Heuristic Normalization matching UserStatsService
+    if (releaseAmount > 1e14) {
+      console.warn(
+        `CompletionFeedService: Detected massive amount (${releaseAmount}). Normalizing by 1e18.`
+      );
+      releaseAmount = releaseAmount / 1e18;
     }
 
     const Escrow = require("../models/Escrow");

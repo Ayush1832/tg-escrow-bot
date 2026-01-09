@@ -2124,6 +2124,7 @@ Once you’ve sent the amount, tap the button below.`;
             updatedEscrow.quantity = releaseAmount;
           }
           updatedEscrow.status = "completed";
+          updatedEscrow.completedAt = new Date();
           updatedEscrow.accumulatedDepositAmount = 0;
           updatedEscrow.depositAmount = 0;
           updatedEscrow.confirmedAmount = 0;
@@ -2665,6 +2666,7 @@ ${approvalNote}`;
                 updatedEscrow.quantity = actualAmountToUser;
               }
               updatedEscrow.status = "completed";
+              updatedEscrow.completedAt = new Date();
               updatedEscrow.buyerClosedTrade = false;
               updatedEscrow.sellerClosedTrade = false;
               updatedEscrow.accumulatedDepositAmount = 0;
@@ -2692,6 +2694,7 @@ ${approvalNote}`;
               updatedEscrow.quantity = actualAmountToUser;
             }
             updatedEscrow.status = "completed";
+            updatedEscrow.completedAt = new Date();
             updatedEscrow.buyerClosedTrade = false;
             updatedEscrow.sellerClosedTrade = false;
             updatedEscrow.accumulatedDepositAmount = 0;
@@ -3929,6 +3932,7 @@ Thank you for using our safe escrow system.`;
           escrow.quantity = amount;
         }
         escrow.status = "completed";
+        escrow.completedAt = new Date();
         escrow.releaseTransactionHash = releaseResult.transactionHash;
         // Zero out deposit amounts after preserving quantity
         escrow.accumulatedDepositAmount = 0;
@@ -4246,6 +4250,7 @@ Trade completed successfully.`;
             escrow.quantity = actualAmount;
           }
           escrow.status = "completed";
+          escrow.completedAt = new Date();
           escrow.releaseTransactionHash = releaseResult.transactionHash;
           escrow.accumulatedDepositAmount = 0;
           escrow.depositAmount = 0;

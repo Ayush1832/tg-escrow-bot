@@ -375,6 +375,11 @@ const escrowSchema = new mongoose.Schema({
     type: Date,
     required: false,
   },
+  // Timestamp when the deal was completed (for accurate duration stats)
+  completedAt: {
+    type: Date,
+    required: false,
+  },
   // Flag if recycling is already scheduled/in progress
   isScheduledForRecycle: {
     type: Boolean,
