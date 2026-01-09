@@ -340,7 +340,7 @@ module.exports = async (ctx) => {
     // Start at 10000000, so first is 10000001
     const counter = await Counter.findByIdAndUpdate(
       { _id: "escrowId" },
-      { $inc: { seq: 1 }, $setOnInsert: { seq: 10000000 } },
+      { $inc: { seq: 1 } },
       { new: true, upsert: true }
     );
     const escrowId = `P2PMMX${counter.seq}`;
