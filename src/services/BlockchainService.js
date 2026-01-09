@@ -885,7 +885,36 @@ class BlockchainService {
       const tx = await vaultContract.release(buyerAddress, amountWei, {
         nonce: nonce,
       });
-      const receipt = await tx.wait();
+
+      const waitPromise = tx.wait();
+      let receipt;
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    `Transaction verification timed out (${attempt}/3).`
+                  )
+                ),
+              60000
+            )
+          );
+          receipt = await Promise.race([waitPromise, timeoutPromise]);
+          break; // Success!
+        } catch (e) {
+          if (attempt === 3) {
+            throw new Error(
+              "Transaction verification timed out after 3 attempts (180s). Please check the explorer manually."
+            );
+          }
+          console.log(
+            `Verification attempt ${attempt} timed out, continuing to wait...`
+          );
+        }
+      }
 
       const transactionHash =
         receipt.transactionHash || receipt.hash || tx.hash;
@@ -1030,7 +1059,36 @@ class BlockchainService {
       const tx = await vaultContract.refund(sellerAddress, amountWei, {
         nonce: nonce,
       });
-      const receipt = await tx.wait();
+
+      const waitPromise = tx.wait();
+      let receipt;
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    `Transaction verification timed out (${attempt}/3).`
+                  )
+                ),
+              60000
+            )
+          );
+          receipt = await Promise.race([waitPromise, timeoutPromise]);
+          break; // Success!
+        } catch (e) {
+          if (attempt === 3) {
+            throw new Error(
+              "Transaction verification timed out after 3 attempts (180s). Please check the explorer manually."
+            );
+          }
+          console.log(
+            `Verification attempt ${attempt} timed out, continuing to wait...`
+          );
+        }
+      }
 
       const transactionHash =
         receipt.transactionHash || receipt.hash || tx.hash;

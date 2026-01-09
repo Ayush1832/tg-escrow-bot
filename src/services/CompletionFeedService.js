@@ -123,7 +123,7 @@ class CompletionFeedService {
     // Determine release type
     const isCompleted = freshEscrow.status === "completed";
     const titleText = isCompleted
-      ? "ROCKET NEW DEAL LOCKED & RELEASED"
+      ? "NEW DEAL LOCKED & RELEASED"
       : "PARTIAL FUNDS RELEASED";
     const emoji = isCompleted ? "🚀" : "💸";
     const statusLine = isCompleted ? "🏆 Success Record" : "⚠️ Status";

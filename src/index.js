@@ -196,10 +196,13 @@ function parseFlexibleNumber(value) {
       decimalSeparator = null;
     }
   } else if (lastDot > -1) {
-    const afterDot = str.slice(lastDot + 1);
-    if (afterDot.length === 3 && /^\d{3}$/.test(afterDot) && lastDot > 0) {
+    // Check if there are multiple dots (likely thousands separators)
+    const dotCount = (str.match(/\./g) || []).length;
+    if (dotCount > 1) {
       decimalSeparator = null;
     } else {
+      // Single dot is treated as decimal separator (US/English standard)
+      // This fixes issues where 1.234 or 0.123 were parsed as 1234 or 123
       decimalSeparator = ".";
     }
   }
