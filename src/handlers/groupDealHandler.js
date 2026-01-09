@@ -1,4 +1,5 @@
 const Escrow = require("../models/Escrow");
+const Counter = require("../models/Counter");
 const GroupPool = require("../models/GroupPool");
 const GroupPoolService = require("../services/GroupPoolService");
 const config = require("../../config");

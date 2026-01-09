@@ -32,13 +32,8 @@ class CompletionFeedService {
       return;
     }
 
-    // Heuristic Normalization matching UserStatsService
-    if (releaseAmount > 1e14) {
-      console.warn(
-        `CompletionFeedService: Detected massive amount (${releaseAmount}). Normalizing by 1e18.`
-      );
-      releaseAmount = releaseAmount / 1e18;
-    }
+    // Amount is guaranteed to be in Units by caller (callbackHandler/index)
+    // No heuristic normalization needed for new trades.
 
     const Escrow = require("../models/Escrow");
     const freshEscrow = await Escrow.findById(escrow._id || escrow.id);

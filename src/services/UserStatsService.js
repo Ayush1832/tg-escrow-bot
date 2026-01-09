@@ -186,12 +186,16 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
         $match: {
           status: "completed",
           tradeStartTime: { $exists: true, $ne: null },
-          completedAt: { $exists: true, $ne: null },
         },
       },
       {
         $addFields: {
-          duration: { $subtract: ["$completedAt", "$tradeStartTime"] },
+          duration: {
+            $subtract: [
+              { $ifNull: ["$completedAt", "$updatedAt"] },
+              "$tradeStartTime",
+            ],
+          },
         },
       },
       { $match: { duration: { $gt: 0 } } },
@@ -206,12 +210,16 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
         $match: {
           status: "completed",
           tradeStartTime: { $exists: true, $ne: null },
-          completedAt: { $exists: true, $ne: null },
         },
       },
       {
         $addFields: {
-          duration: { $subtract: ["$completedAt", "$tradeStartTime"] },
+          duration: {
+            $subtract: [
+              { $ifNull: ["$completedAt", "$updatedAt"] },
+              "$tradeStartTime",
+            ],
+          },
         },
       },
       { $sort: { duration: -1 } },
@@ -402,18 +410,15 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
 
   normalizeAmount(amount) {
     const val = Number(amount);
-    // Heuristic: If amount is > 1 Quadrillion (1e15), it's likely Wei (18 decimals)
-    // or a display error. We normalize it to 18 decimals to be safe.
-    // 9.55e24 (User case) -> becomes 9.55e6 if divided by 1e18? No, 9.55e24 / 1e18 = 9.55e6 (9 Million).
-    // Still huge, but better.
-    // Wait, if input is 9.55e24, and real is 9.55. Factor is 1e24.
-    // If we assume it's Wei, we usually divide by 1e18.
-    // If the number is > 1e20, it's extremely suspicious.
-
+    // Heuristic:
+    // 1. If > 1e22 (10 Sextillion), it's likely double-scaled (18+6 decimals error).
+    //    User case: 9.55e24 -> should be ~9.55. Factor is 1e24.
+    if (val > 1e22) {
+      return val / 1e24;
+    }
+    // 2. If > 1e14 (100 Trillion), it's likely Wei (18 decimals).
+    //    Standard normalization.
     if (val > 1e14) {
-      // Example: 1 ETH = 1e18.
-      // If val is 1e18, result is 1. All good.
-      // If val is 1000 (Units), result is 1000. All good.
       return val / 1e18;
     }
     return val;
@@ -438,7 +443,7 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
       escrowId,
     } = escrow;
 
-    const amount = this.normalizeAmount(quantity);
+    const amount = Number(quantity);
     const tradeDate = new Date();
 
     await User.findOneAndUpdate(
