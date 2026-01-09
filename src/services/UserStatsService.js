@@ -147,17 +147,35 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
       .limit(5);
 
     // Global Stats
-    const totalStats = await Escrow.aggregate([
-      { $match: { status: "completed" } },
-      {
-        $group: {
-          _id: null,
-          totalDeals: { $sum: 1 },
-          totalVolume: { $sum: "$quantity" },
+    const Stats = require("../models/Stats");
+
+    // Global Stats (Preferred from Aggregated Collection)
+    const statsDoc = await Stats.findOne({ key: "global" });
+
+    let totalDeals = 0;
+    let totalVolume = 0;
+
+    if (statsDoc) {
+      totalDeals = statsDoc.totalCompletedTrades || 0;
+      totalVolume = statsDoc.totalCompletedVolume || 0;
+    } else {
+      // Fallback to aggregation (expensive and potentially inaccurate if history is messy)
+      const totalStats = await Escrow.aggregate([
+        { $match: { status: "completed" } },
+        {
+          $group: {
+            _id: null,
+            totalDeals: { $sum: 1 },
+            totalVolume: { $sum: "$quantity" },
+          },
         },
-      },
-    ]);
-    const globalStats = totalStats[0] || { totalDeals: 0, totalVolume: 0 };
+      ]);
+      const aggResult = totalStats[0] || { totalDeals: 0, totalVolume: 0 };
+      totalDeals = aggResult.totalDeals;
+      totalVolume = aggResult.totalVolume;
+    }
+
+    const globalStats = { totalDeals, totalVolume };
 
     // Common projection for deal stats
     const dealProjection = {

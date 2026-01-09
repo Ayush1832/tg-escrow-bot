@@ -389,6 +389,57 @@ async function updateRoleSelectionMessage(ctx, escrow) {
   }
 }
 
+const safeEditMessageText = async (
+  ctx,
+  chatId,
+  messageId,
+  text,
+  extra = {}
+) => {
+  try {
+    await ctx.telegram.editMessageText(
+      chatId,
+      messageId,
+      undefined,
+      text,
+      extra
+    );
+  } catch (error) {
+    if (
+      error.description &&
+      error.description.includes("message is not modified")
+    ) {
+      return;
+    }
+
+    if (
+      error.code === 429 ||
+      (error.description && error.description.includes("Too Many Requests"))
+    ) {
+      const retryAfter = error.parameters?.retry_after || 5;
+      if (retryAfter < 30) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, retryAfter * 1000 + 1000)
+        );
+        try {
+          await ctx.telegram.editMessageText(
+            chatId,
+            messageId,
+            undefined,
+            text,
+            extra
+          );
+        } catch (retryErr) {
+          console.error(`Rate limit retry failed: ${retryErr.message}`);
+        }
+        return;
+      }
+    }
+
+    console.error(`Edit Msg Error: ${error.message}`);
+  }
+};
+
 module.exports = async (ctx) => {
   try {
     const callbackData = ctx.callbackQuery.data;
@@ -4623,56 +4674,6 @@ Approved By: ${
       await safeAnswerCbQuery(ctx);
       return;
     }
-    const safeEditMessageText = async (
-      ctx,
-      chatId,
-      messageId,
-      text,
-      extra = {}
-    ) => {
-      try {
-        await ctx.telegram.editMessageText(
-          chatId,
-          messageId,
-          undefined,
-          text,
-          extra
-        );
-      } catch (error) {
-        if (
-          error.description &&
-          error.description.includes("message is not modified")
-        ) {
-          return;
-        }
-
-        if (
-          error.code === 429 ||
-          (error.description && error.description.includes("Too Many Requests"))
-        ) {
-          const retryAfter = error.parameters?.retry_after || 5;
-          if (retryAfter < 30) {
-            await new Promise((resolve) =>
-              setTimeout(resolve, retryAfter * 1000 + 1000)
-            );
-            try {
-              await ctx.telegram.editMessageText(
-                chatId,
-                messageId,
-                undefined,
-                text,
-                extra
-              );
-            } catch (retryErr) {
-              console.error(`Rate limit retry failed: ${retryErr.message}`);
-            }
-            return;
-          }
-        }
-
-        console.error(`Edit Msg Error: ${error.message}`);
-      }
-    };
   } catch (error) {
     if (
       error.description &&
