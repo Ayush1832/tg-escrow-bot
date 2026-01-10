@@ -26,7 +26,7 @@ async function withRetry(fn, retries = 3, delay = 1000) {
     let waitTime = delay;
     // Respect Telegram's retry_after parameter
     if (error?.response?.parameters?.retry_after) {
-      waitTime = (error.response.parameters.retry_after + 1) * 1000;
+      waitTime = (error.response.parameters.retry_after + 2) * 1000;
     }
 
     console.warn(

@@ -935,7 +935,8 @@ module.exports = async (ctx) => {
         }
 
         return `📋 <b> Deal Summary</b>
-
+        
+• <b>Trade ID:</b> #${escrow.escrowId}
 • <b>Amount:</b> ${amount} ${escrow.token}
 • <b>Rate:</b> ₹${rate.toFixed(1)}
 • <b>Payment:</b> ${paymentMethod}

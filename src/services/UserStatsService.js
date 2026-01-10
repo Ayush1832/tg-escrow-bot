@@ -116,23 +116,24 @@ ${roleIcon} ${roleName} <code>${amount} ${token}</code>
 📅 <code>${dateStr}</code>`;
     }
 
-    return `📊 PERSONAL TRADING STATS — ${usernameDisplay}
-
+    const quoteHeader = `📊 ${usernameDisplay} — Stats`;
+    // Note: Using blockquote expandable for the requested style.
+    const quoteBody = `
 🟢 BUYING STATS
-• Total Bought: <code>${totalBought} USDT</code>
-• Total Buy Trades: <code>${totalBuyTrades}</code>
-🏅 Global Buy Rank: <code>#${buyRank} Buyer</code>
+• Total Bought: $${totalBought}
+• Total Buy Trades: ${totalBuyTrades}
 
 🔴 SELLING STATS
-• Total Sold: <code>${totalSold} USDT</code>
-• Total Sell Trades: <code>${totalSellTrades}</code>
-🥇 Global Sell Rank: <code>#${sellRank} Seller</code>
+• Total Sold: $${totalSold}
+• Total Sell Trades: ${totalSellTrades}`;
+
+    return `<blockquote expandable>${quoteHeader}${quoteBody}</blockquote>
 
 📈 OVERALL PERFORMANCE
-• Lifetime Volume: <code>${lifetimeVolume} USDT</code>
-• Total Deals: <code>${totalDeals}</code>
-• Completion Rate: <code>${completionRateStr} (${totalDeals} / ${totalParticipated})</code>
-🏆 Overall Global Rank: <code>#${overallRank} Trader</code>${lastTradeSection}`;
+• Lifetime Volume: $${lifetimeVolume}
+• Total Deals: ${totalDeals}
+• Completion Rate: ${completionRateStr} (${totalDeals} / ${totalParticipated})
+🏆 Overall Global Rank: #${overallRank} Trader${lastTradeSection}`;
   }
 
   /**

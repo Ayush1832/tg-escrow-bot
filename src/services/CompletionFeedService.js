@@ -32,9 +32,6 @@ class CompletionFeedService {
       return;
     }
 
-    // Amount is guaranteed to be in Units by caller (callbackHandler/index)
-    // No heuristic normalization needed for new trades.
-
     const Escrow = require("../models/Escrow");
     const freshEscrow = await Escrow.findById(escrow._id || escrow.id);
 
@@ -43,7 +40,19 @@ class CompletionFeedService {
       return;
     }
 
-    if (freshEscrow.completionLogSent && freshEscrow.status === "completed") {
+    let volumeToAdd = releaseAmount;
+    const isCompleted = freshEscrow.status === "completed";
+
+    if (isCompleted) {
+      volumeToAdd = freshEscrow.quantity;
+    } else {
+      const fee = freshEscrow.feeRate || 0;
+      if (fee > 0 && fee < 100) {
+        volumeToAdd = releaseAmount / (1 - fee / 100);
+      }
+    }
+
+    if (freshEscrow.completionLogSent && isCompleted) {
       if (
         transactionHash &&
         freshEscrow.releaseTransactionHash &&
@@ -83,7 +92,7 @@ class CompletionFeedService {
           key: "global",
         },
         $inc: {
-          totalCompletedVolume: releaseAmount,
+          totalCompletedVolume: volumeToAdd,
           totalCompletedTrades: 1,
         },
       },
@@ -115,16 +124,14 @@ class CompletionFeedService {
       network,
       transactionHash || freshEscrow.releaseTransactionHash
     );
-    const amountDisplay = this.formatAmount(releaseAmount);
+    const amountDisplay = this.formatAmount(volumeToAdd);
     const usdDisplay = this.formatAmount(
-      this.estimateUsdValue(releaseAmount, freshEscrow)
+      this.estimateUsdValue(volumeToAdd, freshEscrow)
     );
     const transactionLine = explorerLink
       ? `🔗 PROOF OF RELEASE: <a href="${explorerLink}">[Link]</a>`
       : "🔗 PROOF OF RELEASE: N/A";
 
-    // Determine release type
-    const isCompleted = freshEscrow.status === "completed";
     const titleText = isCompleted
       ? "NEW DEAL LOCKED & RELEASED"
       : "PARTIAL FUNDS RELEASED";
