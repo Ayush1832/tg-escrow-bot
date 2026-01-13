@@ -353,6 +353,18 @@ const escrowSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  buyerConfirmedCancel: {
+    type: Boolean,
+    default: false,
+  },
+  sellerConfirmedCancel: {
+    type: Boolean,
+    default: false,
+  },
+  cancelConfirmationMessageId: {
+    type: Number,
+    required: false,
+  },
   pendingSellerAddress: {
     type: String,
     default: null,

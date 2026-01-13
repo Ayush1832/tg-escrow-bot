@@ -10,6 +10,7 @@ const {
   formatParticipant,
   formatParticipantByIndex,
 } = require("../utils/participant");
+const withRetry = require("../utils/retry");
 
 const inviteTimeoutMap = new Map();
 joinRequestHandler.setInviteTimeoutMap(inviteTimeoutMap);
@@ -379,17 +380,7 @@ module.exports = async (ctx) => {
         // If we got here, everything worked
         break;
       } catch (err) {
-        console.error(
-          `Attempt ${attempt} - Error assigning group or generating link:`,
-          err.message
-        );
         assignmentError = err;
-
-        // If the error explicitly says group has been archived or not found,
-        // the GroupPoolService has already marked it as archived.
-        // We just need to loop again to pick a *different* group.
-
-        // If we ran out of retries, we'll handle it below.
       }
     }
 
@@ -458,24 +449,19 @@ module.exports = async (ctx) => {
       "Note: Only the mentioned members can join. Never join any link shared via DM.";
     const feeText = `\n💰 <b>Fee Tier:</b> ${feePercent}%`;
     const message = `<b>🏠 Deal Room Created!</b>\n\n🔗 Join Link: ${inviteLink}\n\n${participantsText}\n${feeText}\n\n${noteText}`;
-    const inviteMsg = await ctx.replyWithPhoto(images.DEAL_ROOM_CREATED, {
-      caption: message,
-      parse_mode: "HTML",
-      // Protect this message so it cannot be forwarded or saved
-      // This prevents users from forwarding the private room link and scamming others
-      protect_content: true,
-    });
-    // Save origin message id to remove later once both join
+    const inviteMsg = await withRetry(() =>
+      ctx.replyWithPhoto(images.DEAL_ROOM_CREATED, {
+        caption: message,
+        parse_mode: "HTML",
+        protect_content: true,
+      })
+    );
     try {
       newEscrow.originInviteMessageId = inviteMsg.message_id;
       await newEscrow.save();
     } catch (_) {}
 
-    // Schedule 5-minute timeout to check if both parties joined
-    // If not, cancel the deal and recycle the group
-    const telegram = ctx.telegram; // Store telegram instance for use in timeout
-
-    // Auto-delete invite link message after 5 minutes
+    const telegram = ctx.telegram;
     const originChatId = String(chatId);
     const inviteMessageId = inviteMsg.message_id;
     setTimeout(async () => {
@@ -483,44 +469,31 @@ module.exports = async (ctx) => {
         await telegram.deleteMessage(originChatId, inviteMessageId);
       } catch (_) {}
     }, 5 * 60 * 1000);
-
-    // Delete the /deal command message after 5 minutes
     if (ctx.message && ctx.message.message_id) {
       const commandMessageId = ctx.message.message_id;
       setTimeout(async () => {
         try {
           await telegram.deleteMessage(originChatId, commandMessageId);
-        } catch (deleteError) {
-          // Message might already be deleted or not accessible - ignore
-        }
-      }, 5 * 60 * 1000); // 5 minutes
+        } catch (_) {}
+      }, 5 * 60 * 1000);
     }
     const timeoutId = setTimeout(async () => {
       try {
-        // Re-fetch escrow to get latest state
         const currentEscrow = await Escrow.findOne({
           escrowId: newEscrow.escrowId,
         });
         if (!currentEscrow) {
-          // Escrow was deleted, nothing to do
           inviteTimeoutMap.delete(newEscrow.escrowId);
           return;
         }
-
-        // Check if escrow status changed (trade started or completed)
         if (
           currentEscrow.status !== "draft" ||
           currentEscrow.roleSelectionMessageId
         ) {
-          // Trade has progressed, cancel timeout
           inviteTimeoutMap.delete(newEscrow.escrowId);
           return;
         }
-
-        // Check if both parties have joined
         const approvedCount = (currentEscrow.approvedUserIds || []).length;
-
-        // Check if initiator is already in group (admin case)
         let initiatorPresent = false;
         if (currentEscrow.creatorId) {
           try {
@@ -536,7 +509,6 @@ module.exports = async (ctx) => {
           }
         }
 
-        // Count total joined: approvedUserIds + initiator if already present
         const creatorAlreadyCounted = currentEscrow.approvedUserIds?.includes(
           Number(currentEscrow.creatorId)
         );
@@ -544,25 +516,21 @@ module.exports = async (ctx) => {
           approvedCount + (initiatorPresent && !creatorAlreadyCounted ? 1 : 0);
 
         if (totalJoined >= 2) {
-          // Both joined, cancel timeout
           inviteTimeoutMap.delete(newEscrow.escrowId);
           return;
         }
 
-        // Timeout expired and not both joined - cancel the deal
         inviteTimeoutMap.delete(newEscrow.escrowId);
 
-        // Delete the invite message
         if (currentEscrow.originChatId && currentEscrow.originInviteMessageId) {
           try {
             await telegram.deleteMessage(
               currentEscrow.originChatId,
               currentEscrow.originInviteMessageId
             );
-          } catch (deleteError) {}
+          } catch (_) {}
         }
 
-        // Send cancellation message
         const initiatorName = formatParticipantByIndex(
           currentEscrow,
           0,
@@ -576,33 +544,28 @@ module.exports = async (ctx) => {
           { html: true }
         );
         try {
-          const cancellationMsg = await telegram.sendMessage(
-            currentEscrow.originChatId,
-            `❌ Deal cancelled between ${initiatorName} and ${counterpartyName} due to inactivity. Both parties must join within 5 minutes.`,
-            { parse_mode: "HTML" }
+          const cancellationMsg = await withRetry(() =>
+            telegram.sendMessage(
+              currentEscrow.originChatId,
+              `❌ Deal cancelled between ${initiatorName} and ${counterpartyName} due to inactivity. Both parties must join within 5 minutes.`,
+              { parse_mode: "HTML" }
+            )
           );
 
-          // Delete cancellation message after 5 minutes
           setTimeout(async () => {
             try {
               await telegram.deleteMessage(
                 currentEscrow.originChatId,
                 cancellationMsg.message_id
               );
-            } catch (deleteError) {
-              // Message might already be deleted or not accessible - ignore
-            }
-          }, 5 * 60 * 1000); // 5 minutes
-        } catch (msgError) {
-          console.log("Could not send cancellation message:", msgError.message);
-        }
+            } catch (_) {}
+          }, 5 * 60 * 1000);
+        } catch (_) {}
 
-        // Recycle the group
         let group = await GroupPool.findOne({
           assignedEscrowId: currentEscrow.escrowId,
         });
 
-        // Fallback: try to find by groupId if not found by assignedEscrowId
         if (!group) {
           group = await GroupPool.findOne({
             groupId: currentEscrow.groupId,
@@ -610,7 +573,6 @@ module.exports = async (ctx) => {
         }
 
         if (group) {
-          // Delete waiting message if it exists
           if (currentEscrow.waitingForUserMessageId) {
             try {
               await telegram.deleteMessage(
@@ -618,17 +580,14 @@ module.exports = async (ctx) => {
                 currentEscrow.waitingForUserMessageId
               );
             } catch (_) {
-              // Message may already be deleted, ignore
             }
           }
 
-          // Clear escrow invite link (but keep group invite link - it's permanent)
           if (currentEscrow.inviteLink) {
             currentEscrow.inviteLink = null;
             await currentEscrow.save();
           }
 
-          // Remove users from group
           try {
             await GroupPoolService.removeUsersFromGroup(
               currentEscrow,
@@ -642,7 +601,6 @@ module.exports = async (ctx) => {
             );
           }
 
-          // Refresh invite link (revoke old and create new) so removed users can rejoin
           try {
             await GroupPoolService.refreshInviteLink(group.groupId, telegram);
           } catch (linkError) {
@@ -652,13 +610,10 @@ module.exports = async (ctx) => {
             );
           }
 
-          // Reset group pool entry
-          // IMPORTANT: Do NOT clear group.inviteLink - we keep the permanent link for reuse
           group.status = "available";
           group.assignedEscrowId = null;
           group.assignedAt = null;
           group.completedAt = null;
-          // Keep inviteLink - it's permanent and will be reused
           await group.save();
         } else {
           console.log(
@@ -684,9 +639,7 @@ module.exports = async (ctx) => {
     // Store timeout reference so we can cancel it if both join
     inviteTimeoutMap.set(newEscrow.escrowId, timeoutId);
 
-    // Note: Progress messages will be sent by joinRequestHandler after users are approved
   } catch (error) {
-    console.error("Error in groupDealHandler:", error);
     return ctx.reply("❌ Failed to create deal room. Please try again.");
   }
 };

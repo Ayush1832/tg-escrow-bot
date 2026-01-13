@@ -2,6 +2,7 @@ const config = require("../../config");
 const Stats = require("../models/Stats");
 const { formatParticipantById } = require("../utils/participant");
 const UserStatsService = require("./UserStatsService");
+const withRetry = require("../utils/retry");
 
 class CompletionFeedService {
   constructor() {
@@ -163,7 +164,6 @@ ${transactionLine}`;
       transactionHash || freshEscrow.releaseTransactionHash
     );
 
-    const withRetry = require("../utils/retry");
     try {
       await withRetry(() =>
         telegram.sendMessage(this.chatId, message, {
@@ -213,15 +213,6 @@ ${transactionLine}`;
           );
         }
       } else {
-        console.error(
-          "CompletionFeedService: Failed to broadcast completion summary:",
-          error
-        );
-        console.error("CompletionFeedService: Error details:", {
-          message: error.message,
-          code: error.code,
-          response: error.response,
-        });
       }
     }
   }
@@ -464,7 +455,6 @@ ${transactionLine}`;
       transactionHash
     );
 
-    const withRetry = require("../utils/retry");
     try {
       await withRetry(() =>
         telegram.sendMessage(this.chatId, message, {
@@ -480,7 +470,9 @@ ${transactionLine}`;
         freshEscrow.refundTransactionHash = transactionHash;
       }
       await freshEscrow.save();
-    } catch (error) {}
+    } catch (error) {
+      // Suppress log
+    }
   }
 
   async sendDirectMessageNotification(
@@ -577,10 +569,12 @@ ${messageBody}`;
     const sendToUser = async (userId) => {
       if (!userId) return;
       try {
-        await telegram.sendMessage(userId, fullMessage, {
-          parse_mode: "HTML",
-          disable_web_page_preview: true,
-        });
+        await withRetry(() =>
+          telegram.sendMessage(userId, fullMessage, {
+            parse_mode: "HTML",
+            disable_web_page_preview: true,
+          })
+        );
       } catch (error) {}
     };
 

@@ -407,14 +407,10 @@ class EscrowBot {
           return;
         }
 
-        if (
-          (escrow.depositAddress || escrow.uniqueDepositAddress) &&
-          escrow.status !== "awaiting_deposit" &&
-          escrow.status !== "draft" &&
-          escrow.status !== "awaiting_details"
-        ) {
+        // Strict check: Cannot cancel if deposit address is already generated
+        if (escrow.depositAddress || escrow.uniqueDepositAddress) {
           return ctx.reply(
-            "❌ Cannot cancel the deal after funds have been deposited."
+            "❌ Trade cannot be cancelled after the deposit address has been generated."
           );
         }
 
@@ -436,15 +432,170 @@ class EscrowBot {
           );
         }
 
-        await ctx.reply("⚠️ Deal cancelled. Resetting group...");
+        // If Admin, cancel immediately
+        if (isAdmin) {
+          await ctx.reply("⚠️ Admin cancelled the deal. Resetting group...");
+          escrow.status = "cancelled";
+          await escrow.save();
+          await GroupPoolService.recycleGroupNow(escrow, ctx.telegram);
+          return;
+        }
 
-        escrow.status = "cancelled";
+        // For Buyer/Seller, require confirmation from BOTH
+        escrow.buyerConfirmedCancel = false;
+        escrow.sellerConfirmedCancel = false;
+
+        // No auto-confirm. Both must explicitly click.
+
         await escrow.save();
 
-        await GroupPoolService.recycleGroupNow(escrow, ctx.telegram);
+        const buyerTag = escrow.buyerUsername
+          ? `@${escrow.buyerUsername}`
+          : "Buyer";
+        const sellerTag = escrow.sellerUsername
+          ? `@${escrow.sellerUsername}`
+          : "Seller";
+
+        const buyerStatus = escrow.buyerConfirmedCancel
+          ? "✅ Confirmed"
+          : "qWaiting...";
+        const sellerStatus = escrow.sellerConfirmedCancel
+          ? "✅ Confirmed"
+          : "⌛️ Waiting...";
+
+        const msg = `⚠️ <b>Cancel Request Initiated</b>
+        
+The ${isBuyer ? "Buyer" : "Seller"} wants to cancel this trade.
+Both parties must confirm to proceed.
+
+<b>Buyer (${buyerTag}):</b> ${buyerStatus}
+<b>Seller (${sellerTag}):</b> ${sellerStatus}`;
+
+        const cancelMsg = await ctx.reply(msg, {
+          parse_mode: "HTML",
+          reply_markup: Markup.inlineKeyboard([
+            [
+              Markup.button.callback(
+                "✅ Confirm Cancel",
+                `cancel_confirm_yes_${escrow.escrowId}`
+              ),
+              Markup.button.callback(
+                "❌ Abort",
+                `cancel_confirm_no_${escrow.escrowId}`
+              ),
+            ],
+          ]).reply_markup,
+        });
+
+        escrow.cancelConfirmationMessageId = cancelMsg.message_id;
+        await escrow.save();
       } catch (error) {
         console.error("Error in cancel command:", error);
-        ctx.reply("❌ An error occurred while cancelling the deal.");
+        ctx.reply("❌ An error occurred while processing cancel request.");
+      }
+    });
+
+    this.bot.action(/^cancel_confirm_yes_(.+)$/, async (ctx) => {
+      try {
+        const escrowId = ctx.match[1];
+        const escrow = await Escrow.findOne({ escrowId });
+        if (!escrow) return ctx.reply("❌ Deal not found.");
+
+        if (escrow.status === "cancelled") {
+          try {
+            await ctx.editMessageText("⚠️ Deal already cancelled.");
+          } catch (e) {}
+          return;
+        }
+
+        if (escrow.depositAddress || escrow.uniqueDepositAddress) {
+          return ctx.reply(
+            "❌ Trade cannot be cancelled after deposit address is generated."
+          );
+        }
+
+        const userId = ctx.from.id;
+        const isBuyer = escrow.buyerId === userId;
+        const isSeller = escrow.sellerId === userId;
+
+        if (!isBuyer && !isSeller) {
+          return ctx.answerCbQuery("❌ Only buyer or seller can confirm.");
+        }
+
+        if (isBuyer) escrow.buyerConfirmedCancel = true;
+        if (isSeller) escrow.sellerConfirmedCancel = true;
+        await escrow.save();
+
+        // Update message
+        const buyerTag = escrow.buyerUsername
+          ? `@${escrow.buyerUsername}`
+          : "Buyer";
+        const sellerTag = escrow.sellerUsername
+          ? `@${escrow.sellerUsername}`
+          : "Seller";
+        const buyerStatus = escrow.buyerConfirmedCancel
+          ? "✅ Confirmed"
+          : "⌛️ Waiting...";
+        const sellerStatus = escrow.sellerConfirmedCancel
+          ? "✅ Confirmed"
+          : "⌛️ Waiting...";
+
+        const msg = `⚠️ <b>Cancel Request Initiated</b>
+        
+The ${isBuyer ? "Buyer" : "Seller"} wants to cancel this trade.
+Both parties must confirm to proceed.
+
+<b>Buyer (${buyerTag}):</b> ${buyerStatus}
+<b>Seller (${sellerTag}):</b> ${sellerStatus}`;
+
+        if (escrow.buyerConfirmedCancel && escrow.sellerConfirmedCancel) {
+          await ctx.editMessageText(
+            `⚠️ <b>Deal Cancelled</b>\n\nBoth parties confirmed. Resetting group...`,
+            { parse_mode: "HTML" }
+          );
+          escrow.status = "cancelled";
+          await escrow.save();
+          await GroupPoolService.recycleGroupNow(escrow, ctx.telegram);
+        } else {
+          await ctx.editMessageText(msg, {
+            parse_mode: "HTML",
+            reply_markup: Markup.inlineKeyboard([
+              [
+                Markup.button.callback(
+                  "✅ Confirm Cancel",
+                  `cancel_confirm_yes_${escrow.escrowId}`
+                ),
+                Markup.button.callback(
+                  "❌ Abort",
+                  `cancel_confirm_no_${escrow.escrowId}`
+                ),
+              ],
+            ]).reply_markup,
+          });
+        }
+      } catch (e) {
+        console.error("Cancel Yes Error", e);
+      }
+    });
+
+    this.bot.action(/^cancel_confirm_no_(.+)$/, async (ctx) => {
+      try {
+        const escrowId = ctx.match[1];
+        const escrow = await Escrow.findOne({ escrowId });
+        if (!escrow) return ctx.reply("❌ Deal not found.");
+
+        const userId = ctx.from.id;
+        if (escrow.buyerId !== userId && escrow.sellerId !== userId) {
+          return ctx.answerCbQuery("❌ Only parties can abort.");
+        }
+
+        escrow.buyerConfirmedCancel = false;
+        escrow.sellerConfirmedCancel = false;
+        await escrow.save();
+
+        await ctx.editMessageText("❌ Cancel request aborted by user.");
+      } catch (e) {
+        console.error("Cancel No Error", e);
       }
     });
 
@@ -2038,6 +2189,29 @@ Funds returned to Seller.`;
           return ctx.reply("❌ No available balance found.");
         }
 
+        // Validate real on-chain balance
+        const bs = new BlockchainService();
+        let realChainBalance = availableBalance;
+        let isMismatch = false;
+
+        try {
+          if (escrow.contractAddress) {
+            realChainBalance = await bs.getTokenBalance(
+              escrow.token,
+              escrow.chain,
+              escrow.contractAddress
+            );
+
+            // Allow small buffer (0.001) for float inconsistencies
+            if (realChainBalance < availableBalance - 0.001) {
+              isMismatch = true;
+              availableBalance = realChainBalance; // Clamp to actual
+            }
+          }
+        } catch (e) {
+          console.error("Balance check error:", e.message);
+        }
+
         const networkName = (escrow.chain || "BSC").toUpperCase();
 
         if (escrow.feeRate === undefined || escrow.feeRate === null) {
@@ -2052,14 +2226,21 @@ Funds returned to Seller.`;
         }
 
         const escrowFeePercent = escrow.feeRate;
-        const escrowFee = (availableBalance * escrowFeePercent) / 100;
         const networkFee = escrow.networkFee;
+        const amountSubjectToFee = Math.max(0, availableBalance - networkFee);
+        const escrowFee = (amountSubjectToFee * escrowFeePercent) / 100;
         const netBalance = Math.max(
           0,
           availableBalance - escrowFee - networkFee
         );
 
         const balanceMessage = `<b>💰 Balance Information</b>
+${
+  isMismatch
+    ? "\n⚠️ <b>Warning:</b> Database mismatch detected. Showing actual vault balance.\n"
+    : ""
+}
+
 
 <b>Gross Amount:</b> ${availableBalance.toFixed(5)} ${escrow.token}
 <b>Net Release Amount:</b> ${netBalance.toFixed(5)} ${escrow.token} (After Fees)

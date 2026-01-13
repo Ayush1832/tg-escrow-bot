@@ -29,9 +29,6 @@ async function withRetry(fn, retries = 3, delay = 1000) {
       waitTime = (error.response.parameters.retry_after + 2) * 1000;
     }
 
-    console.warn(
-      `Operation failed, retrying in ${waitTime}ms... (${retries} attempts left). Error: ${error.message}`
-    );
     await wait(waitTime);
     return withRetry(fn, retries - 1, delay * 2);
   }

@@ -2964,10 +2964,6 @@ Amount Released: ${actualAmountToUser.toFixed(5)} ${updatedEscrow.token}
 
           // Log error appropriately
           if (errStr.includes("Insufficient Vault Balance")) {
-            console.warn(
-              "⚠️ Insufficient Vault Balance: " +
-                (error.message || "").split("\n")[0]
-            );
           } else {
             console.error("Error releasing funds via confirmation:", error);
           }
