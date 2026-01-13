@@ -817,22 +817,25 @@ Both parties must confirm to proceed.
           return next();
         }
 
-        let txHash = text;
+        let txHash = text.trim();
         const hashMatch = text.match(/(?:0x)?([a-fA-F0-9]{64})/);
         if (hashMatch) {
           txHash = hashMatch[1];
         }
 
+        // Normalize to lowercase to ensure global uniqueness check works case-insensitively
+        txHash = txHash.toLowerCase();
+
         const txChainUpper = (escrow.chain || "").toUpperCase();
         if (txChainUpper === "TRON" || txChainUpper === "TRX") {
-          if (!/^[a-fA-F0-9]{64}$/.test(txHash)) {
+          if (!/^[a-f0-9]{64}$/.test(txHash)) {
             await ctx.reply(
               "❌ Invalid TRON transaction hash format. Please provide a valid transaction hash or explorer link."
             );
             return;
           }
         } else {
-          if (!/^(0x)?[a-fA-F0-9]{64}$/.test(txHash)) {
+          if (!/^(0x)?[a-f0-9]{64}$/.test(txHash)) {
             await ctx.reply(
               "❌ Invalid transaction hash format. Please provide a valid transaction hash or explorer link."
             );
@@ -846,10 +849,12 @@ Both parties must confirm to proceed.
           }
         }
 
+        // Use case-insensitive regex to catch duplicates even if legacy data has mixed case
+        const txHashRegex = new RegExp(`^${txHash}$`, "i");
         const existingEscrow = await Escrow.findOne({
           $or: [
-            { transactionHash: txHash },
-            { partialTransactionHashes: txHash },
+            { transactionHash: { $regex: txHashRegex } },
+            { partialTransactionHashes: { $regex: txHashRegex } },
           ],
         });
 
