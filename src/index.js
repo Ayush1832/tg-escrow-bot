@@ -2210,7 +2210,7 @@ Funds returned to Seller.`;
         }
 
         // Validate real on-chain balance
-        const bs = new BlockchainService();
+        const bs = BlockchainService;
         let realChainBalance = availableBalance;
         let isMismatch = false;
 
