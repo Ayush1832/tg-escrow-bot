@@ -12,10 +12,9 @@ module.exports = async (ctx) => {
       return ctx.reply("❌ This command can only be used in a trade group.");
     }
 
+    // Only allow dispute for valid post-deposit states
+    // Draft/Awaiting Deposit are pre-risk, so no dispute needed yet
     let escrow = await findGroupEscrow(chatId, [
-      "draft",
-      "awaiting_details",
-      "awaiting_deposit",
       "deposited",
       "in_fiat_transfer",
       "ready_to_release",
@@ -24,7 +23,7 @@ module.exports = async (ctx) => {
 
     if (!escrow) {
       return ctx.reply(
-        "❌ No active escrow found in this group. This command can only be used in trade groups."
+        "❌ Dispute command is only available after the deposit has been confirmed by the bot."
       );
     }
 

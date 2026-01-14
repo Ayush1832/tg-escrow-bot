@@ -68,6 +68,9 @@ module.exports = {
   DISPUTE_CHANNEL_ID: process.env.DISPUTE_CHANNEL_ID,
   COMPLETION_FEED_CHAT_ID: process.env.COMPLETION_FEED_CHAT_ID,
 
+  // Group Restriction
+  ALLOWED_MAIN_GROUP_ID: process.env.ALLOWED_MAIN_GROUP_ID || "-1002457247089",
+
   // Helper function to get all admin IDs
   getAllAdminIds() {
     const adminIds = [];

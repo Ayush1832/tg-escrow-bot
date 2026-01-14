@@ -1514,6 +1514,21 @@ Use /release After Fund Transfer to Seller
           escrow.sellerUsername.toLowerCase() === normalizedUsername;
         const isSeller = Boolean(isSellerIdMatch || isSellerUsernameMatch);
 
+        if (!isAdmin && escrow.tradeStartTime) {
+          const startTime = new Date(escrow.tradeStartTime).getTime();
+          const now = Date.now();
+          const tenMinutes = 10 * 60 * 1000;
+          const timeDiff = now - startTime;
+
+          if (timeDiff < tenMinutes) {
+            const remainingMinutes = Math.ceil((tenMinutes - timeDiff) / 60000);
+            return ctx.reply(
+              `⏳ <b>Security Cooldown:</b> Funds can only be released 10 minutes after the deal starts.\n\nPlease wait approximately <b>${remainingMinutes} minute(s)</b>.`,
+              { parse_mode: "HTML" }
+            );
+          }
+        }
+
         const commandText = ctx.message.text.trim();
         const parts = commandText.split(/\s+/);
         const hasAmount = parts.length > 1;
@@ -2270,6 +2285,15 @@ This is the current available balance for this trade.`;
           return ctx.reply("❌ This command can only be used in a group chat.");
         }
 
+        if (
+          config.ALLOWED_MAIN_GROUP_ID &&
+          String(chatId) !== String(config.ALLOWED_MAIN_GROUP_ID)
+        ) {
+          return ctx.reply(
+            "❌ This command is only available in the official main group."
+          );
+        }
+
         const messageText = ctx.message.text || "";
         const parts = messageText.trim().split(/\s+/);
         let targetUsername = null;
@@ -2396,6 +2420,15 @@ This is the current available balance for this trade.`;
 
         if (chatId > 0) {
           return ctx.reply("❌ This command can only be used in a group chat.");
+        }
+
+        if (
+          config.ALLOWED_MAIN_GROUP_ID &&
+          String(chatId) !== String(config.ALLOWED_MAIN_GROUP_ID)
+        ) {
+          return ctx.reply(
+            "❌ This command is only available in the official main group."
+          );
         }
 
         const stats = await UserStatsService.getHighLevelStats();

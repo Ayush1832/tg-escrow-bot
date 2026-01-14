@@ -22,6 +22,15 @@ module.exports = async (ctx) => {
       return ctx.reply("❌ This command can only be used inside a group.");
     }
 
+    if (
+      config.ALLOWED_MAIN_GROUP_ID &&
+      String(chatId) !== String(config.ALLOWED_MAIN_GROUP_ID)
+    ) {
+      return ctx.reply(
+        "❌ The /deal command is only available in the official main group."
+      );
+    }
+
     const tradeGroupEscrow = await findGroupEscrow(chatId, null);
 
     if (tradeGroupEscrow) {
@@ -579,8 +588,7 @@ module.exports = async (ctx) => {
                 String(currentEscrow.groupId),
                 currentEscrow.waitingForUserMessageId
               );
-            } catch (_) {
-            }
+            } catch (_) {}
           }
 
           if (currentEscrow.inviteLink) {
@@ -638,7 +646,6 @@ module.exports = async (ctx) => {
 
     // Store timeout reference so we can cancel it if both join
     inviteTimeoutMap.set(newEscrow.escrowId, timeoutId);
-
   } catch (error) {
     return ctx.reply("❌ Failed to create deal room. Please try again.");
   }

@@ -1,6 +1,7 @@
 const Escrow = require("../models/Escrow");
 const Contract = require("../models/Contract");
 const { isValidAddress } = require("../utils/addressValidation");
+const config = require("../../config");
 
 module.exports = async (ctx) => {
   try {
@@ -9,6 +10,15 @@ module.exports = async (ctx) => {
 
     if (chatId > 0) {
       return ctx.reply("❌ This command can only be used in a group chat.");
+    }
+
+    if (
+      config.ALLOWED_MAIN_GROUP_ID &&
+      String(chatId) !== String(config.ALLOWED_MAIN_GROUP_ID)
+    ) {
+      return ctx.reply(
+        "❌ This command is only available in the official main group."
+      );
     }
 
     const tradeGroupEscrow = await Escrow.findOne({
