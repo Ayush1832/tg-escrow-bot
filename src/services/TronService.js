@@ -436,6 +436,7 @@ class TronService {
             to,
             valueDecimal,
             blockNumber: ev.block_number,
+            hash: ev.transaction_id,
           };
         });
     } catch (error) {

@@ -26,6 +26,11 @@ const {
   getAddressExample,
 } = require("./utils/addressValidation");
 const findGroupEscrow = require("./utils/findGroupEscrow");
+const TronService = require("./services/TronService");
+const CompletionFeedService = require("./services/CompletionFeedService");
+const { safeAnswerCbQuery } = require("./utils/telegramUtils");
+const restartHandler = require("./handlers/restartHandler");
+const disputeHandler = require("./handlers/disputeHandler");
 
 class RPCRateLimiter {
   constructor(maxConcurrent = 5, delayBetweenRequests = 100) {
@@ -841,12 +846,43 @@ Both parties must confirm to proceed.
             );
             return;
           }
-          if (
-            ["BSC", "ETH", "SEPOLIA"].includes(txChainUpper) &&
-            !txHash.startsWith("0x")
-          ) {
-            txHash = "0x" + txHash;
+          txHash = "0x" + txHash;
+        }
+
+        // 15-Minute Age Validation
+        try {
+          // Use 'await' to get timestamp (in ms)
+          const txTimestamp = await BlockchainService.getTransactionTimestamp(
+            escrow.chain,
+            txHash
+          );
+          const timeDiff = Date.now() - txTimestamp;
+
+          // 15 minutes = 15 * 60 * 1000 = 900000 ms
+          const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
+
+          // If timestamp is 0, it means fetch failed. We can either block or warn.
+          // Blocking is safer for security.
+          if (txTimestamp === 0) {
+            await ctx.reply(
+              "⚠️ Could not verify transaction time. Please try again in a moment or contact support."
+            );
+            return;
           }
+
+          if (timeDiff > FIFTEEN_MINUTES_MS) {
+            const minutesOld = Math.floor(timeDiff / 60000);
+            await ctx.reply(
+              `❌ Transaction Expired.\n\nThis transaction is ${minutesOld} minutes old.`
+            );
+            return;
+          }
+        } catch (timeError) {
+          console.error("Time validation error:", timeError);
+          await ctx.reply(
+            "❌ Error validating transaction time. Please try again."
+          );
+          return;
         }
 
         // Use case-insensitive regex to catch duplicates even if legacy data has mixed case
@@ -883,7 +919,6 @@ Both parties must confirm to proceed.
 
         if (chainUpper === "TRON" || chainUpper === "TRX") {
           try {
-            const TronService = require("./services/TronService");
             const tokenAddress = BlockchainService.getTokenAddress(
               escrow.token,
               escrow.chain
@@ -1138,7 +1173,6 @@ Both parties must confirm to proceed.
 
         if (newAccumulated < expectedAmount - tolerance) {
           try {
-            const CompletionFeedService = require("./services/CompletionFeedService");
             await CompletionFeedService.handlePartialDeposit({
               escrow: freshEscrow,
               partialAmount: amount,
@@ -1354,10 +1388,18 @@ Use /release After Fund Transfer to Seller
         const groupId = escrow.groupId;
 
         if (escrow.tradeDetailsStep === "step4_amount") {
-          const amount = parseFlexibleNumber(text);
+          // Strict validation: No commas allowed, only numbers and dot
+          if (text.includes(",") || !/^\d+(\.\d+)?$/.test(text)) {
+            await ctx.reply(
+              "❌ Invalid format.\n\nPlease enter the amount using ONLY numbers and '.' (dot) for decimals.\n\nExample: 1500.50\n(Do not use ',' commas)"
+            );
+            return;
+          }
+
+          const amount = parseFloat(text);
           if (isNaN(amount) || amount <= 0) {
             await ctx.reply(
-              "❌ Please enter a valid amount. Examples: 1,500 or 1.500,50"
+              "❌ Please enter a valid amount greater than 0.\n\nExample: 1500.50"
             );
             return;
           }
@@ -1476,9 +1518,7 @@ Use /release After Fund Transfer to Seller
 
     this.bot.command("deal", groupDealHandler);
     this.bot.command("verify", verifyHandler);
-    const restartHandler = require("./handlers/restartHandler");
     this.bot.command("restart", restartHandler);
-    const disputeHandler = require("./handlers/disputeHandler");
     this.bot.command("dispute", disputeHandler);
     this.bot.command("release", async (ctx) => {
       try {
@@ -2132,8 +2172,6 @@ Funds returned to Seller.`;
     this.bot.action(/^refund_confirm_no_(.+)$/, async (ctx) => {
       try {
         const escrowId = ctx.match[1];
-        const Escrow = require("./models/Escrow");
-        const { safeAnswerCbQuery } = require("./utils/telegramUtils");
 
         const escrow = await Escrow.findOne({ escrowId });
 
@@ -2201,7 +2239,7 @@ Funds returned to Seller.`;
             escrow.confirmedAmount ||
             0
         );
-        const availableBalance = amountWeiOverride
+        let availableBalance = amountWeiOverride
           ? Number(ethers.formatUnits(BigInt(amountWeiOverride), decimals))
           : totalDeposited;
 

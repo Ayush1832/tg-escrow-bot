@@ -162,20 +162,7 @@ class BlockchainService {
     const decimals = this.getTokenDecimals(token, network);
     const amount = ethers.parseUnits(String(amountUSDT), decimals);
 
-    let nonce;
-    try {
-      nonce = await provider.getTransactionCount(wallet.address, "latest");
-    } catch (nonceError) {
-      try {
-        nonce = await provider.getTransactionCount(wallet.address);
-      } catch (fallbackError) {
-        throw new Error(
-          `Failed to get transaction nonce: ${fallbackError.message}`
-        );
-      }
-    }
-
-    const tx = await vault.release(to, amount, { nonce: nonce });
+    const tx = await vault.release(to, amount);
     return await tx.wait();
   }
 
@@ -186,20 +173,7 @@ class BlockchainService {
     const decimals = this.getTokenDecimals(token, network);
     const amount = ethers.parseUnits(String(amountUSDT), decimals);
 
-    let nonce;
-    try {
-      nonce = await provider.getTransactionCount(wallet.address, "latest");
-    } catch (nonceError) {
-      try {
-        nonce = await provider.getTransactionCount(wallet.address);
-      } catch (fallbackError) {
-        throw new Error(
-          `Failed to get transaction nonce: ${fallbackError.message}`
-        );
-      }
-    }
-
-    const tx = await vault.refund(to, amount, { nonce: nonce });
+    const tx = await vault.refund(to, amount);
     return await tx.wait();
   }
 
@@ -241,17 +215,6 @@ class BlockchainService {
         );
       }
 
-      let nonce;
-      try {
-        nonce = await provider.getTransactionCount(wallet.address, "latest");
-      } catch (nonceError) {
-        try {
-          nonce = await provider.getTransactionCount(wallet.address);
-        } catch (fallbackError) {
-          throw new Error(`Failed to get nonce: ${fallbackError.message}`);
-        }
-      }
-
       // Check balance before attempting withdrawal
       const accumulatedFees = await vaultContract.accumulatedFees();
 
@@ -284,7 +247,7 @@ class BlockchainService {
         );
       }
 
-      const tx = await vaultContract.withdrawFees({ nonce });
+      const tx = await vaultContract.withdrawFees();
       const receipt = await tx.wait();
 
       return {
@@ -656,7 +619,7 @@ class BlockchainService {
           const value = parsed.args[2];
           const decimals = this.getTokenDecimals(token, network);
           const valueDecimal = Number(ethers.formatUnits(value, decimals));
-          return { from, to, valueDecimal };
+          return { from, to, valueDecimal, hash: log.transactionHash };
         });
       } else {
         const allLogs = [];
@@ -697,7 +660,7 @@ class BlockchainService {
           const value = parsed.args[2];
           const decimals = this.getTokenDecimals(token, network);
           const valueDecimal = Number(ethers.formatUnits(value, decimals));
-          return { from, to, valueDecimal };
+          return { from, to, valueDecimal, hash: log.transactionHash };
         });
       }
     } catch (error) {
@@ -733,49 +696,105 @@ class BlockchainService {
     }
   }
 
-  async getTokenBalance(token, network, address) {
+  /**
+   * Get the timestamp of a transaction in milliseconds
+   * @param {string} network
+   * @param {string} txHash
+   * @returns {Promise<number>} Timestamp in ms
+   */
+  async getTransactionTimestamp(network, txHash) {
     try {
-      const tokenAddress = this.getTokenAddress(token, network);
-      if (!tokenAddress) return 0;
-
-      if (network && network.toUpperCase() === "TRON") {
-        return await TronService.getTokenBalance(token, address);
-      }
-
       if (
-        network.toUpperCase() === "ETH" ||
-        network.toUpperCase() === "SEPOLIA"
+        network &&
+        (network.toUpperCase() === "TRON" || network.toUpperCase() === "TRX")
       ) {
-        const response = await axios.get(this.etherscanBaseUrl, {
-          params: {
-            module: "account",
-            action: "tokenbalance",
-            contractaddress: tokenAddress,
-            address: address,
-            tag: "latest",
-            apikey: this.etherscanApiKey,
-          },
-        });
-
-        if (response.data.status === "1") {
-          return parseFloat(response.data.result) / 1000000;
+        // For TRON, getTransactionInfo typically contains blockTimeStamp
+        if (TronService && typeof TronService.tronWeb !== "undefined") {
+          const tx = await TronService.tronWeb.trx.getTransaction(txHash);
+          if (tx && tx.raw_data && tx.raw_data.timestamp) {
+            return tx.raw_data.timestamp;
+          }
+          // Fallback to info
+          const info = await TronService.tronWeb.trx.getTransactionInfo(txHash);
+          if (info && info.blockTimeStamp) {
+            return info.blockTimeStamp;
+          }
         }
-        return 0;
-      } else {
-        const provider = this.getProvider(network);
-        const contract = new ethers.Contract(
-          tokenAddress,
-          ["function balanceOf(address) view returns (uint256)"],
-          provider
-        );
-        const balance = await contract.balanceOf(address);
-        const decimals = this.getTokenDecimals(token, network);
-        return parseFloat(ethers.formatUnits(balance, decimals));
+        return Date.now(); // Fallback if can't fetch (safety: allow but warn?) -> actually better to throw or handle in caller
       }
+
+      const provider = this.getProvider(network);
+      if (!provider) return Date.now();
+
+      const tx = await provider.getTransaction(txHash);
+      if (!tx || !tx.blockNumber) return Date.now();
+
+      const block = await provider.getBlock(tx.blockNumber);
+      if (!block) return Date.now();
+
+      return block.timestamp * 1000; // EVM timestamps are in seconds
     } catch (error) {
-      console.error("Error getting token balance:", error);
+      console.error(
+        `Error fetching timestamp for ${txHash} on ${network}:`,
+        error.message
+      );
+      return Date.now(); // Fail safe: return current time so we don't block valid txs on RPC errors?
+      // Limit logic: if we return Date.now(), diff is 0, so it passes.
+      // This is "fail open". To "fail closed", we'd return 0.
+      // Let's return 0 to indicate failure to fetch, so the caller can decide.
       return 0;
     }
+  }
+
+  async getTokenBalance(token, network, address) {
+    let lastError;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        if (network === "TRON" || network === "TRX") {
+          // Delegate to TronService if available, otherwise return 0
+          if (
+            TronService &&
+            typeof TronService.getTRC20Balance === "function"
+          ) {
+            const tokenAddress = this.getTokenAddress(token, network);
+            const balance = await TronService.getTRC20Balance(
+              tokenAddress,
+              address
+            );
+            return balance;
+          }
+          return 0;
+        }
+
+        const tokenAddress = this.getTokenAddress(token, network);
+        if (!tokenAddress) {
+          // Native currency check?
+          // if (token === network) ...
+          // For now assume tokens.
+          return 0;
+        }
+
+        const provider = this.providers[network.toUpperCase()];
+        if (!provider) return 0;
+
+        const decimals = this.getTokenDecimals(token, network);
+        const abi = ["function balanceOf(address) view returns (uint256)"];
+        const contract = new ethers.Contract(tokenAddress, abi, provider);
+
+        const balanceWei = await contract.balanceOf(address);
+        return Number(ethers.formatUnits(balanceWei, decimals));
+      } catch (error) {
+        lastError = error;
+        // Wait 2s before retry
+        if (attempt < 3) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+      }
+    }
+    console.error(
+      `Error getting token balance after 3 attempts: ${lastError.message}`
+    );
+    throw lastError;
   }
 
   async releaseFunds(

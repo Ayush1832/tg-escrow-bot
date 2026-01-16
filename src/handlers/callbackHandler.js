@@ -1069,14 +1069,32 @@ ${approvalStatus}`;
         );
 
         // Pin the DEAL CONFIRMED message
-        try {
-          await ctx.telegram.pinChatMessage(
-            updatedEscrow.groupId,
-            confirmedMsg.message_id,
-            { disable_notification: true }
-          );
-        } catch (pinErr) {
-          console.error("Failed to pin message:", pinErr);
+        // Retry logic for pinning (Max 3 attempts)
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            await ctx.telegram.pinChatMessage(
+              updatedEscrow.groupId,
+              confirmedMsg.message_id,
+              { disable_notification: true }
+            );
+            break; // Success
+          } catch (pinErr) {
+            const isRateLimit =
+              pinErr.code === 429 ||
+              pinErr.response?.error_code === 429 ||
+              pinErr.description?.includes("Too Many Requests");
+
+            if (isRateLimit && attempt < 3) {
+              await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2s
+              continue;
+            }
+
+            if (!isRateLimit || attempt === 3) {
+              console.warn(
+                `Failed to pin message: ${pinErr.message} (Attempt ${attempt}/3)`
+              );
+            }
+          }
         }
         updatedEscrow.dealConfirmedMessageId = confirmedMsg.message_id;
         await updatedEscrow.save();
@@ -1490,9 +1508,32 @@ Once you’ve sent the amount, tap the button below.`;
       const newDeposits = (txs || []).filter((tx) => {
         const from = (tx.from || "").toLowerCase();
         const to = (tx.to || "").toLowerCase();
-        // Accept deposit if it's to the vault address
-        // If seller address is set, optionally filter by sender (but allow any sender for now)
-        return to === vaultAddr;
+
+        if (to !== vaultAddr) return false;
+
+        // CRITICAL: Check if hash is already recorded (via Paste Hash or previous Check)
+        const hash = tx.hash;
+        if (!hash) return true; // Fallback if no hash (shouldn't happen with fix)
+
+        // Check main hash
+        if (
+          escrow.transactionHash &&
+          escrow.transactionHash.toLowerCase() === hash.toLowerCase()
+        ) {
+          return false;
+        }
+
+        // Check partials
+        if (
+          escrow.partialTransactionHashes &&
+          escrow.partialTransactionHashes.some(
+            (h) => h.toLowerCase() === hash.toLowerCase()
+          )
+        ) {
+          return false;
+        }
+
+        return true;
       });
 
       const newAmount = newDeposits.reduce(
@@ -1510,6 +1551,27 @@ Once you’ve sent the amount, tap the button below.`;
           );
           if (latest) escrow.lastCheckedBlock = latest;
         } catch {}
+
+        // Save transaction hashes to prevent reuse
+        for (const tx of newDeposits) {
+          const hash = tx.hash;
+          if (!hash) continue;
+
+          if (!escrow.transactionHash) {
+            escrow.transactionHash = hash;
+            escrow.depositTransactionFromAddress = tx.from;
+          } else {
+            if (!escrow.partialTransactionHashes)
+              escrow.partialTransactionHashes = [];
+            // Avoid adding duplicates to the array
+            if (
+              !escrow.partialTransactionHashes.includes(hash) &&
+              escrow.transactionHash !== hash
+            ) {
+              escrow.partialTransactionHashes.push(hash);
+            }
+          }
+        }
 
         escrow.depositAmount = totalAmount;
         escrow.confirmedAmount = totalAmount;
